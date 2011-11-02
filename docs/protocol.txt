@@ -41,8 +41,10 @@ Reply
 				mask=<string> or <integer>
 				mode="primary" or "backup"
 			}
+			hashmap{...}
 		]
 	}
+	hashmap{...}
   ]
 	
 
