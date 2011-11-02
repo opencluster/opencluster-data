@@ -21,18 +21,46 @@ The operations are:
 hello
 
 This operation is used by clients when they connect to a node, and also by nodes when they connect to other nodes.
+The servers list returned is an array.  If there are no current servers, it will return an empty array.
+When a client connects, it should not assume that it has a complete connection, if the hashmask coverage is not complete.  It should 
+only need to connect to one server to get a complete hashmask list, and should fail and produce an error if it cant, because it means 
+the cluster is incomplete and is probably corrupted.
 
 Operation
   op=hello
 
 Reply 
   reply=hello
-  servers=<map>
+  servers=array[
+	hashmap{
+		ip=<string>
+		port=<integer>
+		keymasks=array[
+			hashmap{
+				hash=<string> or <integer>
+				mask=<string> or <integer>
+				mode="primary" or "backup"
+			}
+		]
+	}
+  ]
+	
+
+
 
 -----------------------------------------------------------------------
 ping
 
-This operation 
+This operation is used to ensure that the server node is responding.  The client can send it periodically if it wants, and the servers 
+will send it to each other from time to time.
+
+
+Operation
+  op=ping
+
+Reply
+  reply=ping
+
 
 
 -----------------------------------------------------------------------
@@ -47,3 +75,16 @@ Operation
 Reply
   reply=loadlevel
   level=<integer>
+
+
+
+
+
+
+-----------------------------------------------------------------------
+-----------------------------------------------------------------------
+-----------------------------------------------------------------------
+-----------------------------------------------------------------------
+-----------------------------------------------------------------------
+-----------------------------------------------------------------------
+-----------------------------------------------------------------------
