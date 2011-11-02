@@ -1,0 +1,4 @@
+The initial protocol between servers and clients is based on JSON.
+It is designed to be flexible.  New features should be ignored by older versions of the client or the server.
+
+
