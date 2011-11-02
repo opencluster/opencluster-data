@@ -1,4 +1,49 @@
 The initial protocol between servers and clients is based on JSON.
 It is designed to be flexible.  New features should be ignored by older versions of the client or the server.
 
+The main operation of any message is identified by a entry of 'op'.  Operations are normally responded to with a 'reply'
 
+The operations are:
+  hello - initiate communications.
+  ping - check that the node is responding.
+  set - set a key/value, overwriting if it exists.
+  get - get a key/value pair.
+  lock - obtain a cluster lock
+  unlock - release a cluster lock
+  mapset - set a key/value that is part of a map.
+  mapget - get a key/value that is part of a map.
+  maskupdate - when a set of hashes is being moved to a different server, let the clients and other servers know.
+  loadlevel - nodes will let other nodes know how full they are.
+
+
+
+-----------------------------------------------------------------------
+hello
+
+This operation is used by clients when they connect to a node, and also by nodes when they connect to other nodes.
+
+Operation
+  op=hello
+
+Reply 
+  reply=hello
+  servers=<map>
+
+-----------------------------------------------------------------------
+ping
+
+This operation 
+
+
+-----------------------------------------------------------------------
+loadlevel
+
+This operation is used by nodes to periodically inform other nodes their load level so that buckets can be split and moved around.
+
+Operation
+  op=loadlevel
+  level=<integer>
+
+Reply
+  reply=loadlevel
+  level=<integer>
