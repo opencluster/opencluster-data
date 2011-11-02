@@ -6,6 +6,7 @@ The main operation of any message is identified by a entry of 'op'.  Operations 
 
 The operations are:
   hello - initiate communications.
+  goodbye - terminate communications cleanly
   ping - check that the node is responding.
   set - set a key/value, overwriting if it exists.
   get - get a key/value pair.
