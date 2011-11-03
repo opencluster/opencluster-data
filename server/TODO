@@ -1,0 +1,8 @@
+tasks to do
+
+See the issues list:
+https://github.com/hyper/opencluster/issues
+
+* Add logging to a file, preferably on its own thread.
+* Use glibc for b-tree implementation.
+
