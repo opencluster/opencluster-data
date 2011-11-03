@@ -4,6 +4,10 @@ It is designed to be flexible.  New features should be ignored by older versions
 
 The main operation of any message is identified by a entry of 'op'.  Operations are normally responded to with a 'reply'
 
+NOTE:
+   Each Operation and Reply should end with a linefeed.
+
+
 The operations are:
   hello - initiate communications.
   ping - check that the node is responding.
