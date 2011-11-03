@@ -1,6 +1,6 @@
 Splitting Buckets.
 -------------------
 
-A bucket is a group of keys that fit in a mask.
+A bucket is a group of keys that a node is responsible for.
 
 

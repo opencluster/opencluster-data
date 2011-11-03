@@ -1,5 +1,25 @@
 The initial protocol between servers and clients is based on JSON. 
 
+
+****************************************
+
+The JSON text based protocol is not 
+being implemented due to performance 
+constraints.
+
+See binary-protocol.txt for information
+about the proposed binary protocol.
+
+****************************************
+
+
+
+
+
+
+
+
+
 It is designed to be flexible.  New features should be ignored by older versions of the client or the server.
 
 The main operation of any message is identified by a entry of 'op'.  Operations are normally responded to with a 'reply'

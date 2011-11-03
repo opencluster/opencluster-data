@@ -1,0 +1,19 @@
+The client and servers will use a binary protocol to communicate.
+
+The binary protocol is designed with performance in mind, but is still required to be 
+flexible so that future changes to the protocol do not result in clients and servers 
+of different versions being unable to communicate with each other.
+
+Therefore some struct rules regarding future changes is required.
+  1.  WHen a protocol operation is published, changes will not be made to those operations.
+  2.  If new functionality is required, new operations are required.  Do not make changes 
+      (or even expand) existing operations and replies.  
+  3.  If you want different data in a reply from an existing operation, then you need to 
+      create a new operation.  When a client submits an operation, it expects the reply to 
+      be in a particular format, and should not recieve something different.
+
+Communications are broken up into two steps.  An 'Operation' which could otherwise be 
+called a request, and a 'Reply'.   An operation should always result in a single reply.   
+If an operation should result in a number of logical peices (such as retrieving a full 
+map), then those peices would be wrapped in a container within the reply.  
+

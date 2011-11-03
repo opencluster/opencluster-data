@@ -847,8 +847,7 @@ int main(int argc, char **argv)
 
 	// enter the processing loop.  This function will not return until there is
 	// nothing more to do and the service has shutdown.  Therefore everything
-	// needs to be setup and running before this point.  Once inside the
-	// rq_process function, everything is initiated by the RQ event system.
+	// needs to be setup and running before this point.  
 	if (_verbose > 0) { printf("Starting main loop.\n"); }
 	assert(_evbase);
 	event_base_dispatch(_evbase);
