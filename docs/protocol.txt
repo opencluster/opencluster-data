@@ -10,6 +10,7 @@ NOTE:
 
 The operations are:
   hello - initiate communications.
+  goodbye - terminate communications cleanly
   ping - check that the node is responding.
   set - set a key/value, overwriting if it exists.
   get - get a key/value pair.
