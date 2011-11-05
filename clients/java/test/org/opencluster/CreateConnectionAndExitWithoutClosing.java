@@ -34,9 +34,14 @@ public class CreateConnectionAndExitWithoutClosing {
                 // Send a connection request to the server; this method is non-blocking
                 sChannel.connect(new InetSocketAddress(args[0], Integer.parseInt(args[1])));
 
-                // don't close the channel
-                // and then exit ...
-                //sChannel.close();
+                while (!sChannel.finishConnect()) {
+                    System.out.println("Not connected yet, waiting for connection to complete.");
+                    try {
+                        Thread.sleep(100L);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
 
             } catch (IOException e) {
                 e.printStackTrace();
