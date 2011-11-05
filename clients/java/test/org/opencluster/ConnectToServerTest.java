@@ -1,3 +1,5 @@
+package org.opencluster;
+
 /**
  * Created by IntelliJ IDEA.
  * User: Brian Gorrie
@@ -8,4 +10,7 @@
  *
  */
 public class ConnectToServerTest {
+
+
+
 }
