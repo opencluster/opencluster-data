@@ -11,7 +11,6 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <jansson.h>
 #include <netdb.h>
 #include <pwd.h>
 #include <signal.h>
@@ -30,11 +29,14 @@
 
 
 #define DEFAULT_BUFSIZE 4096
-// #define DEFAULT_MAX_SPLIT (1024 * 1024 * 1024)
+#define DEFAULT_CHUNKSIZE (1024*1024)
+// the minimum number of chunks that the server should allocte.  Each chunk is 1mb.
+#define MINIMUM_CHUNKS 32
 
 #ifndef INVALID_HANDLE
 #define INVALID_HANDLE -1
 #endif
+
 
 
 
@@ -98,6 +100,7 @@ int _conncount = 0;
 // startup settings.
 const char *_interfaces = "127.0.0.1:13600";
 int _maxconns = 1024;
+int _maxmemory = MINIMUM_CHUNKS;
 int _verbose = 0;
 int _daemonize = 0;
 unsigned int _threshold = 0;
@@ -652,6 +655,7 @@ static void usage(void) {
 	printf(PACKAGE " " VERSION "\n");
 	printf("-l <ip_addr:port>  interface to listen on, default is INDRR_ANY\n");
 	printf("-c <num>           max simultaneous connections, default is 1024\n");
+	printf("-m <mb>            mb of RAM to allocate to the cluster.\n");
 	printf("\n");
 	printf("-d                 run as a daemon\n");
 	printf("-P <file>          save PID in <file>, only used with -d option\n");
@@ -681,6 +685,7 @@ static void parse_params(int argc, char **argv)
 		"u:"    /* user to run as */
 		"P:"    /* PID file */
 		"l:"    /* interfaces to listen on */
+		"m:"    /* memory chunks to use */
 		)) != -1) {
 		switch (c) {
 			case 'c':
@@ -713,6 +718,12 @@ static void parse_params(int argc, char **argv)
 				_interfaces = optarg;
 				assert(_interfaces != NULL);
 				assert(_interfaces[0] != 0);
+				break;
+			case 'm':
+				_maxmemory = atoi(optarg);
+				if (_maxmemory < MINIMUM_CHUNKS) {
+					_maxmemory = MINIMUM_CHUNKS;
+				}
 				break;
 				
 			default:
