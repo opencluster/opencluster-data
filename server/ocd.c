@@ -73,12 +73,19 @@ typedef struct {
 } client_t;
 
 
+typedef struct {
+	short available;
+	void *ptr;
+} chunk_t;
+
 
 
 //-----------------------------------------------------------------------------
 // Global Variables.    
 // If we ever add threads then we need to be careful when accessing these 
 // global variables.
+
+chunk_t **_chunks = NULL;
 
 // event base for listening on the sockets, and timeout events.
 struct event_base *_evbase = NULL;
@@ -127,6 +134,15 @@ static void read_handler(int fd, short int flags, void *arg);
 static void write_handler(int fd, short int flags, void *arg);
 
 
+
+
+
+static void init_chunks(void) {
+	assert(_maxmemory >= MINIMUM_CHUNKS);
+	
+	// initialise the chunklist array.
+	
+}
 
 
 
@@ -602,6 +618,7 @@ static void read_handler(int fd, short int flags, void *arg)
 	client_t *client = (client_t *) arg;
 	int avail;
 	int res;
+	int ii;
 	
 	assert(fd >= 0);
 	assert(flags != 0);
@@ -632,7 +649,11 @@ static void read_handler(int fd, short int flags, void *arg)
 		// got some data.
 		assert(res <= avail);
 		client->in_length += res;
-		
+
+		for (ii=0; ii < client->in_length; ii++) {
+			printf("%c", client->in_buffer[ii]);
+		}
+		client->in_length = 0;
 
 		/// ***** this is where we need to process the data.
 	}
@@ -653,7 +674,7 @@ static void read_handler(int fd, short int flags, void *arg)
 // print some info to the user, so that they can know what the parameters do.
 static void usage(void) {
 	printf(PACKAGE " " VERSION "\n");
-	printf("-l <ip_addr:port>  interface to listen on, default is INDRR_ANY\n");
+	printf("-l <ip_addr:port>  interface to listen on, default is localhost:13600\n");
 	printf("-c <num>           max simultaneous connections, default is 1024\n");
 	printf("-m <mb>            mb of RAM to allocate to the cluster.\n");
 	printf("\n");
@@ -819,11 +840,17 @@ int main(int argc, char **argv)
 ///============================================================================
 
 	parse_params(argc, argv);
+
+	// allocate the memory.
+	init_chunks();
 	
 	// daemonize
 	if (_daemonize) {
 		daemonize(_username, _pid_file, _verbose);
 	}
+	
+	
+	
 	
 	// create our event base which will be the pivot point for pretty much everything.
 #if ( _EVENT_NUMERIC_VERSION >= 0x02000000 )
