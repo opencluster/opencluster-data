@@ -652,9 +652,6 @@ static void usage(void) {
 	printf(PACKAGE " " VERSION "\n");
 	printf("-l <ip_addr:port>  interface to listen on, default is INDRR_ANY\n");
 	printf("-c <num>           max simultaneous connections, default is 1024\n");
-	printf("-b <path>          storage path\n");
-	printf("-m <max>           max storage file size (in mb) before splitting (default: 1024).\n");
-	printf("-t <threshold>     data threshold.\n");
 	printf("\n");
 	printf("-d                 run as a daemon\n");
 	printf("-P <file>          save PID in <file>, only used with -d option\n");
