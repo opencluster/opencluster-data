@@ -93,20 +93,6 @@
     <pathelement location="${basedir}/clients/java/lib/junit/junit-4.10.jar"/>
     <pathelement location="${basedir}/clients/java/lib/junit/junit-dep-4.10.jar"/>
   </path>
-  <!-- Register Custom Compiler Taskdefs -->
-  <property name="javac2.home" value="${idea.home}/lib"/>
-  <path id="javac2.classpath">
-    <pathelement location="${javac2.home}/javac2.jar"/>
-    <pathelement location="${javac2.home}/jdom.jar"/>
-    <pathelement location="${javac2.home}/asm.jar"/>
-    <pathelement location="${javac2.home}/asm-commons.jar"/>
-    <pathelement location="${javac2.home}/jgoodies-forms.jar"/>
-  </path>
-  <target name="register.custom.compilers">
-    <taskdef name="javac2" classname="com.intellij.ant.Javac2" classpathref="javac2.classpath"/>
-    <taskdef name="instrumentIdeaExtensions" classname="com.intellij.ant.InstrumentIdeaExtensions" classpathref="javac2.classpath"/>
-  </target>
-  
   <!-- Modules -->
   
   
@@ -174,15 +160,15 @@
   
   <target name="compile.module.clients-java" depends="compile.module.clients-java.production,compile.module.clients-java.tests" description="Compile module clients-java"/>
   
-  <target name="compile.module.clients-java.production" depends="register.custom.compilers" description="Compile module clients-java; production classes">
+  <target name="compile.module.clients-java.production" description="Compile module clients-java; production classes">
     <mkdir dir="${clients-java.output.dir}"/>
-    <javac2 destdir="${clients-java.output.dir}" debug="${compiler.debug}" nowarn="${compiler.generate.no.warnings}" memorymaximumsize="${compiler.max.memory}" fork="true" executable="${module.jdk.bin.clients-java}/javac">
+    <javac destdir="${clients-java.output.dir}" debug="${compiler.debug}" nowarn="${compiler.generate.no.warnings}" memorymaximumsize="${compiler.max.memory}" fork="true" executable="${module.jdk.bin.clients-java}/javac">
       <compilerarg line="${compiler.args.clients-java}"/>
       <bootclasspath refid="clients-java.module.bootclasspath"/>
       <classpath refid="clients-java.module.production.classpath"/>
       <src refid="clients-java.module.sourcepath"/>
       <patternset refid="excluded.from.compilation.clients-java"/>
-    </javac2>
+    </javac>
     
     <copy todir="${clients-java.output.dir}">
       <fileset dir="${module.clients-java.basedir}/clients/java/src">
@@ -192,15 +178,15 @@
     </copy>
   </target>
   
-  <target name="compile.module.clients-java.tests" depends="register.custom.compilers,compile.module.clients-java.production" description="compile module clients-java; test classes" unless="skip.tests">
+  <target name="compile.module.clients-java.tests" depends="compile.module.clients-java.production" description="compile module clients-java; test classes" unless="skip.tests">
     <mkdir dir="${clients-java.testoutput.dir}"/>
-    <javac2 destdir="${clients-java.testoutput.dir}" debug="${compiler.debug}" nowarn="${compiler.generate.no.warnings}" memorymaximumsize="${compiler.max.memory}" fork="true" executable="${module.jdk.bin.clients-java}/javac">
+    <javac destdir="${clients-java.testoutput.dir}" debug="${compiler.debug}" nowarn="${compiler.generate.no.warnings}" memorymaximumsize="${compiler.max.memory}" fork="true" executable="${module.jdk.bin.clients-java}/javac">
       <compilerarg line="${compiler.args.clients-java}"/>
       <bootclasspath refid="clients-java.module.bootclasspath"/>
       <classpath refid="clients-java.module.classpath"/>
       <src refid="clients-java.module.test.sourcepath"/>
       <patternset refid="excluded.from.compilation.clients-java"/>
-    </javac2>
+    </javac>
     
     <copy todir="${clients-java.testoutput.dir}">
       <fileset dir="${module.clients-java.basedir}/clients/java/test">
@@ -264,9 +250,9 @@
   
   <target name="compile.module.docs" depends="compile.module.docs.production,compile.module.docs.tests" description="Compile module docs"/>
   
-  <target name="compile.module.docs.production" depends="register.custom.compilers" description="Compile module docs; production classes"/>
+  <target name="compile.module.docs.production" description="Compile module docs; production classes"/>
   
-  <target name="compile.module.docs.tests" depends="register.custom.compilers,compile.module.docs.production" description="compile module docs; test classes" unless="skip.tests"/>
+  <target name="compile.module.docs.tests" depends="compile.module.docs.production" description="compile module docs; test classes" unless="skip.tests"/>
   
   <target name="clean.module.docs" description="cleanup module">
     <delete dir="${docs.output.dir}"/>
@@ -322,9 +308,9 @@
   
   <target name="compile.module.server" depends="compile.module.server.production,compile.module.server.tests" description="Compile module server"/>
   
-  <target name="compile.module.server.production" depends="register.custom.compilers" description="Compile module server; production classes"/>
+  <target name="compile.module.server.production" description="Compile module server; production classes"/>
   
-  <target name="compile.module.server.tests" depends="register.custom.compilers,compile.module.server.production" description="compile module server; test classes" unless="skip.tests"/>
+  <target name="compile.module.server.tests" depends="compile.module.server.production" description="compile module server; test classes" unless="skip.tests"/>
   
   <target name="clean.module.server" description="cleanup module">
     <delete dir="${server.output.dir}"/>
