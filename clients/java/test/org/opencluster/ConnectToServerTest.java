@@ -5,6 +5,9 @@ import org.junit.Test;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.SocketOption;
+import java.net.SocketOptions;
+import java.net.StandardSocketOptions;
 import java.nio.channels.SocketChannel;
 
 /**
@@ -54,6 +57,40 @@ public class ConnectToServerTest {
         try {
             sChannel = SocketChannel.open();
             sChannel.configureBlocking(false);
+            System.out.println("SO_LINGER: " + sChannel.getOption(StandardSocketOptions.SO_LINGER));
+
+            // Send a connection request to the server; this method is non-blocking
+            sChannel.connect(new InetSocketAddress("localhost", 7777));
+
+            // don't close the channel
+            // and then exit ...
+            //sChannel.close();
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        Assert.assertTrue("Unable to create connection through to server, double check it is running.", sChannel != null);
+    }
+
+    @Test
+    public void doesServerDetectUngracefulDisconnectWithSOLingerSet() {
+
+        // now on my machine it is connecting to localhost:7777 due to how I am plugging virtual box into my network.
+        // Here is the command I use to start ocd on the ubuntu virtual box instance
+        // ocd -l $(ifconfig | grep "inet addr" | head -n 1 | sed 's/:/ /g' | awk '{print $3}'):7777 -vvv
+
+        // Create a non-blocking socket channel
+        SocketChannel sChannel = null;
+        try {
+
+            sChannel = SocketChannel.open();
+            sChannel.configureBlocking(false);
+
+            System.out.println("Before SO_LINGER: " + sChannel.getOption(StandardSocketOptions.SO_LINGER));
+            sChannel.setOption(StandardSocketOptions.SO_LINGER, 0);
+            System.out.println("After SO_LINGER: " + sChannel.getOption(StandardSocketOptions.SO_LINGER));
+
 
             // Send a connection request to the server; this method is non-blocking
             sChannel.connect(new InetSocketAddress("localhost", 7777));
