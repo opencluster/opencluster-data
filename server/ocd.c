@@ -305,7 +305,8 @@ static void client_init ( client_t *client, server_t *server, evutil_socket_t ha
 		read_handler,
 		client);
 	assert(client->read_event);
-	int s = event_add(client->read_event, NULL);
+	struct timeval five_seconds = {5,0};
+	int s = event_add(client->read_event, &five_seconds);
 	assert(s == 0);
 }
 
@@ -609,6 +610,26 @@ static void write_handler(int fd, short int flags, void *arg)
 }
 
 
+static int process_data(client_t *client) 
+{
+	int processed = 0;
+	assert(client);
+
+	// if we dont have 10 characters, then we dont have enough to build a message.  Messages are at
+	// least that.
+	if (client->in_length >= 10) {
+		
+		
+		
+		
+	}
+	
+	
+	return(processed);
+}
+	
+
+
 // This function is called when data is available on the socket.  We need to 
 // read the data from the socket, and process as much of it as we can.  We 
 // need to remember that we might possibly have leftover data from previous 
@@ -618,7 +639,7 @@ static void read_handler(int fd, short int flags, void *arg)
 	client_t *client = (client_t *) arg;
 	int avail;
 	int res;
-	int ii;
+	int processed;
 	
 	assert(fd >= 0);
 	assert(flags != 0);
@@ -626,44 +647,48 @@ static void read_handler(int fd, short int flags, void *arg)
 	assert(client->handle == fd);
 	assert(client->server);
 
-	// Make sure we have room in our inbuffer.
-	assert((client->in_length + client->in_offset) <= client->in_max);
-	avail = client->in_max - client->in_length - client->in_offset;
-	if (avail < DEFAULT_BUFSIZE) {
-		/* we want to increase buffer size, so we'll add another DEFAULT_BUFSIZE to the 
-		   max.  This should keep it in multiples of DEFAULT_BUFSIZE, regardless of how 
-		   much is available for each read.
-		*/
-		
-		client->in_buffer = realloc(client->in_buffer, client->in_max + DEFAULT_BUFSIZE);
-		client->in_max += DEFAULT_BUFSIZE;
-		avail += DEFAULT_BUFSIZE;
-	}
-	assert(avail >= DEFAULT_BUFSIZE);
-	
-	// read data from the socket.
-	assert(client->in_buffer);
-	res = read(fd, client->in_buffer + client->in_offset, avail);
-	if (res > 0) {
-		
-		// got some data.
-		assert(res <= avail);
-		client->in_length += res;
-
-		for (ii=0; ii < client->in_length; ii++) {
-			printf("%c", client->in_buffer[ii]);
-		}
-		client->in_length = 0;
-
-		/// ***** this is where we need to process the data.
-	}
-	else {
-		// the connection was closed, or there was an error.
-// 		printf("socket %d closed. res=%d, errno=%d,'%s'\n", fd, res, errno, strerror(errno));
-		
-		// free the client resources.
+	if (flags & EV_TIMEOUT) {
+		// we timed out, so we should kill the client.
 		client_free(client);
 		client = NULL;
+	}
+	else {
+		// Make sure we have room in our inbuffer.
+		assert((client->in_length + client->in_offset) <= client->in_max);
+		avail = client->in_max - client->in_length - client->in_offset;
+		if (avail < DEFAULT_BUFSIZE) {
+			/* we want to increase buffer size, so we'll add another DEFAULT_BUFSIZE to the 
+			max.  This should keep it in multiples of DEFAULT_BUFSIZE, regardless of how 
+			much is available for each read.
+			*/
+			
+			client->in_buffer = realloc(client->in_buffer, client->in_max + DEFAULT_BUFSIZE);
+			client->in_max += DEFAULT_BUFSIZE;
+			avail += DEFAULT_BUFSIZE;
+		}
+		assert(avail >= DEFAULT_BUFSIZE);
+		
+		// read data from the socket.
+		assert(client->in_buffer);
+		res = read(fd, client->in_buffer + client->in_offset, avail);
+		if (res > 0) {
+			
+			// got some data.
+			assert(res <= avail);
+			client->in_length += res;
+
+			processed = process_data(client);
+			assert(processed >= 0);
+		}
+		else {
+			// the connection was closed, or there was an error.
+			if (_verbose > 2) 
+				printf("socket %d closed. res=%d, errno=%d,'%s'\n", fd, res, errno, strerror(errno));
+			
+			// free the client resources.
+			client_free(client);
+			client = NULL;
+		}
 	}
 }
 
