@@ -6,7 +6,7 @@ DEBUG_LIBS=
 #DEBUG_LIBS=-lefence -lpthread
 
 ARGS=-Wall -O2 -g $(DEBUG_LIBS)
-LIBS=-levent -ljansson
+LIBS=-levent 
 OBJS=event-compat.o
 
 
