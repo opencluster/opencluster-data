@@ -17,3 +17,281 @@ called a request, and a 'Reply'.   An operation should always result in a single
 If an operation should result in a number of logical peices (such as retrieving a full 
 map), then those peices would be wrapped in a container within the reply.  
 
+All integers are to be transmitted using network-byte-order.
+All strings are transmitted with a 4-byte int which indicates the length of the string, followed by
+the string data itself.  Strings are not null-terminated.
+
+All communications begin with an 10-byte header.
+   -----------------------------------------------------------------------
+   |   Short Int   | 2 bytes |  Operation Command Identifier             |
+   |   Integer     | 4 bytes |  User specified ID                        |
+   |   Integer     | 4 bytes |  Length of the data following this header |
+   -----------------------------------------------------------------------
+
+Almost all operations require a reply.  A reply takes the same format as a command, and has the asme
+10-byte header.  A command can generate different replies as needed.
+
+The operations (commands) are:
+  10    hello        initiate communications.
+  20    goodbye      terminate communications cleanly
+  30    ping         check that the node is responding.
+  50    serverhello  when a server is connecting to another server.
+  100   serverlist   sends a list of servers in the cluster.
+  110   hashmasks    list of all the hashmasks that are in the system.
+  120   maskupdate   when a set of hashes is being moved to a different server, let the clients and
+                     other servers know. 
+  130   newserver    when a new server joins the cluster, a message is sent out to the other
+                     members of the cluster.
+  200   loadlevel    nodes will let other nodes know how full they are.
+  1000  lock         obtain a cluster lock
+  1010  unlock       release a cluster lock
+  2000  set          set a key/value, overwriting if it exists.
+  2100  get          get a key/value pair.
+  2300  mapset       set a key/value that is part of a map.
+  2400  mapget       get a key/value that is part of a map.
+
+Note: To promote performance on the server, CommandID's less than 1000 do not require access to the
+      clustered data.  CommandID's over 1000 internally require pipeline locks and need to be done
+      in sequence.  The sub-1000 commands do not, and can be handled without going through the more
+      expensive processing pipeline.
+
+
+
+
+
+
+
+
+
+MESSAGE STRUCTURES.
+
+Note that some messages are commands, and some are replies.
+
+
+-----------------------------------------------------------------------
+ack (1)
+
+General acknowlegement.  Used when no data is returned.
+
+Type of message:
+  Reply
+
+Conditions of use:
+  Sent from either client or server. 
+
+Payload:
+  none
+
+
+
+-----------------------------------------------------------------------
+fail (2)
+
+General failure reply.  Used when no data is returned.
+
+Type of message:
+  Reply
+
+Conditions of use:
+  Sent from either client or server. 
+
+Payload:
+  none
+
+
+-----------------------------------------------------------------------
+failinfo (3)
+
+General failure reply, to indicate that something failed, but this time return an error code and a
+descriptive string.
+
+Type of message:
+  Reply
+
+Conditions of use:
+  Sent from either client or server. 
+
+Payload:
+  integer - error code.  
+  string  - descriptive string of the failure.
+
+
+-----------------------------------------------------------------------
+tryelsewhere (4)
+
+This reply is returned when the operation was not successful because the server is not responsible
+for the data requested. This can be because the server is leaving the cluster, or because the data
+has moved around and is now on a different node.
+ 
+It contains the information of a different server to try.
+
+Type of message:
+  Reply
+
+Conditions of use:
+  Sent from server to client. 
+
+Payload:
+  string - server to use
+
+In response of:
+  hello(10), if the server is shutting down, or not accepting client connections.
+
+
+
+
+
+
+
+-----------------------------------------------------------------------
+hello (10)
+
+This operation is used by clients when they connect to a node. 
+It does not contain any additional information, so it remains merely a header.
+Calling a 'hello' will also result in 'serverlist' and 'hashmasks' information to follow as
+seperate commands to the client.
+
+Type of message:
+  Command
+
+Conditions of use:
+  Sent from client to server. 
+
+Payload:
+  none
+
+Replies:
+  ack(1), on success.
+  tryelsewhere(4), if the server is shutting down, or not accepting client connections.
+
+
+
+-----------------------------------------------------------------------
+goodbye (20)
+
+This operation is used by servers or clients to indicate that the connection is about to be
+dropped. 
+It does not contain any additional information, so it remains merely a header.
+When an ack(1) is received, the connection can be closed.
+If this is sent from a client, it will cause all registered events for this client to be cleared,
+buffers to be reduced, and so on.  If the client sends a goodbye and then changes its mind, its
+capabilities will be diminished, and the server may drop the connection anyway.
+If this is sent from a server to a client, it will attempt to wait for an ack(1) from the client,
+but if the client takes too long to respond, it will drop the connection anyway.
+If this is sent from a server to a server, then certain synchronisations should already be in
+place, but any that are outstanding will need to be resolved.
+
+Type of message:
+  Command
+
+Conditions of use:
+  Sent from client to server. 
+  Sent from server to client.
+  Sent from server to server.
+
+Payload:
+  none
+
+Replies:
+  ack(1), there is no failure condition that will mean anything.
+
+
+
+
+
+-----------------------------------------------------------------------
+ping(30)
+
+This operation is used to ensure that the server node is responding.  The client can send it
+periodically if it wants, and the servers will send it to each other from time to time.
+
+
+Type of message:
+  Command
+
+Conditions of use:
+  Sent from client to server. 
+  Sent from server to server.
+
+Payload:
+  none
+
+Replies:
+  ack(1), there is no failure condition that will mean anything.
+
+
+
+
+
+-----------------------------------------------------------------------
+serverhello(50)
+
+This operation is used by a server when it is connecting to another server.  It will include the
+connection string so that the cluster can publish it to clients and other servers. 
+
+Type of message:
+  Command
+
+Conditions of use:
+  Sent from server to server.
+
+Payload:
+  string - connect info (normally in the form "IP:port", but can be any resolvable standard format)
+
+Replies:
+  ack(1)
+  tryelsewhere(4), if the server is shutting down, or not accepting client connections.
+
+
+
+
+-----------------------------------------------------------------------
+serverlist(100)
+
+Sends a list of servers in the cluster.
+
+Type of message:
+  Command
+
+Conditions of use:
+  Sent from server to server.
+  Sent from server to cient.
+
+Payload:
+  string - connect info (normally in the form "IP:port", but can be any resolvable standard format)
+
+Replies:
+  ack(1)
+  tryelsewhere(4), if the server is shutting down, or not accepting client connections.
+
+
+
+-----------------------------------------------------------------------
+loadlevel
+
+This operation is used by nodes to periodically inform other nodes their load level so that buckets
+can be split and moved around.
+
+Operation
+  op=loadlevel
+  level=<integer>
+
+Reply
+  reply=loadlevel
+  level=<integer>
+
+
+
+
+
+
+-----------------------------------------------------------------------
+-----------------------------------------------------------------------
+-----------------------------------------------------------------------
+-----------------------------------------------------------------------
+-----------------------------------------------------------------------
+-----------------------------------------------------------------------
+-----------------------------------------------------------------------
+
+
+

@@ -16,9 +16,11 @@ order received.
 
 The process for each 'working' thread would be:
  1.   parse the data from the request.
- 2.   look up the data in the b-tree and get the value from the chunk.
+ 2.   look up the data in the b-tree and get the value from the chunk (if needed).
  3.   build the reply.
  4.   add the reply to the output buffer for the client.
+
+Note that only one thread will be doing step #2 at a time.
 
 The main thread would then use its event based system to then send out data to the client.
 
