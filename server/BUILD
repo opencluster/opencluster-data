@@ -3,7 +3,7 @@ open cluster daemon (ocd) requires several libraries to be installed before stas
 
 These are:
 
- - libevent (2.0 or higher)
+ - libevent (2.0.4 or higher)
 
 When the required libraries have been installed, build everything by doing
 

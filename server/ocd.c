@@ -38,6 +38,14 @@
 #endif
 
 
+#define HEADER_SIZE 12
+
+
+
+// commands and replies
+#define REPLY_ACK       1
+#define REPLY_UNKNOWN   9
+#define CMD_HELLO       10
 
 
 
@@ -78,6 +86,23 @@ typedef struct {
 	void *ptr;
 } chunk_t;
 
+
+typedef struct {
+	short command;
+	int userid;
+	int length;
+} header_t;
+
+// this structure is not packed on word boundaries, so it should represent the 
+// data received over the network.
+#pragma pack(push,1)
+typedef struct {
+	short unused;
+	short command;
+	int userid;
+	int length;
+} raw_header_t;
+#pragma pack(pop)
 
 
 //-----------------------------------------------------------------------------
@@ -610,20 +635,162 @@ static void write_handler(int fd, short int flags, void *arg)
 }
 
 
+
+// add a reply to the clients outgoing buffer.  If a 'write' event isnt 
+// already set, then set one so that it can begin sending out the data.
+static void send_reply(client_t *client, header_t *header, short replyID, int length, void *payload)
+{
+	raw_header_t raw;
+	char *ptr;
+	
+	assert(client);
+	assert(replyID > 0);
+	assert((length == 0 && payload == NULL) || (length > 0 && payload != NULL));
+	
+	assert(sizeof(raw_header_t) == HEADER_SIZE);
+
+	// build the raw header.
+	raw.unused = 0;
+	raw.command = htons(replyID);
+	raw.userid = htonl(header->userid);
+	raw.length = htonl(length);
+	
+	// make sure the clients out_buffer is big enough for the message.
+	assert(client->out_buffer);
+	if (client->out_max < client->out_length + client->out_offset + sizeof(raw_header_t) + length) {
+		client->out_buffer = realloc(client->out_buffer, client->out_max + DEFAULT_BUFSIZE);
+		client->out_max += DEFAULT_BUFSIZE;
+	}
+	
+	// add the header and the payload to the clients out_buffer, a
+	ptr = client->out_buffer + client->out_offset;
+	memcpy(ptr, &raw, sizeof(raw_header_t));
+	ptr += sizeof(raw_header_t);
+	memcpy(ptr, payload, length);
+	client->out_length += (sizeof(raw_header_t) + length);
+	
+	// if the clients write-event is not set, then set it.
+	assert(client->out_length > 0);
+	if (client->write_event == NULL) {
+		assert(_evbase);
+		assert(client->handle >= 0);
+		client->write_event = event_new( _evbase, client->handle, EV_WRITE | EV_PERSIST, write_handler, (void *)client); 
+		assert(client->write_event);
+		event_add(client->write_event, NULL);
+	}
+
+}
+
+
+// Pushes out a command to the specified client, with the list of servers taht are maintained.
+static void push_serverlist(client_t *client)
+{
+	// TODO: There is no current server list.  Needs to be developed.
+}
+
+
+
+static void push_hashmasks(client_t *client)
+{
+	// TODO: There are no current hashmasks.  It has not been developed yet.
+}
+
+
+
+// the hello command does not require a payload, and simply does a reply.   
+// However, it triggers a servermap, and a hashmasks command to follow it.
+static void cmd_hello(client_t *client, header_t *header)
+{
+	assert(client && header);
+
+	// send the ACK reply.
+	send_reply(client, header, REPLY_ACK, 0, NULL);
+	
+	// send a servermap command to the client.
+	push_serverlist(client);
+	
+	// send a hashmasks command to the client.
+	push_hashmasks(client);
+}
+
+
+
+
 static int process_data(client_t *client) 
 {
 	int processed = 0;
+	int stopped = 0;
+	char *ptr;
+	header_t header;
+	raw_header_t *raw;
+	
+	assert(sizeof(char) == 1);
+	assert(sizeof(short int) == 2);
+	assert(sizeof(int) == 4);
+	
 	assert(client);
 
-	// if we dont have 10 characters, then we dont have enough to build a message.  Messages are at
-	// least that.
-	if (client->in_length >= 10) {
+	while (stopped == 0) {
+	
+		assert(client->in_buffer);
+		assert((client->in_length + client->in_offset) <= client->in_max);
 		
-		
-		
-		
+		// if we dont have 10 characters, then we dont have enough to build a message.  Messages are at
+		// least that.
+		if (client->in_length >= HEADER_SIZE) {
+			
+			// keeping in mind the offset, get the 4 params, and determine what we need to do with them.
+			
+			// *** performance tuning.  We should only parse the header once.  It should be saved in the client object and only done once.
+			
+	
+			raw = (void *) client->in_buffer + client->in_offset;
+			header.command = ntohs(raw->command);
+			header.userid = ntohl(raw->userid);
+			header.length = ntohl(raw->length);
+			
+			if (_verbose > 1) {
+				printf("New telegram: Command=%d, userid=%d, length=%d, buffer_length=%d\n", header.command, header.userid, header.length, client->in_length);
+			}
+			
+			if ((client->in_length-HEADER_SIZE) < header.length) {
+				// we dont have enough data yet.
+				stopped = 1;
+			}
+			else {
+				
+				// get a pointer to the payload
+				ptr = client->in_buffer + client->in_offset + HEADER_SIZE;
+				
+				// we have enough data, so we need to pass it on to the functions that handle it.
+				switch(header.command) {
+					case CMD_HELLO: 	cmd_hello(client, &header); 	break;
+					default:
+						// got an invalid command, so we need to reply with an 'unknown' reply.
+						// since we have the raw command still in our buffer, we can use that 
+						// without having to build a normal reply.
+						
+						send_reply(client, &header, REPLY_UNKNOWN, sizeof(short int), &raw->command);
+
+						
+						
+						break;
+				}
+				
+				// need to adjust the details of the incoming buffer.
+				assert(0);
+				
+			}
+			
+		}
+		else {
+			// we didn't have enough, even for the header, so we are stopping.
+			stopped = 1;
+		}
+
 	}
 	
+	assert(stopped != 0);
 	
 	return(processed);
 }
@@ -649,6 +816,9 @@ static void read_handler(int fd, short int flags, void *arg)
 
 	if (flags & EV_TIMEOUT) {
 		// we timed out, so we should kill the client.
+		if (_verbose > 2) {
+			printf("client timed out. handle=%d\n", fd);
+		}
 		client_free(client);
 		client = NULL;
 	}

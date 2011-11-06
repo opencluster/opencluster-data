@@ -1,5 +1,12 @@
 tasks to do
 
+work items:
+* establish the chunk memory on startup.
+* setup a timeout on read events from the client so that we can drop the connection if no data is
+  received within a certain time.
+
+
+
 See the issues list:
 https://github.com/hyper/opencluster/issues
 
