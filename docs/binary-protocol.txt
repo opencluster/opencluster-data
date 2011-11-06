@@ -5,16 +5,18 @@ flexible so that future changes to the protocol do not result in clients and ser
 of different versions being unable to communicate with each other.
 
 Therefore some struct rules regarding future changes is required.
-  1.  WHen a protocol operation is published, changes will not be made to those operations.
-  2.  If new functionality is required, new operations are required.  Do not make changes 
-      (or even expand) existing operations and replies.  
-  3.  If you want different data in a reply from an existing operation, then you need to 
-      create a new operation.  When a client submits an operation, it expects the reply to 
-      be in a particular format, and should not recieve something different.
+  1.  When a protocol command or reply is published, changes will not be made to those 
+      operations.
+  2.  If new functionality is required, new commands (and possibly replies) are required.  
+      Do not make changes (or even expand) existing commands and replies.  Do not add new 
+      replies to an existing command.
+  3.  If you want different data in a reply from an existing command, then you need to 
+      create a new command.  When a client submits a command, it expects the certain 
+      replies to be in a particular format, and should not recieve something different.
 
-Communications are broken up into two steps.  An 'Operation' which could otherwise be 
-called a request, and a 'Reply'.   An operation should always result in a single reply.   
-If an operation should result in a number of logical peices (such as retrieving a full 
+Communications are broken up into two steps.  A 'command' which could otherwise be 
+called a request, and a 'Reply'.   A command should always result in a single reply.   
+If a command should result in a number of logical peices (such as retrieving a full 
 map), then those peices would be wrapped in a container within the reply.  
 
 All integers are to be transmitted using network-byte-order.
@@ -24,16 +26,16 @@ the string data itself.  Strings are not null-terminated.
 All communications begin with an 12-byte header.
    ---------------------------------------------------------------------------------
    |   Short Int   | 2 bytes |  Unused - should be zero, but may be used in future |
-   |   Short Int   | 2 bytes |  Operation Command Identifier                       |
+   |   Short Int   | 2 bytes |  Command (or Reply) Identifier                      |
    |   Integer     | 4 bytes |  User specified ID                                  |
    |   Integer     | 4 bytes |  Length of the data following this header           |
    ---------------------------------------------------------------------------------
 
-Almost all operations require a reply.  A reply takes the same format as a command, and has the same
+All commands require a reply.  A reply takes the same format as a command, and has the same
 12-byte header.  A command can generate different replies as needed.  A single 'command' will always 
 return a single 'reply', although it may trigger further commands to come.
 
-The operations (commands) are:
+The commands are:
   10    hello        initiate communications.
   20    goodbye      terminate communications cleanly
   30    ping         check that the node is responding.
@@ -121,7 +123,7 @@ Payload:
 -----------------------------------------------------------------------
 tryelsewhere (4)
 
-This reply is returned when the operation was not successful because the server is not responsible
+This reply is returned when the command was not successful because the server is not responsible
 for the data requested. This can be because the server is leaving the cluster, or because the data
 has moved around and is now on a different node.
  
@@ -144,7 +146,7 @@ In response of:
 -----------------------------------------------------------------------
 unknown (9)
 
-This reply is returned when the operation was not known on the server.  If the 
+This reply is returned when the command was not known on the server.  If the 
 client is using a newer protocol that has newer commands, and it sends one to a 
 server that doesn't understand it, the server will send this reply.  The client 
 library will need to be smart enough to handle these capabilities correctly.  
@@ -174,7 +176,7 @@ In response of:
 -----------------------------------------------------------------------
 hello (10)
 
-This operation is used by clients when they connect to a node. 
+This command is used by clients when they connect to a node. 
 It does not contain any additional information, so it remains merely a header.
 Calling a 'hello' will also result in 'serverlist' and 'hashmasks' information to follow as
 seperate commands to the client.
@@ -198,8 +200,8 @@ Replies:
 -----------------------------------------------------------------------
 capabilities (11)
 
-This operation is used by clients and servers to ensure that the other end knows certain 
-commands.  By providing the commandID, the server will respond with an 'ack', or a 'fail' 
+This command is used by clients and servers to ensure that the other end knows certain 
+commands.  By providing the commandID, the server will respond with an 'ack', or an 'unknown' 
 depending on if it knows it or not.   This can be used to avoid using certain commands 
 the server doesn't know how to handle.
 
@@ -225,8 +227,9 @@ Replies:
 -----------------------------------------------------------------------
 goodbye (20)
 
-This operation is used by servers or clients to indicate that the connection is about to be
+This command is used by servers or clients to indicate that the connection is about to be
 dropped. 
+
 It does not contain any additional information, so it remains merely a header.
 When an ack(1) is received, the connection can be closed.
 If this is sent from a client, it will cause all registered events for this client to be cleared,
@@ -258,7 +261,7 @@ Replies:
 -----------------------------------------------------------------------
 ping(30)
 
-This operation is used to ensure that the server node is responding.  The client can send it
+This command is used to ensure that the server node is responding.  The client can send it
 periodically if it wants, and the servers will send it to each other from time to time.
 
 
@@ -282,7 +285,7 @@ Replies:
 -----------------------------------------------------------------------
 serverhello(50)
 
-This operation is used by a server when it is connecting to another server.  It will include the
+This command is used by a server when it is connecting to another server.  It will include the
 connection string so that the cluster can publish it to clients and other servers. 
 
 Type of message:
@@ -325,24 +328,6 @@ Replies:
 
 
 -----------------------------------------------------------------------
-loadlevel
-
-This operation is used by nodes to periodically inform other nodes their load level so that buckets
-can be split and moved around.
-
-Operation
-  op=loadlevel
-  level=<integer>
-
-Reply
-  reply=loadlevel
-  level=<integer>
-
-
-
-
-
-
 -----------------------------------------------------------------------
 -----------------------------------------------------------------------
 -----------------------------------------------------------------------
