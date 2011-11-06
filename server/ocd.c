@@ -384,7 +384,7 @@ static void client_free(client_t *client)
 	}
 
 	assert(client->in_length == 0);
-	assert(client->in_offset == 0);;;
+	assert(client->in_offset == 0);
 	if (client->in_buffer) {
 		free(client->in_buffer);
 		client->in_buffer = NULL;
@@ -769,6 +769,10 @@ static int process_data(client_t *client)
 						// got an invalid command, so we need to reply with an 'unknown' reply.
 						// since we have the raw command still in our buffer, we can use that 
 						// without having to build a normal reply.
+
+						if (_verbose > 1) {
+							printf("Unknown command: Command=%d, userid=%d, length=%d\n", header.command, header.userid, header.length);
+						}
 						
 						send_reply(client, &header, REPLY_UNKNOWN, sizeof(short int), &raw->command);
 
@@ -819,6 +823,11 @@ static void read_handler(int fd, short int flags, void *arg)
 		if (_verbose > 2) {
 			printf("client timed out. handle=%d\n", fd);
 		}
+		
+		// because the client has timed out, we need to clear out any data that we currently have for it.
+		client->in_offset = 0;
+		client->in_length = 0;
+		
 		client_free(client);
 		client = NULL;
 	}
