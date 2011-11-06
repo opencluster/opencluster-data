@@ -21,15 +21,17 @@ All integers are to be transmitted using network-byte-order.
 All strings are transmitted with a 4-byte int which indicates the length of the string, followed by
 the string data itself.  Strings are not null-terminated.
 
-All communications begin with an 10-byte header.
-   -----------------------------------------------------------------------
-   |   Short Int   | 2 bytes |  Operation Command Identifier             |
-   |   Integer     | 4 bytes |  User specified ID                        |
-   |   Integer     | 4 bytes |  Length of the data following this header |
-   -----------------------------------------------------------------------
+All communications begin with an 12-byte header.
+   ---------------------------------------------------------------------------------
+   |   Short Int   | 2 bytes |  Unused - should be zero, but may be used in future |
+   |   Short Int   | 2 bytes |  Operation Command Identifier                       |
+   |   Integer     | 4 bytes |  User specified ID                                  |
+   |   Integer     | 4 bytes |  Length of the data following this header           |
+   ---------------------------------------------------------------------------------
 
-Almost all operations require a reply.  A reply takes the same format as a command, and has the asme
-10-byte header.  A command can generate different replies as needed.
+Almost all operations require a reply.  A reply takes the same format as a command, and has the same
+12-byte header.  A command can generate different replies as needed.  A single 'command' will always 
+return a single 'reply', although it may trigger further commands to come.
 
 The operations (commands) are:
   10    hello        initiate communications.
@@ -139,6 +141,32 @@ In response of:
 
 
 
+-----------------------------------------------------------------------
+unknown (9)
+
+This reply is returned when the operation was not known on the server.  If the 
+client is using a newer protocol that has newer commands, and it sends one to a 
+server that doesn't understand it, the server will send this reply.  The client 
+library will need to be smart enough to handle these capabilities correctly.  
+
+This is only to be used as a reply.  There should be no such thing as a 'reply' 
+that is not known.
+
+Type of message:
+  Reply
+
+Conditions of use:
+  Sent from server to client. 
+  Sent from server to server. 
+  Sent from client to server. 
+
+Payload:
+  short int - command that was attempted.
+
+In response of:
+  any command that it doesn't recognise.
+
+
 
 
 
@@ -163,6 +191,34 @@ Payload:
 Replies:
   ack(1), on success.
   tryelsewhere(4), if the server is shutting down, or not accepting client connections.
+
+
+
+
+-----------------------------------------------------------------------
+capabilities (11)
+
+This operation is used by clients and servers to ensure that the other end knows certain 
+commands.  By providing the commandID, the server will respond with an 'ack', or a 'fail' 
+depending on if it knows it or not.   This can be used to avoid using certain commands 
+the server doesn't know how to handle.
+
+
+Type of message:
+  Command
+
+Conditions of use:
+  Sent from client to server. 
+  Sent from server to client.
+  Sent from server to server.
+
+Payload:
+  short int - command
+
+Replies:
+  ack(1), if the command is accepted.
+  fail(2), if the command is not known.
+
 
 
 
@@ -258,7 +314,9 @@ Conditions of use:
   Sent from server to cient.
 
 Payload:
-  string - connect info (normally in the form "IP:port", but can be any resolvable standard format)
+  integer - count of the servers in the cluster
+  string ( x count) - connect info (normally in the form "IP:port", but can be any resolvable
+standard format)
 
 Replies:
   ack(1)
