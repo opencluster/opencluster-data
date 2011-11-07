@@ -1,0 +1,14 @@
+The C library, called libcluster will have two primary modes; Lite, and Full.
+
+The lite mode is a bit easier to use and requires less framework, although there are a few things that the developer 
+will need to be aware of for a long-running system.  The Lite version will not use threads, nor handle communications in 
+the background.  This means that unsolicited messages from the server will not be processed automaticaly, but will be 
+received when other outgoing commands are being sent, and also when it is told to check for new messages.  The lite 
+version has access to all the features, but their usability is a little diminished because there is no immediate 
+callbacks fired.
+
+The full version requires a little more effort to use, but provides a full experience and should be faster.  It utilises 
+threads, and an event system for network activity.  It runs mostly in a seperate thread, and handles the received data 
+from the server instantly. 
+
+
