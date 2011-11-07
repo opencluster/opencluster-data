@@ -782,8 +782,14 @@ static int process_data(client_t *client)
 				}
 				
 				// need to adjust the details of the incoming buffer.
-				assert(0);
-				
+				client->in_length -= header.length + HEADER_SIZE;
+				if (client->in_length == 0) {
+					client->in_offset = 0;
+				}
+				else {
+					client->in_offset += header.length + HEADER_SIZE;
+				}
+				assert( ( client->in_length + client->in_offset ) <= client->in_max);
 			}
 			
 		}

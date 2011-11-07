@@ -1,4 +1,4 @@
-## make file for stashd.
+## make file for ocd (open cluster daemon)
 
 all: ocd
 
