@@ -65,7 +65,19 @@ public class hashtest
 		}
         long endTime = System.currentTimeMillis();
         long elapsedTime = endTime-startTime;
-		System.out.println("Hash:" + hash + " " + (elapsedTime));
+		System.out.println("[STR + I as key] Hash:" + hash + " " + (elapsedTime));
+
+        generateStatsOutput(elapsedTime);
+
+        times = new ArrayList<Long>();
+
+        startTime = System.currentTimeMillis();
+		for (int i=0; i < LIMIT; i++) {
+			hash = fnvHashCode(str);
+		}
+        endTime = System.currentTimeMillis();
+        elapsedTime = endTime-startTime;
+		System.out.println("[STR as key] Hash:" + hash + " " + (elapsedTime));
 
         generateStatsOutput(elapsedTime);
 
