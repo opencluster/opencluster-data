@@ -1,3 +1,5 @@
 server/event-compat.o
 server/ocd
 server/*.kate-swp
+clients/c/*.kate-swp
+
