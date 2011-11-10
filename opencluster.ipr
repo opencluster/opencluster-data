@@ -1124,6 +1124,7 @@
     <modules>
       <module fileurl="file://$PROJECT_DIR$/clients-java.iml" filepath="$PROJECT_DIR$/clients-java.iml" />
       <module fileurl="file://$PROJECT_DIR$/docs.iml" filepath="$PROJECT_DIR$/docs.iml" />
+      <module fileurl="file://$PROJECT_DIR$/misc.iml" filepath="$PROJECT_DIR$/misc.iml" />
       <module fileurl="file://$PROJECT_DIR$/server.iml" filepath="$PROJECT_DIR$/server.iml" />
     </modules>
   </component>
