@@ -11,7 +11,8 @@ class hashtest
  		int len = str.length();
 
 		for (int i = 0; i < len; i++) {
-			hash ^= (0x0000ffff & (int)str.charAt(i));
+//			hash ^= (0x0000ffff & (int)str.charAt(i));
+			hash ^= (int)str.charAt(i);
 			hash *= kFNVPrime;
 		}
 
