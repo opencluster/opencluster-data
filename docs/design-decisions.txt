@@ -1,0 +1,11 @@
+This document describes some of the design decisions made during the high-level design of the 
+opencluster project.
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,100 @@
+OpenCluster provides a distributed method for creating locks.
+
+Locks are an important synchronisation method to ensure that data isnt 
+being modified when it can interfere with another operation.
+
+OpenCluster provides two different kinds of locks.  Both behave very 
+differently and should be applied when appropriate.
+
+Named Locks
+	A normal lock which is given a name. It does not physically lock 
+	any data stored in the cluster, but it allows the developer to 
+	group actions.   These work similar to a Mutex in a threading 
+	model.
+
+
+Special Locks (or Restrictive Lock)
+	A special lock that allows a developer to actually lock down 
+	a number of keys and the cluster will block access to those keys 
+	while the lock is in place.  These work similar to the LOCK 
+	TABLES operation in MySQL.
+	
+
+Both locks are distributed based on the resolved hash of the name, in 
+the same way that key-hashes are.  In other words, the key indicates 
+which server is responsible for the lock.
+
+When a lock is requested, a unique code is returned.  In order to 
+unlock the lock, that unique code must be supplied.
+
+In traditional systems, when a client requests a lock from a 
+server, the client would need to maintain a connection to that server.  
+If the client loses the connection, the lock is released.  In 
+OpenCluster we cant maintain that restriction because buckets can be 
+moved around from server to server to keep the cluster balanced.  
+Therefore, the server responsible for the lock may change.  So a client 
+may be in a position where the server it got the lock from may 
+dissapear, but the lock remains in the cluster, but on a different 
+server.
+
+When a cluster lock is created, it specifies a Timeout value (in 
+seconds).  This timeout value means that if the client is lost from the 
+cluster for that amount of time, the lock is released.  Developers 
+should choose this value carefully.  Too high a timeout and the system 
+could get blocked for too long if a client dies.  If the timeout is too 
+low, then locks could get dropped too quickly if a client is moving 
+connections from server to server. Normally 15 seconds would be 
+appropriate.  Every situation is different though.
+
+
+
+
+Special Locks.
+
+These are given a Name, but also specifiy a list of keys that will be 
+given restricted access.  
+
+For example, you might want to set the lock UpdateBalance:4587
+And specify the following conditions.
+
+	UserDetails:4587   READ
+	Balance:4587       WRITE
+	ParsedOutput:4587  WRITE
+
+The combination of READ/WRITE options indicate that when this lock is in 
+effect, other clients can get the value of UserDetails:4587, but cannot 
+make changes to it.  The other two values indicate that no other client 
+can even read those values.
+
+This means, that the process can set the lock, and use those keys on the 
+cluster and be assured that no other client is able to make changes to 
+them, or even see them while in mid operation.
+
+When making changes to those three entries, the unique lock code 
+received will need to be provided, otherwise the operation will not 
+succeed either.
+
+Special locks will not complete until all the conditions are available.  
+By default it would wait until the conditions were met.  
+
+
+IDEA:
+	It may be possible to set a mode so that while the lock is in 
+	effect, the other clients will still be able to read the value, 
+	but will not see the ones that are being modified inside the 
+	lock.  This should reduce blocking.  The main reason to use 
+	special locks is that multiple entries can be modified without 
+	other clients seeing them in a partial state.   By making 
+	changes in the background and committing them when the lock is 
+	released, the overall performance of the cluster should be 
+	greater.  Reduced client blocking is desirable.
+	
+	In this case, the READ and WRITE attributes may not be required.
+	
+	
+
+
+	
+	
+
+	

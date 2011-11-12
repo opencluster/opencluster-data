@@ -1,5 +1,29 @@
 The client and servers will use a binary protocol to communicate.
 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+NOTE:   
+
+During implementation of this protocol it became apparent that there are some 
+performance advantages in knowing if a message is a command or a reply.
+
+So the 'unused' field we included for padding will be used to indicate this.  If 
+it is 0, then it is a command, if it is not zero, then it shows the command that 
+this is a reply to, which can be used as an additional check that the messages 
+haven't gotten out of sync.
+
+In addition to using the 'unused' field, we moved it to be the second part of the 
+message instead of the first.
+
+So now it is:
+ 2 bytes - command
+ 2 bytes - command being replied to.
+ 4 bytes - user specified id.
+ 4 bytes - length of payload.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
 The binary protocol is designed with performance in mind, but is still required to be 
 flexible so that future changes to the protocol do not result in clients and servers 
 of different versions being unable to communicate with each other.
@@ -25,15 +49,16 @@ the string data itself.  Strings are not null-terminated.
 
 All communications begin with an 12-byte header.
    ---------------------------------------------------------------------------------
-   |   Short Int   | 2 bytes |  Unused - should be zero, but may be used in future |
    |   Short Int   | 2 bytes |  Command (or Reply) Identifier                      |
+   |   Short Int   | 2 bytes |  Command being replied to (0 if not a reply)        |
    |   Integer     | 4 bytes |  User specified ID                                  |
    |   Integer     | 4 bytes |  Length of the data following this header           |
    ---------------------------------------------------------------------------------
 
 All commands require a reply.  A reply takes the same format as a command, and has the same
 12-byte header.  A command can generate different replies as needed.  A single 'command' will always 
-return a single 'reply', although it may trigger further commands to come.
+return a single 'reply', although it may trigger further commands to come.  The reply will include 
+a param that indicates the commandID that it is replying to.
 
 The commands are:
   10    hello        initiate communications.
@@ -60,6 +85,27 @@ Note: To promote performance on the server, CommandID's less than 1000 do not re
       expensive processing pipeline.
 
 
+
+
+DATA PRIMITIVES
+
+Different kinds of data can be stored in the cluster.  Several primitives are handled directly.  
+In the event that these primitives are not enough, anything can be stored as a binary blob, which 
+can be any kind of serialized object.  If you serialize using a portable object notation (such as 
+POF, JSON, etc), you can put whatever complex objects that you want in there.
+
+Hint:
+    These data types are also used for parameter passing in network operations.
+    
+
+	+---------+------------+---------------------------------------------------------------------------+
+	| Type    | Bytes      | Details                                                                   |
+	+---------+------------+---------------------------------------------------------------------------+
+	| Short   |  2         | A 16-bit integer, only used in command parameters.  Not a storable type.  |
+	| Integer |  4         | A regular (32-bit) integer, signed.                                       |
+	| Long    |  8         | A long (64-bit) integer, signed.                                          |
+	| String  |  4 + data  | A variable length string. Integer is the length, followed by the data.    |
+	+---------+------------+---------------------------------------------------------------------------+
 
 
 

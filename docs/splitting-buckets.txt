@@ -1,6 +1,13 @@
 Splitting Buckets.
 -------------------
 
+NOTE ABOUT THIS DOCUMENT.
+  For ease of describing the bucket process, we start with 16 buckets (a mask of 000F).  
+  However, the real system normally starts with 256 buckets (a mask of 00FF).  The process is the 
+  same, and it is a bit easier to explain the move from 000F to 000FF.
+
+
+
 A bucket is a group of clustered items that a node is responsible for.
 
 When an item is to be submitted to the cluster, it is sent to the server responsible for that item.
@@ -13,83 +20,123 @@ To accomodate this, the servers utilise a number of 'hashmasks'.
 
 A hashmask is a combination of a mask, and a portion of a hash.
 
+There is normally a 1 to 1 relationship between a hashmask and a bucket (except for when a bucket is 
+split, but the hashmask hasn't been updated yet, but the hashmask still works).
+
 When a cluster is first started with a single server, that server is responsible for all the buckets.   
 
-That first server (#1) will create 16 buckets.   The MASK at this point is 0x000F.   And each bucket is labelled 0x0000 
-through 0x000F.  
+That first server (#1) will create 16 buckets.   The MASK at this point is 0x000F.   And each bucket 
+is labelled 0x0000 through 0x000F.  
 
 When an item is being added to the cache, a hash of the key is generated.  So if the key is named 
-"CustomerDetails:45543", that gets hashed out to "0a0bec73c71375329404fe632c7679c9".   When you do a binary AND on the 
-mask and the hash (0x000F and 0x0a0bec73c71375329404fe632c7679c9) you end up with 0x0009.  This means that this item 
-belongs in the 000F/0009 (mask/key) bucket.
+"CustomerDetails:45543", that gets hashed out to "0a0bec73c71375329404fe632c7679c9".   When you do a 
+binary AND on the mask and the hash (0x000F and 0x0a0bec73c71375329404fe632c7679c9) you end up with 
+0x0009.  This means that this item belongs in the 000F/0009 (mask/key) bucket.
 
-Another item, this time with a key of "InvoiceMarkup:45543" would give a hash of "10b31df6183b032f53f5dbbc07c2c976".  So 
-by applying the mask again, we know that this key belongs in the 000F/0006 bucket.
+Another item, this time with a key of "InvoiceMarkup:45543" would give a hash of 
+"10b31df6183b032f53f5dbbc07c2c976".  So by applying the mask again, we know that this key belongs in 
+the 000F/0006 bucket.
 
-The client maintains an array of bucketID's with details pointing to which server handles which buckets, and it uses 
-that information to know where to send requests.
+The client maintains an array of bucketID's with details pointing to which server handles which 
+buckets, and it uses that information to know where to send requests.
 
-SO with a mask of 000F, we have a total of 16 buckets.  All items in the cluster would be split over those 16 buckets, 
-currently on a single server.
+SO with a mask of 000F, we have a total of 16 buckets.  All items in the cluster would be split over 
+those 16 buckets, currently on a single server.
 
-NOTE:  We may start up a server by default to use a mask of 00FF, which results in 256 buckets.  But testing will 
-       probably need to be done to determine what works best.
+NOTE:  The actual servers will start with 256 buckets (a mask of 00FF).  The process is the same 
+       though.  This is a performance decision so that buckets dont have to be split too early.
 
-So, assume that a second server (#2) joins the cluster.  Server #1 has 16 (100%) of the buckets, and server #2 has 0 
-(0%) which is unbalanced.  Server #1 will decide that it needs to offload some of its buckets to #2.  It may choose to 
-start offloading bucket 000F/0006.  
+So, assume that a second server (#2) joins the cluster.  Server #1 has 16 (100%) of the buckets, and 
+server #2 has 0 (0%) which is unbalanced.  Server #1 will decide that it needs to offload some of 
+it's buckets to #2.  It may choose to start offloading bucket 000F/0006.  
 
-It will first let #2 know that it is doing that.  #1 then starts sending all the items that it has, to #2.  While it is 
-sending Items to #2, it will continue servicing that bucket with requests from the clients.  It will continue to do so 
-until it has both in sync.  When the LAST Item from bucket 000F/0006 is sent it will include a flag which indicates it 
-is the last one.  #2 then immediately becomes the PRIMARY server for that bucket, and #1 becomes the backup.  Both 
-servers will send an update to their clients to indicate the new hashmask settings.
+It will first let #2 know that it is doing that.  #1 then starts sending all the items that it has, 
+to #2.  While it is sending Items to #2, it will continue servicing that bucket with requests from 
+the clients.  It will continue to do so until it has both in sync.  When the LAST Item from bucket 
+000F/0006 is sent it will include a flag which indicates it is the last one.  #2 then immediately 
+becomes the PRIMARY server for that bucket, and #1 becomes the backup.  Both servers will send an 
+update to their clients to indicate the new hashmask settings.
 
-If a client tries to send a request to a server that is no longer the primary for a bucket, the server will respond 
-saying that it is no longer responsible for the bucket, and will include server details for that bucket (probably not a 
-complete hashmask list, just the bare minimum the client would need).  Then the client would connect to the correct 
-server to handle the transaction.
+When a server is offloading buckets to another server, it tries to balance out backup and primary 
+servicing of buckets.  You dont normally want one server to have all the primaries and another to 
+have all the backups.  You want them evenly split over the cluster.   To do this, it will look at 
+how many primaries they each have, and how many backups, and determine which would result in a 
+better balance.   
 
-Servers #1 and #2 will continue transferring buckets until a balance is achieved.  Meanwhile the clients continue to 
-access the cluster as usual.
+If a client tries to send a request to a server that is no longer the primary for a bucket, the 
+server will respond saying that it is no longer responsible for the bucket, and will include server 
+details for that bucket (probably not a complete hashmask list, just the bare minimum the client 
+would need).  Then the client would connect to the correct server to handle the transaction.
+
+Servers #1 and #2 will continue transferring buckets until a balance is achieved.  Meanwhile the 
+clients continue to access the cluster as usual.
 
 So, we now have 16 buckets split over two servers.
 
-Assuming we have a few more servers join the cluster, we may find we dont have enough buckets.  We dont create new 
-buckets, but we instead split the existing buckets.  
+Assuming we have a few more servers join the cluster, we may find we dont have enough buckets.  We 
+dont create new buckets, but we instead split the existing buckets.  
 
-NOTE: On a side note.  The server settings will indicate how many backups of a bucket there should be.  By default it 
-      would be 1.  One server would be the primary, and one server will be the backup.  The backup server is always the 
-      one that previously was responsible for a bucket.  So, if server #1 moves bucket 5 to server #2, #1 will be the 
-      backup.  When server #2 moves the bucket to server #4, then #1 no longer is a backup and will remove the data for 
-      that bucket, freeing space.
+NOTE: On a side note.  The server settings will indicate how many backups of a bucket there should 
+      be.  By default it would be 1.  One server would be the primary, and one server will be the 
+      backup.  The backup server is always the one that previously was responsible for a bucket.  
+      So, if server #1 moves bucket 5 to server #2, #1 will be the backup.  When server #2 moves the 
+      bucket to server #4, then #1 no longer is a backup and will remove the data for that bucket, 
+      freeing space.
 
-When a server is at a point where in need to move data around, but it only have one primary bucket, it will need to 
-split that bucket into 16 smaller buckets.
+When a server is at a point where in need to move data around, but it only have one primary bucket, 
+it will need to split that bucket into 16 smaller buckets.
 
 In the scenario so far, lets say we have server #12, and it has one bucket, 000F/0004.
-This means that a hash of an item gives 06f92937ee3a664bafabf5a4b0e90834 and we binary AND it by 000F, we get 0x0004 
-(the last digit).  So this item would fit in the 000F/0004 bucket.
+This means that a hash of an item gives 06f92937ee3a664bafabf5a4b0e90834 and we binary AND it by 
+000F, we get 0x0004 (the last digit).  So this item would fit in the 000F/0004 bucket.
 
 So we still want all the '4' hashes to go to these 16 buckets.  
-So we slide the mask by 8-bits, so 000F becomes 00FF.  And we now have 16 buckets.  0004, 0014, 0024, 0034, 0044, 0054, 
-0064, 0074, 0084, 0094, 00A4, 00B4, 00C4, 00D4, 00E4 and 00F4.
+So we slide the mask by 8-bits, so 000F becomes 00FF.  And we now have 16 buckets.  0004, 0014, 
+0024, 0034, 0044, 0054, 0064, 0074, 0084, 0094, 00A4, 00B4, 00C4, 00D4, 00E4 and 00F4.
 
-At this point, all the client hashes still work, and all the requests coming from the client still work correctly.  THe 
-server can send a hashmask update to its clients, but it really doesn't even have to at this point.  Because the 
-exisitng hashmasks still work.
+At this point, all the client hashes still work, and all the requests coming from the client still 
+work correctly.  THe server can send a hashmask update to its clients, but it really doesn't even 
+have to at this point.  Because the exisitng hashmasks still work.
 
-But now the server can move those smaller buckets to other servers (keeping in mind that the existing server will still 
-need to be a backup of it.
+But now the server can move those smaller buckets to other servers (keeping in mind that the 
+existing server will still need to be a backup of it.
 
-NOTE: When the primary server splits one bucket into 16 smaller ones, it will also need to inform the backup servers for 
-      this bucket.  They then can also split it on their end, and expect that the backup structure will change (and they 
-      may no longer need to be backups for some of these new buckets).
+NOTE: When the primary server splits one bucket into 16 smaller ones, it will also need to inform 
+      the backup servers for this bucket.  They then can also split it on their end, and expect that 
+      the backup structure will change (and they may no longer need to be backups for some of these 
+      new buckets).
 
-When the number of nodes in the cluster increases again, or if one bucket becomes drastically larger than most other 
-buckets, they can continue to be split.  If there are not enough buckets to split, then the server can once again shift 
-the mask from 00FF to 0FFF, which will allow 4096 buckets.
+When the number of nodes in the cluster increases again, or if one bucket becomes drastically 
+larger than most other buckets, they can continue to be split.  If there are not enough buckets to 
+split, then the server can once again shift the mask from 00FF to 0FFF, which will allow 4096 
+buckets.
 
-Not all servers would need to be sync with the shifting of the MASK.  It would occur naturally as buckets need to be 
-balanced across the cluster.
+Not all servers would need to be sync with the shifting of the MASK.  It would occur naturally as 
+buckets need to be balanced across the cluster.
 
+
+
+
+-----------------------------------
+ON THE CLIENT SIDE
+
+The client will need to maintain a list of hashmasks which indicate which server is responsible for 
+each bucket.   It will need to handle a special case when the buckets are split into smaller 
+buckets.   When a server needs to split a bucket, it splits ALL the buckets that it is responsible 
+for.  
+
+For example, On the client side, assume a server has previously sent a hashmask of 0002/000F.  But then the server splits the bucket, and now you get 0002/00FF, 0012/00FF, 0022/00FF ... 00E2/00FF, 00F2/00FF.   When one server increases the mask, the client list will also need to expand ALL the hashes from all the server to match that higher mask.
+
+This is fairly easy to do, but a little daunting.
+
+Assuming the mask was previously 000F, and is now 00FF.  This is easy to detect, so before parsing the new hashmasks from that server.
+ - Your existing hash array is 16 entries long (000F).  
+ - Create a new array that is 256 entries long (00FF).
+ - for each entry in the new array, binary AND that key with the OLD mask.  
+   For example 0052 AND 000F gives 0002.
+ - Lookup the old array for that entry 
+   In this example, 0002.  That gives us the server that is responsible.
+ - when finished filling out the new array, remove the old array.
+ - Continue parsing the new hashmasks from the server which should now fit in the array.
+
+The process is the same when the mask goes from 00FF to 0FFF.

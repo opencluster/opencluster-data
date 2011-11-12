@@ -96,8 +96,8 @@ int rem;
 int main(void)
 {
 
-	char *teststr =  "when something is wrong, with my baby... something is wrong, with me.   ";
-	char *teststr2 = "twinkle twinkle little star, how i wonder what you are. Up above the world so high, like a diamond in the sky.";
+	char *teststr =  "something";
+	char *teststr2 = "elsetohjk";
 	int length, length2;
 	unsigned int hash;
 	int limit = LIMIT;
@@ -111,8 +111,8 @@ int main(void)
 	length2 = strlen(teststr2);
 
 	for (limit=0; limit < LIMIT; limit += 2)  {
-		hash = generate_hash(teststr, length);
 		hash = generate_hash(teststr2, length2);
+		hash = generate_hash(teststr, length);
 		
 // 		hash = SuperFastHash(teststr, length);
 // 		hash = SuperFastHash(teststr2, length2);
