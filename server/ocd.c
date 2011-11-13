@@ -89,6 +89,7 @@ typedef struct {
 
 typedef struct {
 	short command;
+	short repcmd;
 	int userid;
 	int length;
 } header_t;
@@ -97,8 +98,8 @@ typedef struct {
 // data received over the network.
 #pragma pack(push,1)
 typedef struct {
-	short unused;
 	short command;
+	short repcmd;
 	int userid;
 	int length;
 } raw_header_t;
@@ -323,12 +324,7 @@ static void client_init ( client_t *client, server_t *server, evutil_socket_t ha
 	// assign fd to client object.
 	assert(_evbase);
 	assert(client->handle > 0);
-	client->read_event = event_new(
-		_evbase,
-		client->handle,
-		EV_READ|EV_PERSIST,
-		read_handler,
-		client);
+	client->read_event = event_new( _evbase, client->handle, EV_READ|EV_PERSIST, read_handler, client);
 	assert(client->read_event);
 	struct timeval five_seconds = {5,0};
 	int s = event_add(client->read_event, &five_seconds);
@@ -607,12 +603,17 @@ static void write_handler(int fd, short int flags, void *arg)
 	
 	assert(client->handle > 0);
 	
+	if (_verbose > 2) {
+		printf("WRITING.  handle=%d, length=%d\n", client->handle, client->out_length);
+	}
+	
 	res = send(client->handle, client->out_buffer + client->out_offset, client->out_length, 0);
 	if (res > 0) {
 		
 		assert(res <= client->out_length);
 		if (res == client->out_length) {
 			client->out_offset = 0;
+			client->out_length = 0;
 		}
 		else {
 			client->out_offset += res;
@@ -650,17 +651,17 @@ static void send_reply(client_t *client, header_t *header, short replyID, int le
 	assert(sizeof(raw_header_t) == HEADER_SIZE);
 
 	// build the raw header.
-	raw.unused = 0;
 	raw.command = htons(replyID);
+	raw.repcmd = htons(header->command);
 	raw.userid = htonl(header->userid);
 	raw.length = htonl(length);
 	
 	// make sure the clients out_buffer is big enough for the message.
-	assert(client->out_buffer);
 	if (client->out_max < client->out_length + client->out_offset + sizeof(raw_header_t) + length) {
 		client->out_buffer = realloc(client->out_buffer, client->out_max + DEFAULT_BUFSIZE);
 		client->out_max += DEFAULT_BUFSIZE;
 	}
+	assert(client->out_buffer);
 	
 	// add the header and the payload to the clients out_buffer, a
 	ptr = client->out_buffer + client->out_offset;
@@ -746,6 +747,7 @@ static int process_data(client_t *client)
 	
 			raw = (void *) client->in_buffer + client->in_offset;
 			header.command = ntohs(raw->command);
+			header.repcmd = ntohs(raw->repcmd);
 			header.userid = ntohl(raw->userid);
 			header.length = ntohl(raw->length);
 			
