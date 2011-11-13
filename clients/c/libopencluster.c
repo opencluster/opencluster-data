@@ -34,8 +34,8 @@
 // data received over the network.
 #pragma pack(push,1)
 typedef struct {
-	short unused;
 	short command;
+	short repcmd;
 	int userid;
 	int length;
 } raw_header_t;
@@ -45,16 +45,29 @@ typedef struct {
 
 
 typedef struct {
-	int id;
 	int available;
-	int result;
-} reply_t;
+	int id;
 
+	// data going out.
+	struct {
+		void *data;
+		int length;
+		int max;
+		int command;
+	} out;
+	
+	// data coming in.
+	struct {
+		
+		// 0 indicates that the reply has not been received.
+		// > 0 indicates the command that was received.
+		int result;
+		
+		int length;
+		int max;
+		void *payload;
+	} in;
 
-typedef struct {
-	reply_t *reply;
-	int datalen;
-	void *data;
 } message_t;
 
 typedef unsigned int hash_t;
@@ -109,9 +122,6 @@ cluster_t * cluster_init(void)
 	s->servers = NULL;
 	s->server_count = 0;
 
-	s->reply_count = 0;
-	s->replies = NULL;
-
 	s->msg_count = 0;
 	s->messages = NULL;
 	
@@ -142,7 +152,6 @@ static void server_free(server_t *server)
 // free all the resources used by the 'cluster' object.
 void cluster_free(cluster_t *cluster)
 {
-	reply_t *reply;
 	message_t *msg;
 	int i;
 	
@@ -160,28 +169,16 @@ void cluster_free(cluster_t *cluster)
 	cluster->servers = NULL;
 	assert(cluster->server_count == 0);
 
-	// we might have replies in the reply-pool, so we need to make sure they have all been processed and then clean them out.
-	assert((cluster->replies && cluster->reply_count > 0) || (cluster->replies == NULL && cluster->reply_count == 0));
-	if (cluster->replies) {
-		while (cluster->reply_count > 0) {
-			reply = cluster->replies[cluster->reply_count];
-			if (reply) {
-				assert(reply->available == 1);
-			}
-			cluster->reply_count --;
-		}
-		free(cluster->replies);
-		cluster->replies = NULL;
-	}
 
 	// we may have messages in the message-pool, so we need to make sure they have all been processed nd then clean them all out.
 	assert((cluster->messages && cluster->msg_count > 0) || (cluster->messages == NULL && cluster->msg_count == 0));
 	if (cluster->messages) {
 		while (cluster->msg_count > 0) {
 			msg = cluster->messages[cluster->msg_count];
-			if (msg) {
+			assert(msg);
 				
-			}
+			assert(0);
+
 			cluster->msg_count --;
 		}
 		free(cluster->messages);
@@ -224,7 +221,7 @@ void cluster_addserver(cluster_t *cluster, const char *host)
 	server->in_buffer = malloc(DEFAULT_BUFFER_SIZE);
 	assert(server->in_buffer);
 	server->in_length = 0;
-	server->in_max = 0;
+	server->in_max = DEFAULT_BUFFER_SIZE;
 
 	// parse the host string, to remove the port part.
 	copy = strdup(host);
@@ -325,66 +322,8 @@ int sock_connect(char *host, int port)
 }
 
 
-// get an available reply from the replies list for the server.
-// TODO:PERFormance.  Instead of going through the list all the time, we should have some sort of 
-// indicator of the last reply that was returned so that it can just use that.
-reply_t * next_reply(cluster_t *cluster)
-{
-	reply_t *reply = NULL;
-	reply_t *tmp;
-	int i;
-	
-	assert(cluster);
-	assert(cluster->reply_count >= 0);
-	assert((cluster->reply_count == 0 && cluster->replies == NULL) || (cluster->reply_count > 0 && cluster->replies));
-	
-	for (i=0; i < cluster->reply_count; i++) {
-		tmp = cluster->replies[i];
-		assert(tmp);
-		assert(tmp->id == i);
-		
-		if (tmp->available == 1) {
-			
-			reply = tmp;
-			reply->available = 0;
-			assert(reply->result == 0);
-			
-			// we found what we are looking for, so break out of the loop.
-			i = cluster->reply_count;
-		}
-	}
-	
-	// if we didn't find an empty reply slot, then we need to create one.
-	if (reply == NULL) {
-		cluster->replies = realloc(cluster->replies, sizeof(reply_t *) * (cluster->reply_count + 1));
-		reply = cluster->replies[cluster->reply_count];
-		
-		reply->id = cluster->reply_count;
-		reply->available = 0;
-		reply->result = 0;
-		
-		cluster->reply_count ++;
-	}
-	
-	
-	assert(reply);
-	return(reply);
-}
 
 
-// when a reply structure is no longer needed, it can be returned to the pool to be re-used.  
-// Since the pointer is just referencing an item in an array, we only need to clear and initialise 
-// the structure and mark it as available.
-void return_reply(reply_t *reply)
-{
-	assert(reply);
-	
-	assert(reply->available == 0);
-	assert(reply->id >= 0);
-	
-	reply->available = 1;
-	reply->result = 0;
-}
 
 
 
@@ -401,6 +340,11 @@ static void pending_server(cluster_t *cluster, server_t *server, int blocking)
 	int offset = 0;
 	int avail;
 	int sent;
+	raw_header_t *header;
+	message_t *msg;
+	int length;
+	short repcmd;
+	int userid;
 	
 	assert(cluster);
 	assert(server);
@@ -428,32 +372,87 @@ static void pending_server(cluster_t *cluster, server_t *server, int blocking)
 		
 		avail = server->in_max - server->in_length;
 		assert(avail > 0);
+		assert(offset >= 0);
 		sent = recv(server->handle, server->in_buffer + offset + server->in_length, avail, 0);
 		if (sent <= 0) {
 			// socket has shutdown
 			assert(0);
 		}
 		else {
+			assert(sent > 0);
 			assert(sent <= avail);
 			server->in_length += sent;
 
 			// now that we've got data, we need to make sure we have enough for the header.
-			assert(0);
-			
+			if (server->in_length >= sizeof(raw_header_t)) {
+				
+				void *ptr = server->in_buffer + offset;
+				
+				header = ptr;
+				length = ntohl(header->length);
+				
+				
+				if (length < 0) {
+					// if we get some obviously wrong data, we need to close the socket.
+					assert(0);
+				}
+				
+				if (server->in_length >= sizeof(raw_header_t) + length) {
+					// we have enough data to parse this entire message.
+					
+					repcmd = ntohs(header->repcmd);
+					
+					// if message is a reply, add it to the reply data.
+					if (repcmd > 0) {
+						
+						
+						userid = ntohl(header->userid);
+						assert(userid >= 0);
+						assert(userid < cluster->msg_count);
+						
+						assert(cluster->messages);
+						
+						msg = cluster->messages[userid];
+						
+						assert(msg->id == userid);
+						assert(msg->available == 0);
+						assert(msg->out.command == repcmd);
 
-			// if we've processed all the data, and we dont have any partial messages at the end of 
-			// it, then we exit the loop.  If we do have a partial message, then we need to continue 
-			// waiting for more data.
-			assert(0);
+						if (msg->in.max < length) {
+							msg->in.payload = realloc(msg->in.payload, length);
+							msg->in.max = length;
+						}
+						
+						assert(msg->in.payload);
+						memcpy(msg->in.payload, server->in_buffer + offset + sizeof(raw_header_t), length);
+						msg->in.result = ntohs(header->command);
+						
+						printf("Received reply (%d) from command (%d), length=%d\n", msg->in.result, repcmd, length);
+
+					}
+					else {
+						// it is not a reply, it is a command.  We need to process that as well.
+						assert(0);
+					}
+
+					// if we've processed all the data, and we dont have any partial messages at the end of 
+					// it, then we exit the loop.  If we do have a partial message, then we need to continue 
+					// waiting for more data.
+					
+					offset += sizeof(raw_header_t) + length;
+					assert(offset <= server->in_length);
+					if (offset == server->in_length) {
+						// we've processed all the messages in the buffer, and there are no more partial ones... so we are done.
+						server->in_length = 0;
+						done = 1;
+					}
+					
+				}
+			}
 		}
 	}
 	
-	
-	// if the data is cluster control stuff (commands), then handle it automatically. 
-	assert(0);
-	
-	// if the data is a reply, then we need to put it in the 'replies' array..
-	assert(0);
+	assert(server->in_length == 0);
 	
 	// if non-blocking, set socket back to blocking mode.
 	if (blocking == OC_NON_BLOCKING) {
@@ -493,16 +492,17 @@ static int send_request(cluster_t *cluster, server_t *server, message_t *msg, in
 	}
 	
 	assert(msg);
-	assert(msg->datalen > 0);
-	assert(msg->data);
-	assert(msg->reply);
+	assert(msg->out.length > 0);
+	assert(msg->out.max >= msg->out.length);
+	assert(msg->out.data);
+	assert(msg->in.result == 0);
 	
 	// send the data
 	datasent = 0;
 	assert(server->handle > 0);
-	while (datasent < msg->datalen && server->handle > 0) {
-		avail = msg->datalen - datasent;
-		sent = send(server->handle, msg->data + datasent, avail, 0);
+	while (datasent < msg->out.length && server->handle > 0) {
+		avail = msg->out.length - datasent;
+		sent = send(server->handle, msg->out.data + datasent, avail, 0);
 		assert(sent != 0);
 		assert(sent <= avail);
 		if (sent < 0) {
@@ -522,11 +522,9 @@ static int send_request(cluster_t *cluster, server_t *server, message_t *msg, in
 	
 	// if we are going to be waiting for the data....
 	if (wait_for_reply == WAIT_FOR_REPLY) {
-		assert(0);
-// 		while (not found) {
-// 			pending_server(cluster, server, OC_BLOCKING);
-// 			check for our reply.
-// 		}
+		while (msg->in.result == 0) {
+ 			pending_server(cluster, server, OC_BLOCKING);
+		}
 	}
 	
 	
@@ -541,22 +539,70 @@ static int send_request(cluster_t *cluster, server_t *server, message_t *msg, in
 // the reply is kept with it.
 //
 // when finished with the message, you need to use message_return() to return it to the pool.
-static message_t * message_new(cluster_t *cluster, int command)
+static message_t * message_new(cluster_t *cluster, short int command)
 {
+	int i;
 	message_t *msg = NULL;
+	message_t *tmp;
+	raw_header_t *header;
 	
 	assert(cluster);
 	assert(command > 0);
 	
 	// get a message from the pool.
-	assert(0);
+	assert((cluster->msg_count == 0 && cluster->messages == NULL) || (cluster->msg_count > 0 && cluster->messages));
+	for (i=0; i<cluster->msg_count && msg == NULL; i++) {
+		
+		assert(msg == NULL);
+		tmp = cluster->messages[i];
+		assert(tmp);
+		assert(tmp->id == i);
+		
+		if (tmp->available == 1) {
+			msg = tmp;
+			msg->available = 0;
+		}
+	}
+
+	if (msg == NULL) {
+		cluster->messages = realloc(cluster->messages, sizeof(message_t *) * (cluster->msg_count + 1));
+		msg = malloc(sizeof(message_t));
+		assert(msg);
+		cluster->messages[cluster->msg_count] = msg;
+		
+		msg->id = cluster->msg_count;
+		msg->available = 0;
+		msg->out.length = 0;
+		msg->out.data = malloc(DEFAULT_BUFFER_SIZE);
+		msg->out.max = DEFAULT_BUFFER_SIZE;
+		
+		msg->in.payload = malloc(DEFAULT_BUFFER_SIZE);
+		msg->in.max = DEFAULT_BUFFER_SIZE;
+		msg->in.result = 0;
+		
+		cluster->msg_count ++;
+	}
 	
-	// get the reply object from the pool in the cluster.
-	assert(0);
+	assert(cluster->msg_count > 0);
+	
+	assert(msg->available == 0);
+	assert(msg->out.length == 0);
+	assert(msg->out.max > 0);
+	assert(msg->out.data);
+	assert(msg->in.result == 0);
 	
 	// build the header, and set the 'command' and the 'userid' field.
-	assert(0);
+	assert(msg->out.max >= sizeof(raw_header_t));
+	header = msg->out.data;
+	header->command = htons(command);
+	header->repcmd = 0;
+	header->userid = htonl(msg->id);
+	header->length = 0;
 	
+	msg->out.command = command;
+	
+	msg->out.length = sizeof(raw_header_t);
+	assert(msg->out.length <= msg->out.max);
 	
 	assert(msg);
 	return(msg);
@@ -609,6 +655,7 @@ int server_connect(cluster_t *cluster, server_t *server)
 			assert(res < 0);
 			server->active = 1;
 
+			printf("sending HELLO(%d)\n", CMD_HELLO);
 			msg = message_new(cluster, CMD_HELLO);
 			
 			// send the request and receive the reply.
@@ -618,9 +665,9 @@ int server_connect(cluster_t *cluster, server_t *server)
 			}
 			else {
 			
-				if (msg->reply->result == 0) {
+				if (msg->in.result != 0) {
 					assert(server->active == 1);
-					assert(res == 0);
+					assert(res < 0);
 					
 					// after a HELLO is given, we should expect a serverlist and a 
 					// hashmask to arrive.  We need to keep processing data until they 
@@ -636,6 +683,8 @@ int server_connect(cluster_t *cluster, server_t *server)
 							// period of time, then we give up and mark the server as not-responding.
 							
 							assert(0);
+							
+							res = 0;
 						}
 						else {
 							assert(res < 0);
@@ -644,7 +693,7 @@ int server_connect(cluster_t *cluster, server_t *server)
 					}
 				}
 				else {
-					res = msg->reply->result;
+					res = -1;
 					server->active = 0;
 					
 					

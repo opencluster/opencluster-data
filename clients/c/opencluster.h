@@ -39,9 +39,6 @@ typedef struct {
 	// initially we will be only doing one request at a time, but eventually 
 	// we will be doing async requests as well. so we will need a list of 
 	// replies.
-	int reply_count;
-	void **replies;
-
 	int msg_count;
 	void **messages;
 	
