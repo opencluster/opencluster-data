@@ -125,11 +125,15 @@ each bucket.   It will need to handle a special case when the buckets are split 
 buckets.   When a server needs to split a bucket, it splits ALL the buckets that it is responsible 
 for.  
 
-For example, On the client side, assume a server has previously sent a hashmask of 0002/000F.  But then the server splits the bucket, and now you get 0002/00FF, 0012/00FF, 0022/00FF ... 00E2/00FF, 00F2/00FF.   When one server increases the mask, the client list will also need to expand ALL the hashes from all the server to match that higher mask.
+For example, On the client side, assume a server has previously sent a hashmask of 0002/000F.  But 
+then the server splits the bucket, and now you get 0002/00FF, 0012/00FF, 0022/00FF ... 00E2/00FF, 
+00F2/00FF.   When one server increases the mask, the client list will also need to expand ALL the 
+hashes from all the server to match that higher mask.
 
 This is fairly easy to do, but a little daunting.
 
-Assuming the mask was previously 000F, and is now 00FF.  This is easy to detect, so before parsing the new hashmasks from that server.
+Assuming the mask was previously 000F, and is now 00FF.  This is easy to detect, so before parsing 
+the new hashmasks from that server.
  - Your existing hash array is 16 entries long (000F).  
  - Create a new array that is 256 entries long (00FF).
  - for each entry in the new array, binary AND that key with the OLD mask.  
@@ -140,3 +144,17 @@ Assuming the mask was previously 000F, and is now 00FF.  This is easy to detect,
  - Continue parsing the new hashmasks from the server which should now fit in the array.
 
 The process is the same when the mask goes from 00FF to 0FFF.
+
+
+
+___________________________________
+
+When any server in the cluster splits its buckets, this causes a cacsading effect where all the 
+servers start splitting their buckets.  This is because, when one server splits, it sends out new 
+HASHMASK messages to all connected clients (including other server nodes).   When a server node 
+receives a hashmask where the mask is larger than its own, then it will split its buckets so that 
+it can balance with that server.   When it splits its own buckets, it will again send out a message 
+to all servers with the new hashmasks.
+
+
+

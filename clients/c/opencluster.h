@@ -48,6 +48,10 @@ typedef struct {
 	unsigned int mask;
 	void **hashmasks;
 	
+	void *payload;
+	int payload_max;
+	int payload_length;
+	
 	
 } cluster_t;
 
@@ -62,7 +66,7 @@ void cluster_disconnect(cluster_t *cluster);
 void cluster_pending(cluster_t *cluster, int blocking);
 
 
-int cluster_setint(cluster_t *cluster, const char *name, const int value);
+int cluster_setint(cluster_t *cluster, const char *name, const int value, const int expires);
 int cluster_getint(cluster_t *cluster, const char *name, const int *value);
 
 

@@ -4,6 +4,8 @@ work items:
 * establish the chunk memory on startup.
 * setup a timeout on read events from the client so that we can drop the connection if no data is
   received within a certain time.
+* when starting up the server, drop (or ignore) client connections until it has finished establishing a stable 
+  connection to the cluster (or assumed it is the only one in the cluster).
 
 
 
@@ -11,5 +13,16 @@ See the issues list:
 https://github.com/hyper/opencluster/issues
 
 * Add logging to a file, preferably on its own thread.
-* Use glibc for b-tree implementation.
 
+* figure out what to do when a cluster member drops out, is assumed dead, and then comes back.  Its buckets are now 
+  invalid.
+
+
+* since most of the client connections will have the same event-timeout, we can increase performance 
+  by setting up a common timout value and use that with the events.  This will be useful if there 
+  are a large number of clients, but will not give much benefit if there are not a lot of 
+  connections.
+
+* When shutting down, if it is not able to offload buckets to another server, it will write them out 
+  to disk, and reload them when started again.  This way, the last node in a cluster can save and 
+  restore the data... potentially offloading it to other nodes when the cluster is fully started up.

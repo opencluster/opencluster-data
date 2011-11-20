@@ -13,7 +13,7 @@ OBJS=event-compat.o
 
 
 ocd: ocd.c $(OBJS) event-compat.h
-	gcc -o $@ ocd.c $(OBJS) $(LIBS) $(ARGS)
+	gcc `pkg-config --cflags --libs glib-2.0` -o $@ ocd.c $(OBJS) $(LIBS) $(ARGS)
 
 
 

@@ -62,6 +62,9 @@ a param that indicates the commandID that it is replying to.
 
 The commands are:
   10    hello        initiate communications.
+  11    capabilities determine if a command is accepted or not, without issuing the command.
+  15    shuttingdown tells the other node that this node is shutting down and not to send any 
+                     buckets to it, or other data.
   20    goodbye      terminate communications cleanly
   30    ping         check that the node is responding.
   50    serverhello  when a server is connecting to another server.
@@ -74,10 +77,13 @@ The commands are:
   200   loadlevel    nodes will let other nodes know how full they are.
   1000  lock         obtain a cluster lock
   1010  unlock       release a cluster lock
-  2000  set          set a key/value, overwriting if it exists.
-  2100  get          get a key/value pair.
-  2300  mapset       set a key/value that is part of a map.
-  2400  mapget       get a key/value that is part of a map.
+  2000  set_int      set an integer (32-bit) key/value, overwriting if it exists.
+  2010  set_long     set an long (64-bit) key/value, overwriting it it exists.
+  2020  set_string   set a variable length string key/value.
+  2100  get_int      get a integer (32-bit) key/value pair.
+  2110  get_long     get a long (32-bit) key/value pair.
+  2120  get_string   get a variable length string key/value.
+  2200  get_type     get the type of the data.
 
 Note: To promote performance on the server, CommandID's less than 1000 do not require access to the
       clustered data.  CommandID's over 1000 internally require pipeline locks and need to be done
@@ -269,6 +275,33 @@ Replies:
 
 
 
+-----------------------------------------------------------------------
+shutting down (15)
+
+This command is used by server to tell other nodes that it is shutting down. 
+
+It does not contain any additional information, so it remains merely a header.
+When an ack(1) is received.
+
+When a node receives this command from another node, it will mark that node as shutting down and 
+will not attempt to move buckets to it, will remove that node as a backup to any other buckets.  It 
+will also mark the node to not try and connect to it for a while.
+
+Type of message:
+  Command
+
+Conditions of use:
+  Sent from server to server.
+
+Payload:
+  none
+
+Replies:
+  ack(1), there is no failure condition that will mean anything.
+
+
+
+
 
 -----------------------------------------------------------------------
 goodbye (20)
@@ -374,7 +407,110 @@ Replies:
 
 
 -----------------------------------------------------------------------
+hashmasks(110)
+
+Sends a list of the hashmasks that this server is responsible for, including backup buckets.
+The mask also acts as a count and you should expect two integers for each mask.  If the mask 
+is 256 (0xFF), then that means that there are 256 hashmask entries.
+
+Type of message:
+  Command
+
+Conditions of use:
+  Sent from server to server.
+  Sent from server to client.
+
+Payload:
+  integer - mask
+  integer - buckets in the following list.
+  row * mask:
+     integer - hashmasks
+     integer - instance count (0 = primary, 1 or more = backup).
+
+Replies:
+  ack(1)
+  tryelsewhere(4), if the server is shutting down, or not accepting client connections.
+
+
 -----------------------------------------------------------------------
+hashmask(120)
+
+Sends an updated hashmask.
+
+Type of message:
+  Command
+
+Conditions of use:
+  Sent from server to server.
+  Sent from server to client.
+
+Payload:
+  integer - mask
+  integer - hash:
+  integer - instance count (0 = primary, 1 or more = backup).
+
+Replies:
+  ack(1)
+  tryelsewhere(4), if the server is shutting down, or not accepting client connections.
+
+
+-----------------------------------------------------------------------
+set_int(2000)
+
+Set an integer (32-bit) key/value, overwriting if it exists.
+
+Payload:
+  integer - map hash (0 for non-map items)
+  integer - key hash
+  integer - expires (in seconds from now, 0 means it never expires)
+  integer - full wait (0 indicates dont wait for sync to backup servers, 1 indicates to wait).
+  string  - name
+  integer - value (to be stored).
+
+Replies:
+  ack(1)
+  tryelsewhere(4), if the server is shutting down, or not accepting client connections.
+
+
+
+-----------------------------------------------------------------------
+  2010  set_long     set an long (64-bit) key/value, overwriting it it exists.
+  2020  set_string   set a variable length string key/value.
+-----------------------------------------------------------------------
+get_int(2100)
+
+get a integer (32-bit) key/value pair.
+
+Payload:
+  integer - map hash (0 for non-map items)
+  integer - key hash
+
+Replies:
+  data_int(2105), return the integer data.
+  nack(), if that data doesnt exist or has been expired.
+  tryelsewhere(4), if the bucket is being served by a different server.
+  
+
+-----------------------------------------------------------------------
+data_int(2105)
+
+The integer result from a key lookup
+
+Reply.
+
+Payload:
+  integer - map hash (0 for non-map items)
+  integer - key hash
+  integer - value
+
+  
+
+-----------------------------------------------------------------------
+  2110  get_long     get a long (32-bit) key/value pair.
+  2120  get_string   get a variable length string key/value.
+  2200  get_type     get the type of the data.
+
+
 -----------------------------------------------------------------------
 -----------------------------------------------------------------------
 -----------------------------------------------------------------------

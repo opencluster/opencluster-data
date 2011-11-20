@@ -3,7 +3,90 @@ opencluster project.
 
 
 
+AUTONOMOUS COMMANDS AND REPLIES
 
+	In order to reduce the potential requirements for thread-level locking, the commands and replies 
+	received by a server node will contain all the information it needs to process that message 
+	without the need to lookup what a previous message requested.  For example, a command for the 
+	loadlevel of a server will produce a reply.  That reply need to include all the information 
+	necessary for the server receiving it to know what needs to be done.
+
+	This also means that in most cases, when a command is sent, we dont need to retain that command.  
+	If there is some kind of integrity/timeout issue, then that trigger is kept on a data level and 
+	not a command/messaging level.
+
+
+
+
+
+
+REDUCING THE HANDLING OF DATA IN MEMORY
+
+	Compared the speed of disks, RAM is blazingly fast.  However, access memory is still massively 
+	slow compared to how quickly processors can use do operations.  For a performance perspective, 
+	it is important that we dont spend a lot of time moving bits of data around in memory.  For a 
+	developer point of view, it is very easy to do.  If you have three peices of data and need to 
+	join them, simply create a space big enough for all three, and then copy them over to it.  
+	However, when talking about nano-scale performance, that can be a killer.  Instead, you need to 
+	think about the process and attempt to avoid transferring data all around the place.
+
+	For example.  On the C client library, one of the most used components is to send a command from 
+	the client, to the server.  This is essentially the core functionality of the library, 
+	therefore, performance enhancements here is key to the over-all performance of the library.
+
+	When sending a command to a server, it is generally composed of a 'header' and a 'payload'.  
+	Because the header includes the size (or length) of the payload, and often the payload size wont 
+	be known until it is generated, instinctively, you would generate the payload, and then build 
+	the header with the information about the payload, often in two very different parts of the 
+	code, the payload generated higher up, and the header generated right before sending the message 
+	over the network.   These seperate payload and header peices then need to be send over the 
+	network to the server.  Here is where the performance problem comes in.  It is simple to just 
+	join the two together... or alternatly, send the header over the network and then the payload.  
+	From a logical point of view, both work just fine.  But from a performance point of view, both 
+	those options are terrible.
+
+	If we join the header and payload together, we get hit with the cost in CPU terms of that 
+	transfer, which means the CPU is generally not doing anything while it is doing that.   
+	Alternatively, sending the header and the payload over the network has a different penalty.  
+	Unless they are sent very quickly together, they would often get sent over the network as two 
+	seperate telegrams.  These get processed on the server as two seperate telegrams (potentially).  
+	Which means that the server received just the header, and spends time parsing it, and realises 
+	that it doesn't have the payload yet, so it puts what its got in a buffer and then waits for 
+	more data.  When the payload arrives it is added to that buffer, and after parsing the header 
+	again it now realises that it has enough, and processes the command.   This process has added 
+	extra processing to the server for no good reason, impacting overall performance.
+
+	We can easily solve this problem by simply keeping the header and payloads together from the 
+	start.  This is not an inconvenient thing to do, and quite simple to implement, its just a way 
+	of thinking about the data in terms of minimising how much it is manipulated.  But using a 
+	single buffer, big enough for the potential payload and the header, and ensuring that you can 
+	modify the header part after the payload has been generated, then you end up passing to the 
+	network layer a single buffer of data that was not copied around memory several times.
+
+
+
+
+ACCESSING DATA IN THE SERVER
+
+	When handling very large amounts of data, it can be challenging to locate the exact data 
+	required, in a short amount of time.
+
+	One of the functionality requirements we established with the project, is the ability to store 
+	data as a single unit, or as part of a larger map.  This allows you to store an item called 
+	"DefaultSomething" and be able to retrieve it.  That is a single item.  Additionally we can 
+	store things as maps.  For example we could have a map called "Products", and within that, have 
+	entries with integer ID's or string names.
+
+	When both kinds of data are presented to the server, they both fall into the same buckets even 
+	though they are different things.  
+
+	So after thinking about this, I came to realise that I can either have a seperate hash tree for 
+	each map, which would allow for a fairly linear lookup on data requests.  However, that can make 
+	it rather tricky when attempting to move one bucket to a different server.  
+
+	So instead, I intend to use one tree for each hashmask.   The items in the tree will be a 
+	structure which includes a pointer to the single item, and a list that points to all the map 
+	items that also have the same hash.
 
 
 
