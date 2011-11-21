@@ -6,7 +6,7 @@ public class hashtest
 
     private static final double ONE_MILLION = (double) 1000000;
 
-	private static final int LIMIT = 50000000;
+	private static final int LIMIT = 1000000;
 
 	private static final int kFNVOffset = (int) 2166136261l;
 	private static final int kFNVPrime = 16777619;
