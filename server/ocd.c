@@ -52,6 +52,8 @@
 #define CMD_HASHMASKS    110
 #define CMD_HASHMASK     120
 #define CMD_SET_INT      2000
+#define CMD_GET_INT      2100
+#define REPLY_DATA_INT   2105
 
 
 #define CLIENT_TIMEOUT_LIMIT	6
@@ -907,8 +909,6 @@ static void push_ping(client_t *client)
 	
 	assert(_payload_length == 0);
 	
-	printf("[%d] PING: client:'%s'\n", (int)(_current_time.tv_sec-_start_time.tv_sec), client->name);
-	
 	send_message(client, NULL, CMD_PING, 0, NULL);
 	assert(_payload_length == 0);
 }
@@ -948,8 +948,6 @@ static void push_hashmasks(client_t *client)
 	assert(_payload_length == 0);
 
 	assert(_mask >= 0);
-	
-	printf("PUSHING HASHMASKS: mask=%08X\n", _mask);
 	
 	// first we set the number of buckets this server contains.
 	payload_int(_mask);
@@ -1095,8 +1093,6 @@ static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 
 	next = payload;
 	
-	if (_verbose > 2) printf("[%d] CMD: serverhello\n", (int)(_current_time.tv_sec-_start_time.tv_sec));
-	
 	// the only parameter is a string indicating the servers connection data.  
 	// Normally an IP and port.
 	raw_name = data_string(&next, &length);
@@ -1183,7 +1179,7 @@ static gint key_compare_fn(gconstpointer a, gconstpointer b)
 	aa = a;
 	bb = b;
 	
-	return(*aa - *bb);
+	return((*aa) - (*bb));
 }
 
 
@@ -1247,7 +1243,7 @@ static int store_value(int map_hash, int key_hash, char *name, int expires, valu
 				item->name = name;
 				item->value = value;
 				
-				g_tree_insert(list->mapstree, &item->key, item);
+				g_tree_insert(list->mapstree, &item->map_key, item);
 			}
 			else {
 				// if item is found, replace the data.
@@ -1276,12 +1272,77 @@ static int store_value(int map_hash, int key_hash, char *name, int expires, valu
 }
 
 
+static int get_value(int map_hash, int key_hash, value_t **value) 
+{
+	int bucket_index;
+	bucket_t *bucket;
+	maplist_t *list;
+	item_t *item;
+	int result = -1;
+
+		// calculate the bucket that this item belongs in.
+	bucket_index = _mask & key_hash;
+	assert(bucket_index >= 0);
+	assert(bucket_index < _mask);
+	bucket = _buckets[bucket_index];
+
+	// if we have a record for this bucket, then we are either a primary or a backup for it.
+	if (bucket) {
+
+		// make sure that this server is 'primary' for this bucket.
+		if (bucket->level != 0) {
+			// we need to reply with an indication of which server is actually responsible for this bucket.
+			assert(result < 0);
+			assert(0);
+		}
+		else {
+			
+			// search the btree in the bucket for this key.
+			assert(bucket->tree);
+			
+			list = g_tree_lookup(bucket->tree, &key_hash);
+			if (list == NULL) {
+				assert(result < 0);
+			}
+			else {
+			
+				// search the list of maps for a match.
+				assert(list->mapstree);
+				item = g_tree_lookup(list->mapstree, &map_hash);
+				if (item == NULL) {
+					assert(result < 0);
+				}
+				else {
+					// item is found, return with the data.
+					assert(item->name);
+					assert(item->value);
+					
+					if (item->expires > 0 && item->expires < _current_time.tv_sec) {
+						// item has expired.   We need to remove it from the map list.
+						assert(result < 0);
+						assert(0);
+					}
+					else {
+						*value = item->value;
+
+						assert(result < 0);
+						result = 0;
+					}
+				}
+			}
+		}
+	}
+	
+	return(result);
+}
+
+
+
 
 
 // Set a value into the hash storage.
 static void cmd_set_int(client_t *client, header_t *header, char *payload)
 {
-	int length;
 	char *next;
 	int map_hash;
 	int key_hash;
@@ -1317,7 +1378,7 @@ static void cmd_set_int(client_t *client, header_t *header, char *payload)
 	memcpy(name, str, name_len);
 	name[name_len] = 0;
 	
-	if (_verbose > 2) printf("[%d] CMD: set (integer): '%s'=%d\n\n", (int)(_current_time.tv_sec-_start_time.tv_sec), name, value->data.i);
+	if (_verbose > 2) printf("[%d] CMD: set (integer): [%d/%d]'%s'=%d\n\n", (int)(_current_time.tv_sec-_start_time.tv_sec), map_hash, key_hash, name, value->data.i);
 
 	// eventually we will add the ability to wait until the data has been competely distributed 
 	// before returning an ack.
@@ -1334,13 +1395,72 @@ static void cmd_set_int(client_t *client, header_t *header, char *payload)
 	// send the ACK reply.
 	if (result == 0) {
 		send_message(client, header, REPLY_ACK, 0, NULL);
+		_payload_length = 0;
 	}
 	else {
 		assert(0);
 	}
-
-
 }
+
+
+// Get a value from storage.
+static void cmd_get_int(client_t *client, header_t *header, char *payload)
+{
+	char *next;
+	int map_hash;
+	int key_hash;
+	value_t *value;
+	int result;
+	
+	assert(client);
+	assert(header);
+	assert(payload);
+
+	next = payload;
+	
+	map_hash = data_int(&next);
+	key_hash = data_int(&next);
+	
+	
+	if (_verbose > 2) printf("[%d] CMD: get (integer)\n\n", (int)(_current_time.tv_sec-_start_time.tv_sec));
+
+
+	// store the value into the trees.  If a value already exists, it will get released and this one 
+	// will replace it, so control of this value is given to the tree structure.
+	// NOTE: value is controlled by the tree after this function call.
+	// NOTE: name is controlled by the tree after this function call.
+	value = NULL;
+	result = get_value(map_hash, key_hash, &value);
+	
+	// send the ACK reply.
+	if (result == 0) {
+		assert(value);
+		
+		if (value->type != VALUE_INT) {
+			// need to indicate stored value is a different type.
+			assert(0);
+		}
+		else {
+		
+			// build the reply.
+			assert(_payload);
+			assert(_payload_length == 0);
+			assert(_payload_max > 0);
+			
+			payload_int(map_hash);
+			payload_int(key_hash);
+			payload_int(value->data.i);
+		}
+		
+		assert(_payload_length > 0);
+		send_message(client, header, REPLY_DATA_INT, _payload_length, _payload);
+		_payload_length = 0;
+	}
+	else {
+		assert(0);
+	}
+}
+
 
 
 static void process_ack(client_t *client, header_t *header)
@@ -1412,8 +1532,8 @@ static int process_data(client_t *client)
 			header.userid = ntohl(raw->userid);
 			header.length = ntohl(raw->length);
 			
-			if (_verbose > 1) {
-				printf("[%d] New telegram: Command=%d, repcmd=%d, userid=%d, length=%d, buffer_length=%d\n", (_current_time.tv_sec-_start_time.tv_sec), header.command, header.repcmd, header.userid, header.length, client->in.length);
+			if (_verbose > 4) {
+				printf("[%d] New telegram: Command=%d, repcmd=%d, userid=%d, length=%d, buffer_length=%d\n", (int)(_current_time.tv_sec-_start_time.tv_sec), header.command, header.repcmd, header.userid, header.length, client->in.length);
 			}
 			
 			if ((client->in.length-HEADER_SIZE) < header.length) {
@@ -1435,7 +1555,7 @@ static int process_data(client_t *client)
 						default:
 							if (_verbose > 1) {
 								printf("[%d] Unknown reply: Reply=%d, Command=%d, userid=%d, length=%d\n", 
-									(_current_time.tv_sec-_start_time.tv_sec), header.repcmd, header.command, header.userid, header.length);
+									(int)(_current_time.tv_sec-_start_time.tv_sec), header.repcmd, header.command, header.userid, header.length);
 							}
 							break;
 					}
@@ -1448,11 +1568,12 @@ static int process_data(client_t *client)
 						case CMD_SERVERHELLO: 	cmd_serverhello(client, &header, ptr); 	break;
 						case CMD_PING: 	        cmd_ping(client, &header); 				break;
 						case CMD_SET_INT: 		cmd_set_int(client, &header, ptr); 		break;
+						case CMD_GET_INT: 		cmd_get_int(client, &header, ptr); 		break;
 						default:
 							// got an invalid command, so we need to reply with an 'unknown' reply.
 							// since we have the raw command still in our buffer, we can use that 
 							// without having to build a normal reply.
-							if (_verbose > 1) { printf("[%d] Unknown command received: Command=%d, userid=%d, length=%d\n", (_current_time.tv_sec-_start_time.tv_sec), header.command, header.userid, header.length); }
+							if (_verbose > 1) { printf("[%d] Unknown command received: Command=%d, userid=%d, length=%d\n", (int)(_current_time.tv_sec-_start_time.tv_sec), header.command, header.userid, header.length); }
 							send_message(client, &header, REPLY_UNKNOWN, 0, NULL);
 							break;
 					}
@@ -1505,7 +1626,7 @@ static void read_handler(int fd, short int flags, void *arg)
 		
 			// we timed out, so we should kill the client.
 			if (_verbose > 2) {
-				printf("[%d] client timed out. handle=%d\n", (_current_time.tv_sec-_start_time.tv_sec), fd);
+				printf("[%d] client timed out. handle=%d\n", (int)(_current_time.tv_sec-_start_time.tv_sec), fd);
 			}
 			
 			// because the client has timed out, we need to clear out any data that we currently have for it.
@@ -1772,12 +1893,12 @@ static void client_connect_handler(int fd, short int flags, void *arg)
 	assert(client->wait_event == NULL);
 	assert(client->name);
 	
-	if (_verbose) printf("[%d] CONNECT: handle=%d\n", (_current_time.tv_sec-_start_time.tv_sec), fd);
+	if (_verbose) printf("[%d] CONNECT: handle=%d\n", (int)(_current_time.tv_sec-_start_time.tv_sec), fd);
 
 	if (flags & EV_TIMEOUT) {
 		// timeout on the connect.  Need to handle that somehow.
 		
-		if (_verbose) printf("[%d] Timeout connecting to: %s\n", (_current_time.tv_sec-_start_time.tv_sec), client->name);
+		if (_verbose) printf("[%d] Timeout connecting to: %s\n", (int)(_current_time.tv_sec-_start_time.tv_sec), client->name);
 		
 		assert(0);
 	}

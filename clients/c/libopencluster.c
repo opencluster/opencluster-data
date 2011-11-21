@@ -45,7 +45,9 @@ typedef struct {
 } raw_header_t;
 #pragma pack(pop)
 
-
+// The following macro can be used to help find situations where a peice of memory is free'd twice.  
+// Useful to track down some difficult memory corruption bugs.
+// #define free(x) printf("free: %08X, line:%d\n", (unsigned int)(x), __LINE__); free(x); x=NULL;
 
 
 typedef struct {
@@ -70,6 +72,7 @@ typedef struct {
 		int length;
 		int max;
 		void *payload;
+		int offset;		// used when reading out the data from the message.
 	} in;
 
 } message_t;
@@ -164,6 +167,7 @@ void cluster_free(cluster_t *cluster)
 {
 	message_t *msg;
 	int i;
+	hashmask_t **hashmasks;
 	
 	assert(cluster);
 
@@ -180,29 +184,72 @@ void cluster_free(cluster_t *cluster)
 	assert(cluster->server_count == 0);
 
 
-	// we may have messages in the message-pool, so we need to make sure they have all been processed nd then clean them all out.
-	assert((cluster->messages && cluster->msg_count > 0) || (cluster->messages == NULL && cluster->msg_count == 0));
-	if (cluster->messages) {
-		while (cluster->msg_count > 0) {
-			msg = cluster->messages[cluster->msg_count];
-			assert(msg);
-				
-			assert(0);
+	// we may have messages in the message-pool, so we need to make sure they have all been 
+	// processed and then clean them all out.
+	while (cluster->msg_count > 0) {
+		cluster->msg_count --;
+		msg = cluster->messages[cluster->msg_count];
+		assert(msg);
+		
+		assert(msg->available > 0);
+		assert(msg->id == cluster->msg_count);
 
-			cluster->msg_count --;
-		}
-		free(cluster->messages);
-		cluster->messages = NULL;
+		assert(msg->out.data);
+		assert(msg->out.length == 0);
+		assert(msg->out.max > 0);
+		assert(msg->out.command == 0);
+		
+		free(msg->out.data);
+		msg->out.data = NULL;
+		msg->out.max = 0;
+
+		assert(msg->in.result == 0);
+		assert(msg->in.length == 0);
+		assert(msg->in.max > 0);
+		assert(msg->in.payload);
+		assert(msg->in.offset == 0);
+		
+		free(msg->in.payload);
+		msg->in.payload = NULL;
+		msg->in.max = 0;
+		
+		free(msg);
 	}
+	free(cluster->messages);
+	cluster->messages = NULL;
 
 	// the hashmasks array should be empty at this point, because freeing each server should have 
 	// removed it from this list already.
 	assert((cluster->mask == 0 && cluster->hashmasks == NULL) || (cluster->mask > 0 && cluster->hashmasks));
-	for (i=0; i<cluster->mask; i++) {
-		assert(cluster->hashmasks[i] == NULL);
+	if (cluster->hashmasks) {
+		hashmasks = (hashmask_t **) cluster->hashmasks;
+		for (i=0; i <= cluster->mask; i++) {
+			if (hashmasks[i]) {
+				assert(hashmasks[i]->server == NULL);
+				assert(hashmasks[i]->backup == NULL);
+				if (hashmasks[i]->host) {
+					assert(hashmasks[i] != hashmasks[i]->host);
+// 					free(hashmasks[i]->host);
+					hashmasks[i]->host = NULL;
+				}
+				assert(hashmasks[i]);
+				free(hashmasks[i]);
+				hashmasks[i] = NULL;
+			}
+		}
+		free(cluster->hashmasks);
+		cluster->hashmasks = NULL;
+		cluster->mask = 0;
 	}
-	free(cluster->hashmasks);
-	cluster->hashmasks = NULL;
+	
+
+	if (cluster->payload) {
+		assert(cluster->payload_max > 0);
+		assert(cluster->payload_length == 0);
+		free(cluster->payload);
+		cluster->payload = NULL;
+		cluster->payload_max = 0;
+	}
 	
 	free(cluster);
 }
@@ -557,7 +604,7 @@ static void split_mask(cluster_t *cluster, int mask)
 	assert(cluster);
 	assert(mask > cluster->mask);
 	
-	printf("Splitting bucket list: oldmask=%08X, newmask=%08X\n", cluster->mask, mask);
+// 	printf("Splitting bucket list: oldmask=%08X, newmask=%08X\n", cluster->mask, mask);
 	
 	oldlist = (hashmask_t **) cluster->hashmasks;
 	cluster->hashmasks = NULL;
@@ -573,9 +620,10 @@ static void split_mask(cluster_t *cluster, int mask)
 		oldlist[0]->host = NULL;
 		oldlist[0]->port =0;
 		oldlist[0]->server = NULL;
+		oldlist[0]->backup = NULL;
 	}
 	
-	newlist = malloc(sizeof(hashmask_t *) * mask);
+	newlist = malloc(sizeof(hashmask_t *) * (mask+1));
 	assert(newlist);
 	for (i=0; i<=mask; i++) {
 		
@@ -591,8 +639,9 @@ static void split_mask(cluster_t *cluster, int mask)
 			newlist[index]->host = NULL;
 		}
 		newlist[i]->server = oldlist[index]->server;
+		newlist[i]->backup = oldlist[index]->backup;
 		
-		printf("New Mask: %08X/%08X --> '%s:%d'\n", mask, i, newlist[i]->host, newlist[i]->port);
+// 		printf("New Mask: %08X/%08X --> '%s:%d'\n", mask, i, newlist[i]->host, newlist[i]->port);
 	}
 
 	
@@ -606,6 +655,7 @@ static void split_mask(cluster_t *cluster, int mask)
 		free(oldlist[i]);
 	}
 	free(oldlist);
+	oldlist = NULL;
 	
 	cluster->hashmasks = (void *) newlist;
 	cluster->mask = mask;
@@ -664,7 +714,9 @@ static void process_hashmasks(cluster_t *cluster, server_t *server, int userid, 
 				if (hashmasks[hash]->server != server) {
 					if(hashmasks[hash]->host) {
 						free(hashmasks[hash]->host);
+						hashmasks[hash]->host = NULL;
 					}
+					assert(server->host);
 					hashmasks[hash]->host = strdup(server->host);
 					hashmasks[hash]->port = server->port;
 					hashmasks[hash]->server = server;
@@ -744,7 +796,7 @@ static void pending_server(cluster_t *cluster, server_t *server, int blocking)
 		assert(avail > 0);
 		assert(offset >= 0);
 		
-		printf("recv: max=%d\n", avail);
+// 		printf("recv: max=%d\n", avail);
 
 		
 		sent = recv(server->handle, server->in_buffer + offset + server->in_length, avail, 0);
@@ -757,7 +809,7 @@ static void pending_server(cluster_t *cluster, server_t *server, int blocking)
 			assert(sent <= avail);
 			server->in_length += sent;
 
-			printf("recv: got=%d\n", sent);
+// 			printf("recv: got=%d\n", sent);
 			
 			inner = 0;
 			while (inner == 0) {
@@ -813,14 +865,14 @@ static void pending_server(cluster_t *cluster, server_t *server, int blocking)
 							memcpy(msg->in.payload, ptr, length);
 							msg->in.result = ntohs(header->command);
 							
-							printf("Received reply (%d) from command (%d), length=%d\n", msg->in.result, repcmd, length);
+// 							printf("Received reply (%d) from command (%d), length=%d\n", msg->in.result, repcmd, length);
 
 						}
 						else {
 							// it is not a reply, it is a command.  We need to process that as well.
 					
 							command = ntohs(header->command);
-							printf("Command Received: %d\n", command); 
+// 							printf("Command Received: %d\n", command); 
 							switch (command) {
 		
 								case CMD_SERVERLIST: process_serverlist(cluster, server, userid, length, ptr); break;
@@ -909,7 +961,7 @@ static int send_request(cluster_t *cluster, server_t *server, message_t *msg, in
 		}
 	}
 	
-	printf("sent: %d\n", datasent);
+// 	printf("sent: %d\n", datasent);
 	
 	if (status == 0) {
 		// we lost connection during the send.  make sure we will return a NULL.
@@ -920,7 +972,7 @@ static int send_request(cluster_t *cluster, server_t *server, message_t *msg, in
 	// if we are going to be waiting for the data....
 	if (wait_for_reply == WAIT_FOR_REPLY) {
 		while (msg->in.result == 0  && server->handle > 0) {
-			printf("waiting for reply\n");
+// 			printf("waiting for reply\n");
  			pending_server(cluster, server, OC_BLOCKING);
 		}
 	}
@@ -977,6 +1029,7 @@ static message_t * message_new(cluster_t *cluster, short int command)
 		msg->in.payload = malloc(DEFAULT_BUFFER_SIZE);
 		msg->in.max = DEFAULT_BUFFER_SIZE;
 		msg->in.result = 0;
+		msg->in.offset = 0;
 		
 		cluster->msg_count ++;
 	}
@@ -1019,6 +1072,7 @@ static void message_return(message_t *msg)
 
 	msg->in.result = 0;
 	msg->in.length = 0;
+	msg->in.offset = 0;
 		
 	// mark the message as ready to use.
 	msg->available = 1;
@@ -1054,7 +1108,7 @@ int server_connect(cluster_t *cluster, server_t *server)
 		else {
 			assert(res < 0);
 
-			printf("sending HELLO(%d)\n", CMD_HELLO);
+// 			printf("sending HELLO(%d)\n", CMD_HELLO);
 			msg = message_new(cluster, CMD_HELLO);
 			
 			// send the request and receive the reply.
@@ -1075,7 +1129,7 @@ int server_connect(cluster_t *cluster, server_t *server)
 					// NOTE: Its possible that this has already been received.  This is just to 
 					//       catch if the server is busy and a delay occurs from it.
 					while (server->active == 0 && server->handle > 0) {
-						printf("Waiting for Hashmasks from server\n");
+// 						printf("Waiting for Hashmasks from server\n");
 						pending_server(cluster, server, OC_BLOCKING);
 		
 						assert(server->active > 0);
@@ -1168,16 +1222,30 @@ int cluster_connect(cluster_t *cluster)
 
 void server_disconnect(cluster_t *cluster, server_t *server)
 {
+	int i;
+	hashmask_t *hashmask;
+	
 	assert(cluster);
 	assert(server);
 	
-	
-	// make sure there are no outstanding requests to be retrieved.
-	assert(0);
+	// remove the server from the hashmasks list.
+	assert(cluster->hashmasks);
+	for (i=0; i<= cluster->mask; i++) {
+		hashmask = cluster->hashmasks[i];
+		assert(hashmask);
+		
+		if (hashmask->server == server) {
+			hashmask->server = NULL;
+		}
+		if (hashmask->backup == server) {
+			hashmask->backup = NULL;
+		}
+	}
 	
 	// close the connection.
-	assert(0);
-	
+	assert(server->handle > 0);
+	close(server->handle);
+	server->handle = -1;
 }
 
 void cluster_disconnect(cluster_t *cluster)
@@ -1322,6 +1390,7 @@ int cluster_setint(cluster_t *cluster, const char *name, const int value, const 
 	// get the server object from the index.
 	assert(cluster->hashmasks);
 	hashmask = cluster->hashmasks[mask_index];
+	assert(hashmask);
 	server = hashmask->server;
 	
 	// make sure server is connected.  if not, then connect and wait for the initial handshaking.
@@ -1356,11 +1425,27 @@ int cluster_setint(cluster_t *cluster, const char *name, const int value, const 
 	return(res);
 }
 
-int cluster_getint(cluster_t *cluster, const char *name, const int *value)
+static void msg_getint(message_t *msg, int *value)
+{
+	int *ptr;
+	
+	assert(msg);
+	assert(value);
+	assert(msg->in.offset >= 0);
+	
+	ptr = ((void*)(msg->in.payload) + msg->in.offset);
+	*value = ntohl(*ptr);
+
+	msg->in.offset += sizeof(int);
+}
+
+int cluster_getint(cluster_t *cluster, const char *name, int *value)
 {
 	int res = 0;
 	int name_hash;
 	int mask_index;
+	int map_hash;
+	int key_hash;
 	server_t *server;
 	hashmask_t *hashmask;
 	message_t *msg;
@@ -1379,6 +1464,7 @@ int cluster_getint(cluster_t *cluster, const char *name, const int *value)
 	// get the server object from the index.
 	assert(cluster->hashmasks);
 	hashmask = cluster->hashmasks[mask_index];
+	assert(hashmask);
 	server = hashmask->server;
 	
 	// make sure server is connected.  if not, then connect and wait for the initial handshaking.
@@ -1401,11 +1487,16 @@ int cluster_getint(cluster_t *cluster, const char *name, const int *value)
 	}
 
 	// now we've got a reply, we free the message, because there is no 
+// 	printf("msg result == %d\n", msg->in.result);
 	assert(msg->in.result == CMD_DATA_INT);
+
+	msg_getint(msg, &map_hash);
+	msg_getint(msg, &key_hash);
+	msg_getint(msg, value);
+
+// printf("---- map_hash:%d, key_hash:%d, name_hash:%d, value:%d\n", map_hash, key_hash, name_hash, *value);
 	
-#error "Need to pull the data out of the reply."
-	
-	
+	assert(key_hash == name_hash);
 	
 	message_return(msg);
 	

@@ -67,7 +67,7 @@ void cluster_pending(cluster_t *cluster, int blocking);
 
 
 int cluster_setint(cluster_t *cluster, const char *name, const int value, const int expires);
-int cluster_getint(cluster_t *cluster, const char *name, const int *value);
+int cluster_getint(cluster_t *cluster, const char *name, int *value);
 
 
 
