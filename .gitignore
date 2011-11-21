@@ -8,3 +8,6 @@ clients/c/libopencluster.so.1.0.1
 gamut/c/gamut
 misc/hash-test
 misc/hashtest.class
+docs/.*.kate-swp
+misc/btree
+
