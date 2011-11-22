@@ -1,0 +1,103 @@
+OpenCluster shutdown to disk.
+
+There may be a time when the cluster needs to be stopped, but the data needs to be saved and restored when the cluster is started 
+again.
+
+There may be many reasons for this stoppage:
+
+  1.  A planned network outage.
+  2.  Moving the entire cluster to a different data center, and no network links between.
+  3.  Incompatible software updates on the server (meaning all need to be updated at the same time)
+
+In MOST cases, stopping everything and storing to disk would not be needed, because the dynamic 
+nature of the cluster means that it can move around by doing orderly shutdowns and starts of the 
+node members.  So as long as data can be moved around the network, it should be ok.
+
+Additionally, because of the current way to server works, if you need to update one server in the 
+cluster, you can make sure there is enough memory on the other nodes and then just shutdown the 
+other.
+
+If you dont have enough physical memory on a box, you can use swap-space (virtual memory).   
+OpenCluster would be slower than normal when it has to use swap space, but it wont care, and will 
+happily continue to hold the data.
+
+
+That being said, if you really must shutdown the entire cluster, and not want to lose the data in 
+it, simply shutdown ALL the nodes (safely) except for one.   The data will migrate to that last 
+node.  Note that if the cluster data is large, you may have to make sure there is enough swap space 
+setup on that machine.   It is very easy to add swap-files to the main swap-space on a linux server.  
+When everything is in sync, and all the other nodes are shutdown, then shutdown the last one.   If 
+it was setup correctly in the first place, when a node is being shutdown, and it recognises that it 
+is the last node in the cluster, it will write out the data to a number of files.  These files can 
+then be used to restore the data in the cluster.
+
+
+
+ALTERNATIVELY
+
+We can provide a special version of the server.  It communicates with the rest of the cluster in the 
+same way, except for the following:
+
+  1.  It will ignore connections from regular clients, and will only communicate with server nodes.
+  2.  When asked for its loadlevel, it will always respond with zero's, indicating that it should 
+      receive some buckets.
+  3.  It will never ask other server nodes for their load levels.
+  4.  It will not store the data in memory... in fact, it will have a very small memory footprint.
+  5.  It will store the bucket data it receives in files on disk.
+  6.  When it has ALL the buckets in the cluster (either primary or backup), 
+
+Once the STORAGE server is online, the server nodes can be shutdown.  It is probably best to shut 
+them down one at a time.  The STORAGE server will not force the nodes to give it the buckets, but 
+because it is lying about loadlevels, then it would end up with more buckets than most other nodes.   
+As nodes are shutdown, the preasure to spread them will cause most of them to end up on the storage 
+server.   Once the cluster is down to two nodes... a single real node, and a STORAGE node, the 
+storage node will have all the data, and the last real one can shutdown, passing its primary buckets 
+to the STORAGE node.   In this scenario, the last server node still ends up with a copy of all the 
+data in the cluster.   So this is not enough.
+
+TO combat this problem, the storage server actually mimics two nodes.  It listens on two different 
+ports, and therefore it can have both the primary, and the backup copies of the buckets.  Of course, 
+the backup buckets will be discarded quietly.
+
+Question: How can we get the real nodes to only transfer primary buckets to the STORAGE node without 
+          wasting time by sending both backup and primary buckets to the storage node?   Not sure.  
+          I guess, if the STORAGE node already has one of them, it can respond to the other node to 
+          say that it already has a copy of that bucket, then when the real node is stopping, it can 
+          just promote one of the backup copies.  Yeah, that should work quite well.  
+
+
+The advantage of starting up a special node that is able to backup everything, is you dont have to 
+setup existing nodes to be able to do it.   It also means that the last real node in teh cluster 
+doesn't have to do a lot of time-consuming swapspace swapping.
+
+Starting up the cluster would be easy, as you do it as normal, but inject the data (that has not 
+expired) back in to the cluster.  This data would be injected quite rapidly, but should probably be 
+done before client services are started up as there might be conflicts.   The cluster might also be 
+load-balancing at the same time as the injection is happening.
+
+
+ALTERNATE #2
+
+Another alternative is to have a LOGGING node that attaches itself to the real nodes and requests a 
+special mode where any 'update' on the server will be sent to the logging node.   The functionality 
+for this would have to be built in to the server code, becuase the LOGGING node wouldn't behave like 
+a real node, and it cannot actually service real buckets.   In fact, the logging node could care 
+less about buckets, it would just store map/hash/expires/value data continuously appended to a 
+series of log files.   If a cluster needs to start up using those log files, you could start up a 
+regular cluster but inject the data from the logfiles into it.
+
+Another, seperate tool can take those logged files, and parse them to strip out entries that have 
+been over-written, to reduce the file size, especially when restoring.   If you have a bunch of keys 
+that are constantly being written to, then each update would write a record to the file.  The 
+'compress' tool would take those duplicate entries and just leave the last one.  When all the files 
+have been processed, then the final size of them would end up being about the size of the full 
+cluster.
+
+Since the number of updates over the cluster might end up outpacing the ability to log the output to 
+the file, the logger service would have to be smart in buffering the incoming data.  It can do this 
+by using events on the socket connections to read in data, and store them immediately into a buffer.  
+This buffer can be read in a different thread and written out to disk.  That way, the socket data 
+should not be impacted too much.  
+
+
+

@@ -11,7 +11,7 @@ balance the data (and presumably the load) amongst the different nodes.
 
          Technically, the specifications of the server would not be that fantastic anyway, so a 
          cluster of various machines from low-end to high-end should assume that the lowest spec 
-         machine in the minimum required for the amount of functionality required.
+         machine is the minimum required for the amount of functionality required.
 
 
 When the first node in the cluster starts up, it becomes responsible for all the buckets, and there 
@@ -76,7 +76,7 @@ results in both servers having a copy of all the buckets in the cluster.
 
       NOTE: although this diagram shows a pattern between primary 
             and backup balancing, the server would actually 
-            transfer the buckets in random order.
+            transfer the buckets in semi-random order.
 
 Also note that, if the backup buckets are kept in sync with the primary buckets, then a server can 
 go offline quickly and orderly by simply telling the servers containing the backup buckets, that 
@@ -85,7 +85,7 @@ they are now primary.
 The way the bucket migration works, is that when a node joins another server, it establishes an 
 event on that server that fires every so often.  
 
-So lets go back to the state of thing when Server B joined the cluster that was previously only the 
+So lets go back to the state of things when Server B joined the cluster that was previously only the 
 single Server A.
 
 
@@ -114,8 +114,8 @@ single Server A.
 At this point, both Server A and Server B would have a LoadBalancing event fire every so often 
 (more often when the cluster is unbalanced, less often when things are balanced).  This event will 
 query the other node, saying "How much load do you have?" and the node will respond with something 
-like "12 primary buckets, 4 secondary buckets".  The node will compare that reply with what it 
-currently has and will decide if it wants to push a bucket to the other server or not.
+like "12 primary buckets, 4 secondary buckets" (as an example).  The node will compare that reply 
+with what it currently has and will decide if it wants to push a bucket to the other server or not.
 
   NOTE: New nodes are not able to request buckets.  They just receive them when other nodes 
         determine that it should be given one.  This could be a result of balancing, or it could be 
@@ -126,8 +126,15 @@ back that it is not currently holding any primary or secondary buckets.  Server 
 how many Primary and Secondary buckets it has, determins that it has more primaries than 
 secondaries, and so decides to send a primary to the other server.
 
-When deciding to send a bucket, it first decides whether to send a primary or a backup, but then it 
-will choose the bucket randomly among that category.
+  NOTE: If a node receives a request to take over a bucket, it should do its best to accomodate.  It 
+        may be that the other server is shutting down and is offloading buckets.  So the receiving 
+        server should always accept new buckets, UNLESS it is already in the process of receiving 
+        another bucket from some other node.  A node can only receive one bucket at a time.
+
+When deciding to send a bucket, it first looks for any primary buckets that do not have backup 
+buckets on other nodes.  It decides whether to demote or promote on the other server based on how 
+many primary and secondary buckets that other server already has. Then it will choose the first 
+bucket randomly among that category.
 
 Server A sends a message to B saying "I'm going to be giving you Bucket #16, be prepared for it".  
 At this point Server B would normally respond with an "OK, start sending", but if it is already in 
@@ -145,8 +152,8 @@ for that bucket being transferred.
         and remove them as it sync's them.  When updates occur, that item is just re-added to the 
         list.
 
-While the sync is going on, it will not trigger any more LoadBalancing events.  In other words, it 
-will only be attempting to balance one bucket at a time.
+While the sync is going on, it will not trigger any more LoadBalancing events (or, if it does, they 
+will be ignored).  In other words, it will only be attempting to balance one bucket at a time.
 
 When Server A has managed to send ALL the items belonging to Bucket #16 to Server B, the following 
 things happen:
@@ -304,9 +311,14 @@ The first server to fire a LoadBalancing event against Server C will see that it
 than the other, and will start sending buckets to it.   Remember that only one Bucket can be 
 transferred to the node at a time.
 
-One extra thing to note here, is that by default the servers will be setup to only keep one backup of each bucket.  So if a primary bucket is being migrated to Server C, then the current backup node will be told that it can release the bucket.
+One extra thing to note here, is that by default the servers will be setup to only keep one backup 
+of each bucket.  So if a primary bucket is being migrated to Server C, then the current backup node 
+will be told that it can release the bucket.
 
-We can use Bucket #1 as an example.  Here we have Server A being the backup, and B being the primary.  If B is wanting to move that bucket to Server C, it would start the process as in the previous examples.   It will start sending the data to C, and when finished, C will become the primary, B will become the backup, and A will be told that it can drop the bucket entirely.
+We can use Bucket #1 as an example.  Here we have Server A being the backup, and B being the 
+primary.  If B is wanting to move that bucket to Server C, it would start the process as in the 
+previous examples.   It will start sending the data to C, and when finished, C will become the 
+primary, B will become the backup, and A will be told that it can drop the bucket entirely.
 
 So we end up with:
 
@@ -337,6 +349,34 @@ to C, then it is still ok, because B will stop being a backup for some of the bu
 should still end up being rather balanced.
 
 This same scenario will scale up to many more nodes.
+
+While migrating the buckets over the three servers, we would eventually end up with something 
+similar to this incomplete migration (it is incomplete beacuse it is still unbalanced, but would 
+eventually balance out):
+
+
+  +--------------------------+  +--------------------------+  +--------------------------+
+  |                          |  |                          |  |                          |
+  |  Server A                |  |  Server B                |  |  Server C                |
+  |    Bucket #1  -          |  |    Bucket #1  - backup   |  |    Bucket #1  - primary  |
+  |    Bucket #2  - primary  |  |    Bucket #2  - backup   |  |    Bucket #2  -          |
+  |    Bucket #3  -          |  |    Bucket #3  - primary  |  |    Bucket #3  - backup   |
+  |    Bucket #4  - primary  |  |    Bucket #4  - backup   |  |    Bucket #4  -          |
+  |    Bucket #5  -          |  |    Bucket #5  - backup   |  |    Bucket #5  - primary  |
+  |    Bucket #6  -          |  |    Bucket #6  - primary  |  |    Bucket #6  - backup   |
+  |    Bucket #7  - primary  |  |    Bucket #7  - backup   |  |    Bucket #7  -          |
+  |    Bucket #8  - backup   |  |    Bucket #8  -          |  |    Bucket #8  - primary  |
+  |    Bucket #9  - backup   |  |    Bucket #9  -          |  |    Bucket #9  - primary  |
+  |    Bucket #10 - backup   |  |    Bucket #10 - primary  |  |    Bucket #10 -          |
+  |    Bucket #11 - primary  |  |    Bucket #11 - backup   |  |    Bucket #11 -          |
+  |    Bucket #12 - backup   |  |    Bucket #12 - primary  |  |    Bucket #12 -          |
+  |    Bucket #13 - primary  |  |    Bucket #13 -          |  |    Bucket #13 - backup   |
+  |    Bucket #14 - backup   |  |    Bucket #14 - primary  |  |    Bucket #14 -          |
+  |    Bucket #15 - primary  |  |    Bucket #15 - backup   |  |    Bucket #15 -          |
+  |    Bucket #16 -          |  |    Bucket #16 - primary  |  |    Bucket #16 - backup   |
+  |                          |  |                          |  |                          |
+  +--------------------------+  +--------------------------+  +--------------------------+
+
 
 This situation doesn't mean that there can be only a maximum of 16 nodes, because when a server gets 
 to the point where it has only 4 buckets, it will split those 4 buckets into smaller buckets.  
@@ -416,6 +456,21 @@ the bucket to primary.  It will also start looking for other servers to transfer
 If the node that died comes back, with intact buckets, it will find that those buckets already exist 
 on the cluster, and it will need to delete them.  The tricky part is determining which server is 
 correct, and which server is not.   
+
+
+
+PROBLEMS NOT YET DEALT WITH.
+
+  1.  What happens if a server goes offline suddenly, and it was the only node in the cluster 
+      holding a certain bucket (because the initial sync was still occuring).
+
+  2.  What happens if two nodes go down at the same time (maybe a data center failure), and those 
+      two servers were the only ones on the cluster responsible for a couple of buckets.  What will 
+      trigger the other nodes to re-create those missing buckets?
+
+  3.  When a network error happens and neither node is able to determine which one is responsible 
+      for a bucket, and has had local clients updating both of them.  They both have new data.  How 
+      can those broken buckets be merged?
 
 
 

@@ -4,9 +4,13 @@ Splitting Buckets.
 NOTE ABOUT THIS DOCUMENT.
   For ease of describing the bucket process, we start with 16 buckets (a mask of 000F).  
   However, the real system normally starts with 256 buckets (a mask of 00FF).  The process is the 
-  same, and it is a bit easier to explain the move from 000F to 000FF.
+  same, but it is a bit easier to explain the move from 000F to 000FF.
 
-
+NOTE ABOUT HASHES.
+  When this document was originally written, we were thinking about using 64-bit or 128-bit hashes.  
+  However, after discussing it, we decided that a 32-bit hash was a far more useful hash to 
+  generate, and should not conflict with the kind of data we expect OpenCluster to be used with.
+  In the future if larger hash sizes are required, then that functionality can be supported.
 
 A bucket is a group of clustered items that a node is responsible for.
 
