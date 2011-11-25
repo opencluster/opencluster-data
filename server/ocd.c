@@ -815,10 +815,17 @@ static void client_shutdown_handler(evutil_socket_t fd, short what, void *arg)
 		}
 	}
 	else {
-		// client is not a node, we can shut it down straight away.
-		event_free(client->shutdown_event);
-		client->shutdown_event = NULL;
-		client_free(client);
+		// client is not a node, we can shut it down straight away, if there isn't pending data going out to it.
+		if (client->in.length == 0 && client->out.length == 0) {
+			event_free(client->shutdown_event);
+			client->shutdown_event = NULL;
+			client_free(client);
+		} 
+		else {
+			printf("waiting to flust data to client:%d\n", client->handle);
+			assert(client->shutdown_event);
+			evtimer_add(client->shutdown_event, &_shutdown_timeout);
+		}
 	}
 }
 
