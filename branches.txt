@@ -1,0 +1,20 @@
+THis file provides some information about active branches in the repository.
+
+server-sync
+	This branch is to ensure that when nodes are connected to the cluster, they send communications to the backup nodes 
+	of any changes to buckets.
+
+node-timeout
+	When a node is in the Node-list, but it is not connected, a one minute timer will fire 30 times, if a connection 
+	hasn't been established in that time, then the node is removed from the list and will not be attempted again.  To 
+	get that node to connect to the cluster, it will have to establish the connection.
+
+system-logging
+	Rather than printing to the output stream, we need to log certain info to a logfile that gets renamed when it gets 
+	too big.  The log data can be output using an event.
+
+data-logging
+	A special node can connect to the cluster that logs all the updates that occur.  It logs the output to a series of 
+	files.  It can also be used to re-inject that logged data into a cluster.
+
+
