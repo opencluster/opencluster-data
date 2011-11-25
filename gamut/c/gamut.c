@@ -9,7 +9,7 @@
 #include <sys/time.h>
 
 
-#define GET_LIMIT 40000
+#define GET_LIMIT 4000
 
 
 int main(int argc, char **argv)
@@ -53,6 +53,8 @@ int main(int argc, char **argv)
 			stop_time.tv_sec --;
 		}
 		printf("Timing of %d gets. %d.%09d\n", GET_LIMIT, (stop_time.tv_sec - start_time.tv_sec), (stop_time.tv_usec - start_time.tv_usec));
+		
+		sleep(30);
 		
 		printf("Disconnecting from the cluster,\n");
 		cluster_disconnect(cluster);		

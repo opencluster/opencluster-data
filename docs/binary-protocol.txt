@@ -447,7 +447,7 @@ Conditions of use:
 Payload:
   integer - mask
   integer - hash:
-  integer - instance count (0 = primary, 1 or more = backup).
+  integer - instance count (-1 = not hosted, 0 = primary, 1 or more = backup).
 
 Replies:
   ack(1)

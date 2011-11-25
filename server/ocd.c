@@ -62,6 +62,10 @@
 //-----------------------------------------------------------------------------
 // common structures.
 
+
+typedef int hash_t;
+
+
 typedef struct {
 	struct evconnlistener *listener;
 } server_t;
@@ -76,6 +80,7 @@ typedef struct {
 	struct event *write_event;
 	struct event *connect_event;
 	struct event *wait_event;
+	struct event *shutdown_event;
 	struct sockaddr saddr;
 
 	struct {
@@ -132,9 +137,17 @@ typedef struct {
 #pragma pack(pop)
 
 
+typedef struct {
+	char *name;
+	client_t *client;
+	struct event *loadlevel_event;
+} node_t;
+
 
 typedef struct {
 
+	hash_t hash;
+	
 	//  0 indicates primary
 	//  1 or more indicate which level of indirection the backups go.
 	int level;	
@@ -144,28 +157,31 @@ typedef struct {
 	
 	// if this bucket is not hosted here, then this is the server that it is hosted.
 	// NULL if it is hosted here.
-	char *target;
-	char *backup;
+	char *target_host;
+	char *backup_host;
+	char *logging_host;
 	
+	node_t *target_node;
+	node_t *backup_node;
+	node_t *logging_node;
+
+	struct event *shutdown_event;
+	struct event *transfer_event;
+
 } bucket_t;
 
 
-typedef struct {
-	char *name;
-	client_t *client;
-	struct event *loadlevel_event;
-} node_t;
 
 
 typedef struct {
 	GTree *mapstree;
-	int key;
+	hash_t key;
 } maplist_t;
 
 
 typedef struct {
-	int key;
-	int map_key;
+	hash_t key;
+	hash_t map_key;
 	int expires;
 	char *name;
 	value_t *value;
@@ -258,7 +274,9 @@ struct event *_shutdown_event = NULL;
 // Standard timeout values for the various events.  Note that common-timeouts should probably be 
 // used instead which can increase performance when there are a lot of events that have the same 
 // timeout value.
+struct timeval _now_timeout = {0,0};
 struct timeval _standard_timeout = {5,0};
+struct timeval _shutdown_timeout = {0,500000};
 struct timeval _settle_timeout = {.tv_sec = 5, .tv_usec = 0};
 struct timeval _seconds_timeout = {.tv_sec = 0, .tv_usec = 100000};
 struct timeval _stats_timeout = {.tv_sec = 1, .tv_usec = 0};
@@ -368,6 +386,7 @@ static client_t * client_new(void)
 	client->write_event = NULL;
 	client->connect_event = NULL;
 	client->wait_event = NULL;
+	client->shutdown_event = NULL;
 	
 	client->out.buffer = NULL;
 	client->out.offset = 0;
@@ -506,6 +525,10 @@ static void client_free(client_t *client)
 		event_free(client->wait_event);
 		client->wait_event = NULL;
 	}
+	
+
+	assert(client->connect_event == NULL);
+	assert(client->shutdown_event == NULL);
 
 	if (client->handle != INVALID_HANDLE) {
 		EVUTIL_CLOSESOCKET(client->handle);
@@ -517,7 +540,7 @@ static void client_free(client_t *client)
 		client->name = NULL;
 	}
 	
-	// remove the client from the server list.
+	// remove the client from the main list.
 	assert(_clients);
 	assert(_client_count > 0);
 	assert(found == 0);
@@ -650,62 +673,388 @@ static void push_shuttingdown(client_t *client)
 }
 
 
+gboolean traverse_hash_fn(gpointer key, gpointer value, void *data)
+{
+	// data points to the variable that we will be using.
+	hash_t **aa = data;
+
+	aa[0] = value;
+	return(TRUE);
+}
+
+// delete the contents of the bucket.  Note, that the bucket becomes empty, but the bucket itself is not destroyed.
+static void bucket_destroy(bucket_t *bucket)
+{
+	maplist_t *maplist;
+	int total, total_items;
+	int i, j;
+	item_t *item;
+	
+	assert(bucket);
+	
+	// while going through the tree, cannot modify the tree, so we will continuously go through the 
+	// list, getting an item one at a time, clearing it and removing it from the tree.  Continue the 
+	// process until there is no more items in the tree.
+	assert(bucket->tree);
+	total = g_tree_nnodes(bucket->tree);
+	assert(total >= 0);
+	
+	for (i=0; i<total; i++) {
+		maplist = NULL;
+		g_tree_foreach(bucket->tree, traverse_hash_fn, &maplist);
+		assert(maplist);
+		
+		assert(maplist->mapstree);
+		
+		total_items = g_tree_nnodes(maplist->mapstree);
+		assert(total_items >= 0);
+		
+		for (j=0; j<total_items; j++) {
+			item = NULL;
+			g_tree_foreach(maplist->mapstree, traverse_hash_fn, &item);
+			assert(item);
+			
+			assert(item->key == maplist->key);
+			
+			assert(item->name);
+			free(item->name);
+			item->name = NULL;
+
+			assert(item->value);
+			if (item->value->type == VALUE_STRING) {
+				assert(item->value->data.s.data);
+				free(item->value->data.s.data);
+				item->value->data.s.data = NULL;
+			}
+			free(item->value);
+			item->value = NULL;
+
+			// now remove hte reference from the binary tree.
+			gboolean found = g_tree_remove(maplist->mapstree, &item->map_key);
+			assert(found == TRUE);
+			
+			free(item);
+		}
+		
+		total_items = g_tree_nnodes(maplist->mapstree);
+		assert(total_items == 0);
+		
+		g_tree_destroy(maplist->mapstree);
+		maplist->mapstree = NULL;
+		
+		g_tree_remove(bucket->tree, &maplist->key);
+		free(maplist);
+	}
+	
+	// the tree should be empty now.
+	total = g_tree_nnodes(bucket->tree);
+	assert(total == 0);
+	
+	g_tree_destroy(bucket->tree);
+	bucket->tree = NULL;
+}
+
+
+
+
 //-----------------------------------------------------------------------------
-static void shutdown_handler(evutil_socket_t fd, short what, void *arg)
+static void bucket_transfer_handler(evutil_socket_t fd, short what, void *arg)
 {
 	int waiting = 0;
+	bucket_t *bucket = arg;
 	
 	assert(fd == -1);
 	assert(what & EV_TIMEOUT);
-	assert(arg == NULL);
+	assert(bucket);
 
-	if (_verbose) printf("SHUTDOWN: handle=%d\n", fd);
+	if (_verbose) printf("Bucket transfer handler\n");
+
+	// check the state of the bucket.  If it is a backup bucket, then we can deleete it.
+	if (bucket->level > 0) {
+		bucket_destroy(bucket);
+	}
 	
-	// check the clients list.
-	assert(0);
-	
-	// check the buckets, if we still have some being transferred, then wait.
+	// if it is a primary bucket, and does not have any backup buckets, and there are no nodes, then delete the bucket.
 	assert(0);
 	
 	if (waiting > 0) {
+		if (_verbose) printf("WAITING FOR BUCKET (%d).\n", bucket->hash);
 		evtimer_add(_shutdown_event, &_seconds_timeout);
+	}
+	else {
+		// the bucket is done.
+		assert(bucket->transfer_event);
+		event_free(bucket->transfer_event);
+		bucket->transfer_event = NULL;
+		
+		
+	}
+}
+
+
+static void client_shutdown_handler(evutil_socket_t fd, short what, void *arg) 
+{
+	client_t *client = arg;
+	
+	assert(fd == -1);
+	assert(arg);
+
+	// check to see if this is a node connection, and there are still buckets, reset the timeout for one_second.
+	assert(client);
+	if (client->name) {
+		if (_bucket_count > 0) {
+			// this is a node client, and there are still buckets, so we need to keep the connection open.
+			assert(client->shutdown_event);
+			evtimer_add(client->shutdown_event, &_shutdown_timeout);
+		}
+		else {
+			// this is a node connection, but we dont have any buckets left, so we can close it now.
+			event_free(client->shutdown_event);
+			client->shutdown_event = NULL;
+			client_free(client);
+		}
+	}
+	else {
+		// client is not a node, we can shut it down straight away.
+		event_free(client->shutdown_event);
+		client->shutdown_event = NULL;
+		client_free(client);
+	}
+}
+
+
+// I assume that this is supposed to push out the details of an adjusted hash to all the clients 
+// (and therefore nodes).
+static void all_push_hashmask(hash_t hash)
+{
+	int i;
+	
+	assert(_mask > 0);
+
+	for (i=0; i<_client_count; i++) {
+		if (_clients[i]) {
+			assert(0);
+		}
 	}
 }
 
 
 
-//-----------------------------------------------------------------------------
-static void sigint_handler(evutil_socket_t fd, short what, void *arg)
+static void push_promote(client_t *client, hash_t hash)
 {
-	int i;
+	assert(client);
+	
+	// send a message to the client, telling it that it is now the primary node for the specified bucket hash.
+	assert(0);
+	
+}
 
+
+
+static void bucket_shutdown_handler(evutil_socket_t fd, short what, void *arg) 
+{
+	bucket_t *bucket = arg;
+	int done = 0;
+	
+	assert(fd == -1);
+	assert(arg);
+	assert(bucket);
+	assert(bucket->shutdown_event);
+	
+	// if the bucket is a backup bucket, we can simply destroy it, and send out a message to clients that it is no longer the backup for the bucket.
+	if (bucket->level > 0) {
+		done ++;
+	}
+	else {
+		assert(bucket->level == 0);
+
+		// if the bucket is primary, but there are no nodes to send it to, then we destroy it.
+		if (_node_count == 0) {
+			done ++;
+		}
+		else {
+			assert(_node_count > 0);
+			
+			// If the backup node is connected, then we will tell that node, that it has been 
+			// promoted to be primary for the bucket.
+			if (bucket->backup_node && bucket->backup_node->client) {
+				push_promote(bucket->backup_node->client, bucket->hash);
+
+				done ++;
+			}
+			else {
+			
+				// at this point, we are the primary and there is no backup.  There are other nodes connected, so we need to try and transfer this bucket to another node.
+				assert(0);
+				
+				assert(done == 0);
+				
+// 				assert(_buckets[i]->transfer_event == NULL);
+// 				_buckets[i]->transfer_event = evtimer_new(_evbase, bucket_transfer_handler, _buckets[i]);
+// 				assert(_buckets[i]->transfer_event);
+			}
+		}
+	}
+	
+	if (done > 0) {
+		// we are done with the bucket.
+	
+		bucket_destroy(bucket);
+		all_push_hashmask(bucket->hash);
+				
+		event_free(bucket->shutdown_event);
+		bucket->shutdown_event = NULL;
+
+		assert(_buckets[bucket->hash] == bucket);
+		_buckets[bucket->hash] = NULL;
+		free(bucket);
+		bucket = NULL;
+	}
+	else {
+		// we are not done yet, so we need to schedule the event again.
+		assert(bucket->shutdown_event);
+		evtimer_add(bucket->shutdown_event, &_shutdown_timeout);
+	}		
+}
+
+
+
+//-----------------------------------------------------------------------------
+static void shutdown_handler(evutil_socket_t fd, short what, void *arg)
+{
+	int waiting = 0;
+	int i;
+	
+	assert(fd == -1);
+	assert(what & EV_TIMEOUT);
 	assert(arg == NULL);
-	
- 	if (_verbose > 0) printf("\nSIGINT received.\n\n");
-	
-	assert(_shutdown <= 0);
+
+	if (_verbose) printf("SHUTDOWN handler\n");
 
 	// need to send a message to each node telling them that we are shutting down.
-	for (i=0; i<_node_count; i++) {
-		if (_nodes[i]) {
-			if (_nodes[i]->client) {
-				// we have a connection to another node, we need to let it know that we are shutting down.
-				if (_nodes[i]->client->handle > 0) {
-					push_shuttingdown(_nodes[i]->client);
-				}
+	for (i=0; i<_client_count; i++) {
+		if (_clients[i]) {
+			waiting ++;
+			if (_clients[i]->shutdown_event == NULL) {
+				// if there is a client object, and it is not already shutting down, then we need to start hte shutdown event for it.  Doing it this way, will also help catch any new clients that appear after we initiate the shutdown but are currently already in teh event loop (if that is even possible).
+				assert(_clients[i]->handle > 0);
+				printf("Client shutdown initiated: %d\n", _clients[i]->handle);
+				assert(_evbase);
+				_clients[i]->shutdown_event = evtimer_new(_evbase, client_shutdown_handler, _clients[i]);
+				assert(_clients[i]->shutdown_event);
+				evtimer_add(_clients[i]->shutdown_event, &_now_timeout);
 			}
 		}
 	}
 
-	// we need to send all the buckets we have, to other nodes if we can.
-	assert(0);
+	// start a timeout event for each bucket, to attempt to send it to other nodes.
+	if (_buckets) {
+		assert(_mask > 0);
+		for (i=0; i<=_mask; i++) {
+			if (_buckets[i]) {
+				waiting ++;
+				if (_buckets[i]->shutdown_event == NULL) {
+					printf("Bucket shutdown initiated: %d\n", i);
+
+					assert(_evbase);
+					_buckets[i]->shutdown_event = evtimer_new(_evbase, bucket_shutdown_handler, _buckets[i]);
+					assert(_buckets[i]->shutdown_event);
+					evtimer_add(_buckets[i]->shutdown_event, &_now_timeout);
+				}
+			}
+		}
+	}
 	
-	assert(_server);
-	if (_verbose) printf("Shutting down server interface: %s\n", _interface);
-	server_shutdown();
+	if (_server) {
+		if (_verbose) printf("Shutting down server interface: %s\n", _interface);
+		server_shutdown();
+	}
 	
+	// ----------
+/*
+		node_t **_nodes = NULL;
+		int _node_count = 0;
+
+		int _active_nodes = 0;
+
+
+
+		// we will use a default payload buffer to generate the payload for each message sent.  It is not 
+		// required, but avoids having to allocate memory each time a message is sent.   
+		// While single-threaded this is all that is needed.  When using threads, would probably have one 
+		// of these per thread.
+		char *_payload = NULL;
+		int _payload_length = 0; 
+		int _payload_max = 0;
+
+
+		// number of connections that we are currently listening for activity from.
+		int _conncount = 0;
+
+		// When the service first starts up, it attempts to connect to another node in the cluster, but it 
+		// doesn't know if it is the first member of the cluster or not.  So it wait a few seconds and then 
+		// create all the buckets.  This event is a one-time timout to trigger this process.  If it does 
+		// connect to another node, then this event will end up doing nothing.
+		struct event *_settle_event = NULL;
+
+		// The 'seconds' event fires several times a second checking the current time.  When the time ticks 
+		// over, it updates the internal _current_time variable which is used for tracking expiries and 
+		// lifetime of stored data.
+		struct event *_seconds_event = NULL;
+		struct timeval _current_time = {0,0};
+		struct timeval _start_time = {0,0};
+
+		// The stats event fires every second, and it collates the stats it has and logs some statistics 
+		// (if there were any).
+		struct event *_stats_event = NULL;
+		long _stat_counter = 0;
+
+		// This event is started when the system is shutting down, and monitors the events that are left to 
+		// finish up.  When everything is stopped, it stops the final events that have been ticking over 
+		// (like the seconds and stats events), which will allow the event-loop to exit.
+		struct event *_shutdown_event = NULL;
+
+		// This will be 0 when the node has either connected to other nodes in the cluster, or it has 
+		// assumed that it is the first node in the cluster.
+		int _settling = 1;
+		
+*/
 
 	
+	if (waiting > 0) {
+		if (_verbose) printf("WAITING FOR SHUTDOWN.  nodes=%d, clients=%d, buckets=%d\n", _node_count, _client_count, _bucket_count);
+		evtimer_add(_shutdown_event, &_shutdown_timeout);
+	}
+	else {
+		assert(_seconds_event);
+		event_free(_seconds_event);
+		_seconds_event = NULL;
+		
+		assert(_stats_event);
+		event_free(_stats_event);
+		_stats_event = NULL;
+	}
+}
+
+
+
+
+
+
+
+
+
+
+
+//-----------------------------------------------------------------------------
+// Since this is the interrupt handler, we need to do as little as possible here, and just start up an event to take care of it.
+static void sigint_handler(evutil_socket_t fd, short what, void *arg)
+{
+	assert(arg == NULL);
+	assert(_shutdown <= 0);
+
+ 	if (_verbose > 0) printf("\nSIGINT received.\n\n");
+
 	// delete the signal events.
 	assert(_sigint_event);
 	event_free(_sigint_event);
@@ -715,24 +1064,12 @@ static void sigint_handler(evutil_socket_t fd, short what, void *arg)
 	event_free(_sighup_event);
 	_sighup_event = NULL;
 	
-	
-	// TODO: normally we want the stats and the seconds counter to continue when shutting down, but 
-	// 		 for now we will just delete the events.
-	assert(_seconds_event);
-	event_free(_seconds_event);
-	_seconds_event = NULL;
-	
-	assert(_stats_event);
-	event_free(_stats_event);
-	_stats_event = NULL;
-	
 	// start the shutdown event.  This timeout event will just keep ticking over until the _shutdown 
 	// value is back down to 0, then it will stop resetting the event, and the loop can exit.... 
 	// therefore shutting down the service completely.
 	_shutdown_event = evtimer_new(_evbase, shutdown_handler, NULL);
 	assert(_shutdown_event);
-	evtimer_add(_shutdown_event, &_seconds_timeout);
-	
+	evtimer_add(_shutdown_event, &_now_timeout);
 	
 // 	printf("SIGINT complete\n");
 }
@@ -961,7 +1298,8 @@ static void push_hashmasks(client_t *client)
 			// we have the bucket, and we are the 'primary for it'
 			
 			assert(_buckets[i]->tree);
-			assert(_buckets[i]->target == NULL);
+			assert(_buckets[i]->target_host == NULL);
+			assert(_buckets[i]->target_node == NULL);
 			
 			payload_int(i);
 			payload_int(0);
@@ -973,7 +1311,8 @@ static void push_hashmasks(client_t *client)
 			// we have the bucket, but we are a backup for it. 
 			
 			assert(_buckets[i]->tree);
-			assert(_buckets[i]->target);
+			assert(_buckets[i]->target_host);
+			assert(_buckets[i]->target_node);
 
 			payload_int(i);
 			payload_int(_buckets[i]->level);
@@ -986,7 +1325,8 @@ static void push_hashmasks(client_t *client)
 			
 			assert(_buckets[i]->level == -1);
 			assert(_buckets[i]->tree == NULL);
-			assert(_buckets[i]->backup == NULL);
+			assert(_buckets[i]->backup_host == NULL);
+			assert(_buckets[i]->backup_node == NULL);
 			
 		}
 	}
@@ -1206,6 +1546,7 @@ static int store_value(int map_hash, int key_hash, char *name, int expires, valu
 	assert(bucket_index >= 0);
 	assert(bucket_index < _mask);
 	bucket = _buckets[bucket_index];
+	assert(bucket->hash == bucket_index);
 
 	// if we have a record for this bucket, then we are either a primary or a backup for it.
 	if (bucket) {
@@ -1285,6 +1626,7 @@ static int get_value(int map_hash, int key_hash, value_t **value)
 	assert(bucket_index >= 0);
 	assert(bucket_index < _mask);
 	bucket = _buckets[bucket_index];
+	assert(bucket->hash == bucket_index);
 
 	// if we have a record for this bucket, then we are either a primary or a backup for it.
 	if (bucket) {
@@ -2080,6 +2422,31 @@ static void all_hashmask(unsigned int hashmask, int level)
 }
 
 
+static bucket_t * bucket_new(hash_t hash)
+{
+	bucket_t *bucket;
+	
+	assert(_buckets[hash] == NULL);
+	
+	bucket = calloc(1, sizeof(bucket_t));
+	bucket->hash = hash;
+	assert(bucket->level == 0);
+			
+	assert(bucket->backup_host == NULL);
+	assert(bucket->backup_node == NULL);
+	assert(bucket->target_host == NULL);
+	assert(bucket->target_node == NULL);
+	assert(bucket->logging_host == NULL);
+	assert(bucket->logging_node == NULL);
+	assert(bucket->transfer_event == NULL);
+	assert(bucket->shutdown_event == NULL);
+			
+	bucket->tree = g_tree_new(key_compare_fn);
+	assert(bucket->tree);
+	
+	return(bucket);
+}
+
 // this handler is fired 5 seconds after the daemon starts up.  It checks to see if it has connected 
 // to other nodes, if it hasn't then it initialises the cluster as if it is the first node in the 
 // cluster.
@@ -2100,21 +2467,14 @@ static void settle_handler(int fd, short int flags, void *arg)
 		_mask = STARTING_MASK;
 		assert(_mask > 0);
 		
-		_buckets = malloc(sizeof(bucket_t *) * _mask);
+		_buckets = malloc(sizeof(bucket_t *) * (_mask + 1));
 		assert(_buckets);
 		
 		_bucket_count = _mask + 1;
 		
 		// for starters we will need to create a bucket for each hash.
 		for (i=0; i<=_mask; i++) {
-			_buckets[i] = malloc(sizeof(bucket_t));
-			_buckets[i]->level = 0;
-			
-			_buckets[i]->backup = NULL;
-			_buckets[i]->target = NULL;
-			
-			_buckets[i]->tree = g_tree_new(key_compare_fn);
-			assert(_buckets[i]->tree);
+			_buckets[i] = bucket_new(i);
 
 			// send out a message to all connected clients, to let them know that the buckets have changed.
 			all_hashmask(i, 0);
