@@ -7,11 +7,6 @@ loadlevels
 bucket-migration
 	Migrate a bucket from one node to another... updating clients of the change.
 
-node-timeout
-	When a node is in the Node-list, but it is not connected, a one minute timer will fire 30 times, if a connection 
-	hasn't been established in that time, then the node is removed from the list and will not be attempted again.  To 
-	get that node to connect to the cluster, it will have to establish the connection.
-
 server-sync
 	This branch is to ensure that when nodes are connected to the cluster, they send communications to the backup nodes 
 	of any changes to buckets.
