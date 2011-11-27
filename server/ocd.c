@@ -73,15 +73,12 @@ typedef struct {
 
 
 typedef struct {
-	char *name;
+	void *node;	// node_t;
 	
 	evutil_socket_t handle;
 	struct event *read_event;
 	struct event *write_event;
-	struct event *connect_event;
-	struct event *wait_event;
 	struct event *shutdown_event;
-	struct sockaddr saddr;
 
 	struct {
 		char *buffer;
@@ -140,7 +137,11 @@ typedef struct {
 typedef struct {
 	char *name;
 	client_t *client;
+	struct event *connect_event;
 	struct event *loadlevel_event;
+	struct event *wait_event;
+	struct event *shutdown_event;
+	int connect_attempts;
 } node_t;
 
 
@@ -302,24 +303,14 @@ int _shutdown = -1;
 
 
 
-
-
-
-
 //-----------------------------------------------------------------------------
 // Pre-declare our handlers, because often they need to interact with functions
 // that are used to invoke them.
 static void accept_conn_cb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *address, int socklen, void *ctx);
 static void read_handler(int fd, short int flags, void *arg);
 static void write_handler(int fd, short int flags, void *arg);
-static void client_wait_handler(int fd, short int flags, void *arg);
-
-
-
-
-
-
-
+static void node_wait_handler(int fd, short int flags, void *arg);
+static void node_connect_handler(int fd, short int flags, void *arg);
 
 
 
@@ -340,8 +331,6 @@ static void server_listen(void)
 	assert(_server);
 
 	_server->listener = NULL;
-
-
 
 	memset(&sin, 0, sizeof(sin));
 	// 	sin.sin_family = AF_INET;
@@ -368,8 +357,7 @@ static void server_listen(void)
 								sizeof(sin)
 							);
 		assert(_server->listener);
-	}	
-}
+}	}
 
 
 
@@ -384,8 +372,6 @@ static client_t * client_new(void)
 	
 	client->read_event = NULL;
 	client->write_event = NULL;
-	client->connect_event = NULL;
-	client->wait_event = NULL;
 	client->shutdown_event = NULL;
 	
 	client->out.buffer = NULL;
@@ -446,14 +432,14 @@ static void client_accept(client_t *client, evutil_socket_t handle, struct socka
 	
 	if (_verbose) printf("[%d] New client - handle=%d\n", (int)(_current_time.tv_sec-_start_time.tv_sec), handle);
 
-	client->saddr = *address;
-
 	assert(_evbase);
 	assert(client->handle > 0);
 	client->read_event = event_new( _evbase, client->handle, EV_READ|EV_PERSIST, read_handler, client);
 	assert(client->read_event);
 	int s = event_add(client->read_event, &_standard_timeout);
 	assert(s == 0);
+	
+	_conncount ++;
 }
 
 
@@ -489,10 +475,18 @@ static void client_free(client_t *client)
 {
 	char found=0, resize=0;
 	int i;
+	node_t *node;
 	
 	assert(client);
 	
 	if (_verbose >= 2) printf("[%d] client_free: handle=%d\n", (int)(_current_time.tv_sec-_start_time.tv_sec), client->handle);
+
+	if (client->node) {
+		node = client->node;
+		node->client = NULL;
+		_active_nodes --;
+		assert(_active_nodes >= 0);
+	}
 	
 	assert(client->out.length == 0);
 	assert(client->out.offset == 0);
@@ -521,23 +515,11 @@ static void client_free(client_t *client)
 		client->write_event = NULL;
 	}
 
-	if (client->wait_event) {
-		event_free(client->wait_event);
-		client->wait_event = NULL;
-	}
-	
-
-	assert(client->connect_event == NULL);
 	assert(client->shutdown_event == NULL);
 
 	if (client->handle != INVALID_HANDLE) {
 		EVUTIL_CLOSESOCKET(client->handle);
 		client->handle = INVALID_HANDLE;
-	}
-	
-	if (client->name) {
-		free(client->name);
-		client->name = NULL;
 	}
 	
 	// remove the client from the main list.
@@ -554,9 +536,7 @@ static void client_free(client_t *client)
 				_client_count --;
 				assert(_client_count >= 0);
 				resize ++;
-			}
-		}
-	}
+	}	}	}
 	
 	printf("[%d] found:%d, client_count:%d\n", (int)(_current_time.tv_sec-_start_time.tv_sec), found, _client_count);
 	
@@ -570,13 +550,13 @@ static void client_free(client_t *client)
 				_clients[_client_count-1] = NULL;
 				_client_count --;
 				resize ++;
-			}
-		}
-	}
-	
+	}	}	}
+
 	if (resize > 0) {
 		_clients = realloc(_clients, sizeof(void*)*_client_count);
 	}
+	
+	_conncount --;
 	
 	assert(client);
 	free(client);
@@ -801,7 +781,7 @@ static void client_shutdown_handler(evutil_socket_t fd, short what, void *arg)
 
 	// check to see if this is a node connection, and there are still buckets, reset the timeout for one_second.
 	assert(client);
-	if (client->name) {
+	if (client->node) {
 		if (_bucket_count > 0) {
 			// this is a node client, and there are still buckets, so we need to keep the connection open.
 			assert(client->shutdown_event);
@@ -822,7 +802,7 @@ static void client_shutdown_handler(evutil_socket_t fd, short what, void *arg)
 			client_free(client);
 		} 
 		else {
-			printf("waiting to flust data to client:%d\n", client->handle);
+			printf("waiting to flush data to client:%d\n", client->handle);
 			assert(client->shutdown_event);
 			evtimer_add(client->shutdown_event, &_shutdown_timeout);
 		}
@@ -854,6 +834,63 @@ static void push_promote(client_t *client, hash_t hash)
 	// send a message to the client, telling it that it is now the primary node for the specified bucket hash.
 	assert(0);
 	
+}
+
+static void node_free(node_t *node)
+{
+	assert(node);
+	assert(node->name);
+	
+	assert(node->client == NULL);
+	assert(node->connect_event == NULL);
+	assert(node->loadlevel_event == NULL);
+	assert(node->wait_event == NULL);
+	assert(node->shutdown_event == NULL);
+	
+	free(node->name);
+	node->name = NULL;
+	
+	free(node);
+}
+
+
+
+static void node_shutdown_handler(evutil_socket_t fd, short what, void *arg) 
+{
+	node_t *node = arg;
+	int i;
+	
+	assert(fd == -1 && arg);
+	assert(node);
+	
+	// if the node is connecting, we have to wait for it to time-out.
+	if (node->connect_event) {
+		assert(node->shutdown_event);
+		evtimer_add(node->shutdown_event, &_shutdown_timeout);
+	}
+	else {
+	
+		// if the node is waiting... cancel it.
+		if (node->wait_event) {
+			assert(0);
+		}
+		
+		// if we can, remove the node from the nodes list.
+		if (node->client) {
+			// the client is still connected.  We need to wait for it to disconnect.
+		}
+		else {
+			
+			for (i=0; i<_node_count; i++) {
+				if (_nodes[i] == node) {
+					_nodes[i] = NULL;
+					break;
+				}
+			}
+			
+			node_free(node);
+		}
+	}
 }
 
 
@@ -938,22 +975,63 @@ static void shutdown_handler(evutil_socket_t fd, short what, void *arg)
 
 	if (_verbose) printf("SHUTDOWN handler\n");
 
+	// setup a shutdown event for all the nodes.
+	for (i=0; i<_node_count; i++) {
+		if (_nodes[i]) {
+			waiting++;
+			if (_nodes[i]->shutdown_event == NULL) {
+				
+				assert(_evbase);
+				_nodes[i]->shutdown_event = evtimer_new(_evbase, node_shutdown_handler, _nodes[i]);
+				assert(_nodes[i]->shutdown_event);
+				evtimer_add(_nodes[i]->shutdown_event, &_now_timeout);
+	}	}	}
+	
+	assert(_node_count >= 0);
+	if (_node_count > 0) {
+		while (_nodes[_node_count - 1] == NULL) {
+			_node_count --;
+	}	}
+	
+	if (_node_count == 0) {
+		if (_nodes) {
+			free(_nodes);
+			_nodes = NULL;
+		}
+	}
+	else {
+		assert(waiting > 0);
+	}
+
 	// need to send a message to each node telling them that we are shutting down.
 	for (i=0; i<_client_count; i++) {
 		if (_clients[i]) {
 			waiting ++;
 			if (_clients[i]->shutdown_event == NULL) {
-				// if there is a client object, and it is not already shutting down, then we need to start hte shutdown event for it.  Doing it this way, will also help catch any new clients that appear after we initiate the shutdown but are currently already in teh event loop (if that is even possible).
-				assert(_clients[i]->handle > 0);
-				printf("Client shutdown initiated: %d\n", _clients[i]->handle);
+				
 				assert(_evbase);
 				_clients[i]->shutdown_event = evtimer_new(_evbase, client_shutdown_handler, _clients[i]);
 				assert(_clients[i]->shutdown_event);
 				evtimer_add(_clients[i]->shutdown_event, &_now_timeout);
-			}
+	}	}	}
+	
+	assert(_client_count >= 0);
+	if (_client_count > 0) {
+		while (_clients[_client_count - 1] == NULL) {
+			_client_count --;
+	}	}
+	
+	if (_client_count == 0) {
+		if (_clients) {
+			free(_clients);
+			_clients = NULL;
 		}
 	}
-
+	else {
+		assert(waiting > 0);
+	}
+	
+	
 	// start a timeout event for each bucket, to attempt to send it to other nodes.
 	if (_buckets) {
 		assert(_mask > 0);
@@ -967,66 +1045,13 @@ static void shutdown_handler(evutil_socket_t fd, short what, void *arg)
 					_buckets[i]->shutdown_event = evtimer_new(_evbase, bucket_shutdown_handler, _buckets[i]);
 					assert(_buckets[i]->shutdown_event);
 					evtimer_add(_buckets[i]->shutdown_event, &_now_timeout);
-				}
-			}
-		}
-	}
+	}	}	}	}
 	
 	if (_server) {
 		if (_verbose) printf("Shutting down server interface: %s\n", _interface);
 		server_shutdown();
 	}
 	
-	// ----------
-/*
-		node_t **_nodes = NULL;
-		int _node_count = 0;
-
-		int _active_nodes = 0;
-
-
-
-		// we will use a default payload buffer to generate the payload for each message sent.  It is not 
-		// required, but avoids having to allocate memory each time a message is sent.   
-		// While single-threaded this is all that is needed.  When using threads, would probably have one 
-		// of these per thread.
-		char *_payload = NULL;
-		int _payload_length = 0; 
-		int _payload_max = 0;
-
-
-		// number of connections that we are currently listening for activity from.
-		int _conncount = 0;
-
-		// When the service first starts up, it attempts to connect to another node in the cluster, but it 
-		// doesn't know if it is the first member of the cluster or not.  So it wait a few seconds and then 
-		// create all the buckets.  This event is a one-time timout to trigger this process.  If it does 
-		// connect to another node, then this event will end up doing nothing.
-		struct event *_settle_event = NULL;
-
-		// The 'seconds' event fires several times a second checking the current time.  When the time ticks 
-		// over, it updates the internal _current_time variable which is used for tracking expiries and 
-		// lifetime of stored data.
-		struct event *_seconds_event = NULL;
-		struct timeval _current_time = {0,0};
-		struct timeval _start_time = {0,0};
-
-		// The stats event fires every second, and it collates the stats it has and logs some statistics 
-		// (if there were any).
-		struct event *_stats_event = NULL;
-		long _stat_counter = 0;
-
-		// This event is started when the system is shutting down, and monitors the events that are left to 
-		// finish up.  When everything is stopped, it stops the final events that have been ticking over 
-		// (like the seconds and stats events), which will allow the event-loop to exit.
-		struct event *_shutdown_event = NULL;
-
-		// This will be 0 when the node has either connected to other nodes in the cluster, or it has 
-		// assumed that it is the first node in the cluster.
-		int _settling = 1;
-		
-*/
-
 	
 	if (waiting > 0) {
 		if (_verbose) printf("WAITING FOR SHUTDOWN.  nodes=%d, clients=%d, buckets=%d\n", _node_count, _client_count, _bucket_count);
@@ -1156,8 +1181,6 @@ static void write_handler(int fd, short int flags, void *arg)
 			event_free(client->write_event);
 			client->write_event = NULL;
 			assert(client->read_event);
-			assert(client->connect_event == NULL);
-			assert(client->wait_event == NULL);
 		}
 	}
 	else if (res == 0 || (errno != EAGAIN && errno != EWOULDBLOCK)) {
@@ -1244,12 +1267,14 @@ static void push_serverhello(client_t *client)
 	_payload_length = 0;
 }
 
-// Pushes out a command to the specified client (which should be a cluster node), informing it that we are a cluster node also, that our interface is such and such.
+// Pushes out a command to the specified client (which should be a cluster node), informing it that 
+// we are a cluster node also, that our interface is such and such.   We do not send PINGS to 
+// regular clients.
 static void push_ping(client_t *client)
 {
 	assert(client);
 	assert(client->handle > 0);
-	assert(client->name);
+	assert(client->node);
 	
 	assert(_payload_length == 0);
 	
@@ -1356,12 +1381,11 @@ static char * data_string(char **data, int *length)
 	assert(*data);
 	assert(length);
 	
-	str = *data;
 	
 	ptr = (void*) *data;
 	*length = ntohl(ptr[0]);
 
-	str += sizeof(int);
+	str = *data + sizeof(int);
 
 	*data += (sizeof(int) + *length);
 
@@ -1421,6 +1445,26 @@ static void cmd_ping(client_t *client, header_t *header)
 }
 
 
+static node_t * node_new(const char *name) 
+{
+	node_t *node;
+	
+	node = malloc(sizeof(node_t));
+	assert(node);
+	node->name = strdup(name);
+	node->client = NULL;
+	node->connect_event = NULL;
+	node->loadlevel_event = NULL;
+	node->wait_event = NULL;
+	node->shutdown_event = NULL;
+
+	node->connect_attempts = 0;
+	
+	return(node);
+}
+
+
+
 
 
 // the hello command does not require a payload, and simply does a reply.   
@@ -1430,6 +1474,7 @@ static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 	int length;
 	char *next;
 	char *raw_name;
+	char *name;
 	int used = 0;
 	int i;
 	int found;
@@ -1440,6 +1485,8 @@ static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 
 	next = payload;
 	
+	assert(client->node == NULL);
+	
 	// the only parameter is a string indicating the servers connection data.  
 	// Normally an IP and port.
 	raw_name = data_string(&next, &length);
@@ -1448,10 +1495,10 @@ static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 	used += sizeof(int) + length;
 	
 	// we need to mark this client as a node connection, we do this by settings its node name.
-	assert(client->name == NULL);
-	client->name = malloc(length +1);
-	strncpy(client->name, raw_name, length);
-	client->name[length] = 0;
+	assert(length > 0);
+	name = malloc(length +1);
+	strncpy(name, raw_name, length);
+	name[length] = 0;
 	
 	
 	// we have a server name.  We need to check it against out node list.  If it is there, then we 
@@ -1464,7 +1511,7 @@ static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 		assert(_nodes[i]->client);
 		assert(_nodes[i]->name);
 		
-		if (strcmp(_nodes[i]->name, client->name) == 0) {
+		if (strcmp(_nodes[i]->name, name) == 0) {
 			found = i;
 		}
 	}
@@ -1472,15 +1519,23 @@ static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 	if (found < 0) {
 		// the node was not found in the list.  We need to add it to the list, and add this client 
 		// to the node.
-		assert(0);
+		
+		_nodes = realloc(_nodes, sizeof(node_t *) * (_node_count + 1));
+		assert(_nodes);
+		_nodes[_node_count] = node_new(name);
+		_nodes[_node_count]->client = client;
+		client->node = _nodes[_node_count];
+		_node_count ++;
+		
+		_active_nodes ++;
+		
+		printf("Adding '%s' as a New Node.\n", name);
 	}
 	else {
 		
-		
-		
 		// the node was found in the list.  Now we need to remove the existing one, and replace it 
 		// with this new one.
-		
+		assert(_nodes[found]->client);
 		if (_nodes[found]->client == client) {
 			// is this even possible?
 			assert(0);
@@ -1492,30 +1547,27 @@ static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 				assert(0);
 			}
 			else {
-				if (_nodes[found]->client->connect_event) {
+				if (_nodes[found]->connect_event) {
 					assert(_nodes[found]->client->handle > 0);
-					assert(_nodes[found]->client->wait_event == NULL);
+					assert(_nodes[found]->wait_event == NULL);
 					
 					// this client is in the middle of connecting, and we've received a connection at the same time.
 					assert(0);
 				}
 				else {
-					assert(_nodes[found]->client->connect_event == NULL);
+					assert(_nodes[found]->connect_event == NULL);
+					assert(_nodes[found]->wait_event);
 					assert(_nodes[found]->client->read_event == NULL);
-					assert(_nodes[found]->client->wait_event);
 					assert(_nodes[found]->client->handle == -1);
 					
 					// the client is waiting to connect, so we can break it down.
 					client_free(_nodes[found]->client);
-					_nodes[found]->client = client;
-				}
-			}
-		}
-	}
+					assert(_nodes[found]->client == NULL);
+					client->node = _nodes[found];
+	}	}	}	}
 	
 	// send the ACK reply.
 	send_message(client, header, REPLY_ACK, 0, NULL);
-	
 }
 
 
@@ -1676,11 +1728,7 @@ static int get_value(int map_hash, int key_hash, value_t **value)
 
 						assert(result < 0);
 						result = 0;
-					}
-				}
-			}
-		}
-	}
+	}	}	}	}	}
 	
 	return(result);
 }
@@ -1939,15 +1987,97 @@ static int process_data(client_t *client)
 					client->in.offset += (header.length + HEADER_SIZE);
 				}
 				assert( ( client->in.length + client->in.offset ) <= client->in.max);
-			}
-		}
-	}
+	}	}	}
 	
 	assert(stopped != 0);
 	
 	return(processed);
 }
+
+
+// if the name is passed it, then it is assumed that this is the first time a connect is attempted.  If a name is not supplied (ie, it is NULL), then we simply re-use the existing data in the client object.
+static void node_connect(node_t *node) 
+{
+	int len;
+	int sock;
+	struct sockaddr saddr;
+
 	
+	sock = socket(AF_INET,SOCK_STREAM,0);
+	assert(sock >= 0);
+											
+	// Before we attempt to connect, set the socket to non-blocking mode.
+	evutil_make_socket_nonblocking(sock);
+
+	assert(node);
+	assert(node->name);
+	
+	// resolve the address.
+	len = sizeof(saddr);
+	if (evutil_parse_sockaddr_port(node->name, &saddr, &len) != 0) {
+		// if we cant parse the socket, then we should probably remove it from the nodes list.
+		assert(0);
+	}
+
+	// attempt the connect.
+	int result = connect(sock, &saddr, sizeof(struct sockaddr));
+	assert(result < 0);
+	assert(errno == EINPROGRESS);
+
+		
+	if (_verbose) printf("attempting to connect to node: %s\n", node->name);
+	
+	// set the connect event with a timeout.
+	assert(node->connect_event == NULL);
+	assert(_evbase);
+	node->connect_event = event_new(_evbase, sock, EV_WRITE, node_connect_handler, node);
+	event_add(node->connect_event, &_connect_timeout);
+
+	assert(node->wait_event == NULL);
+	assert(node->connect_event);
+}
+
+
+
+static void node_wait_handler(int fd, short int flags, void *arg)
+{
+	node_t *node = arg;
+
+	assert(fd == -1);
+	assert((flags & EV_TIMEOUT) == EV_TIMEOUT);
+	assert(arg);
+	
+	assert(node->name);
+	if (_verbose) printf("WAIT: node:'%s'\n", node->name);
+	
+	assert(node->connect_event == NULL);
+	assert(node->wait_event);
+	
+	event_free(node->wait_event);
+	node->wait_event = NULL;
+
+	if (_shutdown <= 0) {
+		node_connect(node);
+	}
+}
+
+
+
+// this function must assume that the client object has been destroyed because the connection was 
+// lost, and we need to setup a wait event to try and connect again later.
+static void node_retry(node_t *node)
+{
+	assert(node);
+	assert(_evbase);
+	
+	node->client = NULL;
+	
+	
+	assert(node->connect_event == NULL);
+	assert(node->wait_event == NULL);
+	node->wait_event = evtimer_new(_evbase, node_wait_handler, (void *) node);
+	evtimer_add(node->wait_event, &_node_wait_timeout);
+}
 
 
 // This function is called when data is available on the socket.  We need to 
@@ -1987,7 +2117,7 @@ static void read_handler(int fd, short int flags, void *arg)
 		}
 		else {
 			// if the client is a node, then // we send a ping.
-			if (client->name) {
+			if (client->node) {
 				push_ping(client);
 			}
 		}
@@ -2031,28 +2161,19 @@ static void read_handler(int fd, short int flags, void *arg)
 			if (_verbose > 2)  printf("socket %d closed. res=%d, errno=%d,'%s'\n", fd, res, errno, strerror(errno));
 			
 			// free the client resources.
-			if (client->name) {
+			if (client->node) {
 				// this client is actually a node connection.  We need to create an event to wait 
 				// and then try connecting again.
 
-				assert(client->read_event);
-				event_free(client->read_event);
-				client->read_event = NULL;
-			
-				
-				assert(client->connect_event == NULL);
-				assert(client->wait_event == NULL);
-				client->wait_event = evtimer_new(_evbase, client_wait_handler, (void *) client);
-				evtimer_add(client->wait_event, &_node_wait_timeout);
+				_active_nodes --;
+				assert(_active_nodes >= 0);
 
+				node_retry(client->node);
 			}
-			else {		
-				client_free(client);
-				client = NULL;
-			}
-		}
-	}
-}
+
+			client_free(client);
+			client = NULL;
+}	}	}
 
 
 
@@ -2075,18 +2196,6 @@ static void usage(void) {
 	return;
 }
 
-static node_t * node_new(const char *name) 
-{
-	node_t *node;
-	
-	node = malloc(sizeof(node_t));
-	assert(node);
-	node->name = strdup(optarg);
-	node->client = NULL;
-	node->loadlevel_event = NULL;
-	
-	return(node);
-}
 
 static void parse_params(int argc, char **argv)
 {
@@ -2151,9 +2260,7 @@ static void parse_params(int argc, char **argv)
 				fprintf(stderr, "Illegal argument \"%c\"\n", c);
 				return;
 				
-		}
-	}
-}
+}	}	}
 
 
 void daemonize(const char *username, const char *pidfile, const int noclose)
@@ -2229,34 +2336,27 @@ void daemonize(const char *username, const char *pidfile, const int noclose)
 
 
 
-static void client_connect_handler(int fd, short int flags, void *arg)
+static void node_connect_handler(int fd, short int flags, void *arg)
 {
-	client_t *client = (client_t *) arg;
+	node_t *node = (node_t *) arg;
 	int error;
 	
-	assert(fd >= 0);
-	assert(flags != 0);
-	assert(client);
-	assert(client->handle == fd);
-	assert(client->connect_event);
-	assert(client->wait_event == NULL);
-	assert(client->name);
-	
+	assert(fd >= 0 && flags != 0 && node);
 	if (_verbose) printf("[%d] CONNECT: handle=%d\n", (int)(_current_time.tv_sec-_start_time.tv_sec), fd);
 
 	if (flags & EV_TIMEOUT) {
 		// timeout on the connect.  Need to handle that somehow.
 		
-		if (_verbose) printf("[%d] Timeout connecting to: %s\n", (int)(_current_time.tv_sec-_start_time.tv_sec), client->name);
+		if (_verbose) printf("[%d] Timeout connecting to: %s\n", (int)(_current_time.tv_sec-_start_time.tv_sec), node->name);
 		
 		assert(0);
 	}
 	else {
 
 		// remove the connect event
-		assert(client->connect_event);
-		event_free(client->connect_event);
-		client->connect_event = NULL;
+		assert(node->connect_event);
+		event_free(node->connect_event);
+		node->connect_event = NULL;
 
 		// check to see if we really are connected.
 		socklen_t foo = sizeof(error);
@@ -2264,112 +2364,46 @@ static void client_connect_handler(int fd, short int flags, void *arg)
 		getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &foo);
 		if (error == ECONNREFUSED) {
 
-			if (_verbose) printf("Unable to connect to: %s\n", client->name);
+			if (_verbose) printf("Unable to connect to: %s\n", node->name);
 
 			// close the socket that didn't connect.
 			close(fd);
-			client->handle = -1;
 
 			//set the action so that we can attempt to reconnect.
-			assert(client->connect_event == NULL);
-			assert(client->wait_event == NULL);
-			client->wait_event = evtimer_new(_evbase, client_wait_handler, (void *) client);
-			evtimer_add(client->wait_event, &_node_wait_timeout);
+			assert(node->connect_event == NULL);
+			assert(node->wait_event == NULL);
+			assert(_evbase);
+			node->wait_event = evtimer_new(_evbase, node_wait_handler, (void *) node);
+			evtimer_add(node->wait_event, &_node_wait_timeout);
 		}
 		else {
-			if (_verbose) printf("Connected to node: %s\n", client->name);
+			if (_verbose) printf("Connected to node: %s\n", node->name);
 			
 			// we've connected to another server.... 
 			// TODO: we still dont know if its a valid connection, but we can delay the _settling event.
 
-			assert(client->connect_event == NULL);
-			assert(client->wait_event == NULL);
+			assert(node->connect_event == NULL);
+			assert(node->wait_event == NULL);
+			
+			node->client = client_new();
+			node->client->node = node;
+			node->client->handle = fd;
 			
 			assert(_evbase);
-			assert(client->handle > 0);
-			client->read_event = event_new( _evbase, client->handle, EV_READ|EV_PERSIST, read_handler, client);
-			assert(client->read_event);
-			int s = event_add(client->read_event, &_standard_timeout);
+			assert(node->client->handle > 0);
+			assert(node->client->read_event == NULL);
+			node->client->read_event = event_new( _evbase, fd, EV_READ|EV_PERSIST, read_handler, node->client);
+			assert(node->client->read_event);
+			int s = event_add(node->client->read_event, &_standard_timeout);
 			assert(s == 0);
 			
 			// should send a SERVERHELLO command to the server we've connected to.
-			push_serverhello(client);
-		}
-	}
-}
-
-
-
-// if the name is passed it, then it is assumed that this is the first time a connect is attempted.  If a name is not supplied (ie, it is NULL), then we simply re-use the existing data in the client object.
-static void client_connect(client_t *client, char *name) 
-{
-	int len;
-	int sock;
-	struct sockaddr saddr;
-
-	sock = socket(AF_INET,SOCK_STREAM,0);
-	assert(sock >= 0);
-											
-	// Before we attempt to connect, set the socket to non-blocking mode.
-	evutil_make_socket_nonblocking(sock);
-
-	
-	if (name != NULL) {
-		// create client object.
-		client->name = name;
-	}	
-	
-	// resolve the address.
-	len = sizeof(saddr);
-	if (evutil_parse_sockaddr_port(client->name, &saddr, &len) != 0) {
-		// if we cant parse the socket, then we should probably remove it from the nodes list.
-		assert(0);
-	}
-
-	// attempt the connect.
-	int result = connect(sock, &saddr, sizeof(struct sockaddr));
-	assert(result < 0);
-	assert(errno == EINPROGRESS);
-
-		
-	client->handle = sock;
-	client->saddr = saddr;
-	
-	if (_verbose) printf("attempting to connect to node: %s\n", client->name);
-	
-	// set the connect event with a timeout.
-	assert(client->connect_event == NULL);
-	client->connect_event = event_new(_evbase, sock, EV_WRITE, client_connect_handler, client);
-	event_add(client->connect_event, &_connect_timeout);
-
-	assert(client->wait_event == NULL);
-	assert(client->connect_event);
-}
+			push_serverhello(node->client);
+}	}	}
 
 
 
 
-static void client_wait_handler(int fd, short int flags, void *arg)
-{
-	client_t *client = arg;
-
-	assert(fd == -1);
-	assert((flags & EV_TIMEOUT) == EV_TIMEOUT);
-	assert(arg);
-	
-	if (_verbose) printf("WAIT: handle=%d\n", fd);
-	
-	assert(client->connect_event == NULL);
-	assert(client->read_event == NULL);
-	assert(client->wait_event);
-	
-	event_free(client->wait_event);
-	client->wait_event = NULL;
-
-	if (_shutdown <= 0) {
-		client_connect(client, NULL);
-	}
-}
 
 
 
@@ -2385,11 +2419,10 @@ void connect_nodes(void)
 		assert(_nodes);
 		assert(_nodes[i]);
 		assert(_nodes[i]->name);
+		if (_nodes[i]->client == NULL) {
+			node_connect(_nodes[i]);
+}	}	}
 
-		_nodes[i]->client = client_new();
-		client_connect(_nodes[i]->client, _nodes[i]->name);
-	}
-}
 
 // send a message to all connected clients informing them of the new hashmask info.
 static void all_hashmask(unsigned int hashmask, int level)
@@ -2614,7 +2647,9 @@ int main(int argc, char **argv)
 
 	// server interface should be shutdown.
 	assert(_server == NULL);
-	
+	assert(_node_count == 0);
+	assert(_client_count == 0);
+
 
 	// make sure signal handlers have been cleared.
 	assert(_sigint_event == NULL);
