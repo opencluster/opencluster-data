@@ -51,6 +51,8 @@
 #define CMD_SERVERLIST   100
 #define CMD_HASHMASKS    110
 #define CMD_HASHMASK     120
+#define CMD_LOADLEVELS   200
+#define REPLY_LOADLEVELS 210
 #define CMD_SET_INT      2000
 #define CMD_GET_INT      2100
 #define REPLY_DATA_INT   2105
@@ -202,9 +204,6 @@ unsigned int _mask = 0;
 // the ones that are not handled by this server, will have a NULL entry.
 bucket_t ** _buckets = NULL;
 
-// we will keep track of the number of buckets we are actually supporting.  This is so that we dont 
-// have to go through the list to determine it.
-int _bucket_count = 0;
 
 
 // event base for listening on the sockets, and timeout events.
@@ -219,7 +218,6 @@ int _client_count;
 node_t **_nodes = NULL;
 int _node_count = 0;
 
-int _active_nodes = 0;
 
 
 
@@ -284,6 +282,7 @@ struct timeval _stats_timeout = {.tv_sec = 1, .tv_usec = 0};
 struct timeval _loadlevel_timeout = {.tv_sec = 30, .tv_usec = 0};
 struct timeval _connect_timeout = {.tv_sec = 30, .tv_usec = 0};
 struct timeval _node_wait_timeout = {.tv_sec = 5, .tv_usec = 0};
+struct timeval _node_loadlevel_timeout = {.tv_sec = 30, .tv_usec = 0};
 
 // This will be 0 when the node has either connected to other nodes in the cluster, or it has 
 // assumed that it is the first node in the cluster.
@@ -300,6 +299,30 @@ int _settling = 1;
 // the system will stop before it has really completed.
 int _shutdown = -1;
 
+
+
+struct {
+	struct {
+		int active_nodes;
+		int clients;
+		int primary_buckets;
+		int secondary_buckets;
+		int items;
+		int maps;
+	} last;
+	
+	int clients;
+
+	int active_nodes;
+
+	// we will keep track of the number of buckets we are actually supporting.  This is so that we 
+	// dont have to go through the list to determine it.
+	int primary_buckets;
+	int secondary_buckets;
+	int bucket_transfer;
+
+
+} _stats;
 
 
 
@@ -484,8 +507,8 @@ static void client_free(client_t *client)
 	if (client->node) {
 		node = client->node;
 		node->client = NULL;
-		_active_nodes --;
-		assert(_active_nodes >= 0);
+		_stats.active_nodes --;
+		assert(_stats.active_nodes >= 0);
 	}
 	
 	assert(client->out.length == 0);
@@ -782,7 +805,7 @@ static void client_shutdown_handler(evutil_socket_t fd, short what, void *arg)
 	// check to see if this is a node connection, and there are still buckets, reset the timeout for one_second.
 	assert(client);
 	if (client->node) {
-		if (_bucket_count > 0) {
+		if (_stats.primary_buckets > 0 || _stats.secondary_buckets > 0) {
 			// this is a node client, and there are still buckets, so we need to keep the connection open.
 			assert(client->shutdown_event);
 			evtimer_add(client->shutdown_event, &_shutdown_timeout);
@@ -1054,7 +1077,7 @@ static void shutdown_handler(evutil_socket_t fd, short what, void *arg)
 	
 	
 	if (waiting > 0) {
-		if (_verbose) printf("WAITING FOR SHUTDOWN.  nodes=%d, clients=%d, buckets=%d\n", _node_count, _client_count, _bucket_count);
+		if (_verbose) printf("WAITING FOR SHUTDOWN.  nodes=%d, clients=%d, buckets=%d\n", _node_count, _client_count, _stats.primary_buckets + _stats.secondary_buckets);
 		evtimer_add(_shutdown_event, &_shutdown_timeout);
 	}
 	else {
@@ -1148,7 +1171,7 @@ static void write_handler(int fd, short int flags, void *arg)
 
 	// PERF: if a performance issue is found with sending large chunks of data 
 	//       that dont fit in single send, we might be wasting time by purging 
-	//       sent data from hte buffer which results in moving data in memory.
+	//       sent data from the buffer which results in moving data in memory.
 	
 	assert(client->write_event);
 	assert(client->out.buffer);
@@ -1252,7 +1275,8 @@ static void payload_string(const char *str)
 
 
 
-// Pushes out a command to the specified client (which should be a cluster node), informing it that we are a cluster node also, that our interface is such and such.
+// Pushes out a command to the specified client (which should be a cluster node), informing it that 
+// we are a cluster node also, that our interface is such and such.
 static void push_serverhello(client_t *client)
 {
 	assert(client);
@@ -1320,7 +1344,7 @@ static void push_hashmasks(client_t *client)
 	
 	// first we set the number of buckets this server contains.
 	payload_int(_mask);
-	payload_int(_bucket_count);
+	payload_int(_stats.primary_buckets + _stats.secondary_buckets);
 	
 	check = 0;
 	for (i=0; i<=_mask; i++) {
@@ -1363,7 +1387,7 @@ static void push_hashmasks(client_t *client)
 		}
 	}
 
-	assert(_bucket_count == 0 || (check) == _bucket_count);
+	assert((_stats.primary_buckets + _stats.secondary_buckets) == 0 || (check) == (_stats.primary_buckets + _stats.secondary_buckets));
 
 	send_message(client, NULL, CMD_HASHMASKS, _payload_length, _payload);
 
@@ -1464,6 +1488,41 @@ static node_t * node_new(const char *name)
 }
 
 
+// Pushes out a command to the specified client (which should be a cluster node), asking for its 
+// currently load level. 
+static void push_loadlevels(client_t *client)
+{
+	assert(client);
+	assert(client->handle > 0);
+	
+	assert(_payload_length == 0);
+	
+	printf("[%d] LOADLEVELS: \n", (int)(_current_time.tv_sec-_start_time.tv_sec));
+	
+	send_message(client, NULL, CMD_LOADLEVELS, 0, NULL);
+	assert(_payload_length == 0);
+}
+
+
+static void node_loadlevel_handler(int fd, short int flags, void *arg)
+{
+	node_t *node = arg;
+	
+	assert(fd == -1);
+	assert((flags & EV_TIMEOUT) == EV_TIMEOUT);
+	assert(arg);
+
+	assert(node);
+	assert(node->client);
+	
+	push_loadlevels(node->client);
+
+	// add the timeout event back in.
+	assert(node->loadlevel_event);
+	assert(_evbase);
+	evtimer_add(node->loadlevel_event, &_node_loadlevel_timeout);
+}
+
 
 
 
@@ -1527,7 +1586,10 @@ static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 		client->node = _nodes[_node_count];
 		_node_count ++;
 		
-		_active_nodes ++;
+		_stats.active_nodes ++;
+		assert(_stats.active_nodes > 0);
+		
+		found = 0;
 		
 		printf("Adding '%s' as a New Node.\n", name);
 	}
@@ -1565,7 +1627,14 @@ static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 					assert(_nodes[found]->client == NULL);
 					client->node = _nodes[found];
 	}	}	}	}
-	
+
+	// since this connection is a client, we need to set a 'loadlevel' timer.
+	assert(_nodes[found]->loadlevel_event == NULL);
+	assert(_evbase);
+	_nodes[found]->loadlevel_event = evtimer_new(_evbase, node_loadlevel_handler, (void *) _nodes[found]);
+	assert(_nodes[found]->loadlevel_event);
+	evtimer_add(_nodes[found]->loadlevel_event, &_node_loadlevel_timeout);
+
 	// send the ACK reply.
 	send_message(client, header, REPLY_ACK, 0, NULL);
 }
@@ -1859,6 +1928,31 @@ static void cmd_get_int(client_t *client, header_t *header, char *payload)
 }
 
 
+// the hello command does not require a payload, and simply does a reply.   
+// However, it triggers a servermap, and a hashmasks command to follow it.
+static void cmd_loadlevels(client_t *client, header_t *header)
+{
+	assert(client);
+	assert(header);
+
+	assert(_payload);
+	assert(_payload_length == 0);
+	assert(_payload_max > 0);
+	
+	assert(_stats.primary_buckets >= 0);
+	assert(_stats.secondary_buckets >= 0);
+	assert(_stats.bucket_transfer >= 0);
+	payload_int(_stats.primary_buckets);
+	payload_int(_stats.secondary_buckets);
+	payload_int(_stats.bucket_transfer);
+	
+	// send the reply.
+	send_message(client, header, REPLY_LOADLEVELS, _payload_length, _payload);
+
+	_payload_length = 0;
+}
+
+
 
 static void process_ack(client_t *client, header_t *header)
 {
@@ -1868,11 +1962,41 @@ static void process_ack(client_t *client, header_t *header)
 	// if there are any special repcmds that we need to process, then we would add them here.  
 
 	if (header->repcmd == CMD_SERVERHELLO) {
-		_active_nodes ++;
-		if (_verbose) printf("Active cluster node connections: %d\n", _active_nodes);
+		_stats.active_nodes ++;
+		if (_verbose) printf("Active cluster node connections: %d\n", _stats.active_nodes);
 	}
 	
 }
+
+
+
+
+static void process_loadlevels(client_t *client, header_t *header, void *ptr)
+{
+	char *next;
+	int primary;
+	int backups;
+	int transferring;
+	
+	assert(client);
+	assert(header);
+	assert(ptr);
+	
+	assert(client->node);
+	
+	next = ptr;
+
+	// need to get the data out of the payload.
+	primary = data_int(&next);
+	backups = data_int(&next);
+	transferring = data_int(&next);
+	
+	if ((_stats.primary_buckets + _stats.secondary_buckets) > (primary + backups + 1)) {
+		// need to migrate a bucket to this node.
+		assert(0);
+	}
+}
+
 
 
 static void process_unknown(client_t *client, header_t *header)
@@ -1947,8 +2071,9 @@ static int process_data(client_t *client)
 					// we have received a reply to a command we issued.  So we need to process that reply.
 					// we have enough data, so we need to pass it on to the functions that handle it.
 					switch (header.command) {
-						case REPLY_ACK:     process_ack(client, &header); 		break;
-						case REPLY_UNKNOWN: process_unknown(client, &header); 	break;
+						case REPLY_ACK:     	process_ack(client, &header); 				break;
+						case REPLY_LOADLEVELS:	process_loadlevels(client, &header, ptr);	break;
+						case REPLY_UNKNOWN:		process_unknown(client, &header); 			break;
 						default:
 							if (_verbose > 1) {
 								printf("[%d] Unknown reply: Reply=%d, Command=%d, userid=%d, length=%d\n", 
@@ -1964,6 +2089,7 @@ static int process_data(client_t *client)
 						case CMD_HELLO: 		cmd_hello(client, &header); 			break;
 						case CMD_SERVERHELLO: 	cmd_serverhello(client, &header, ptr); 	break;
 						case CMD_PING: 	        cmd_ping(client, &header); 				break;
+						case CMD_LOADLEVELS: 	cmd_loadlevels(client, &header);		break;
 						case CMD_SET_INT: 		cmd_set_int(client, &header, ptr); 		break;
 						case CMD_GET_INT: 		cmd_get_int(client, &header, ptr); 		break;
 						default:
@@ -2060,6 +2186,10 @@ static void node_wait_handler(int fd, short int flags, void *arg)
 		node_connect(node);
 	}
 }
+
+
+
+
 
 
 
@@ -2165,8 +2295,8 @@ static void read_handler(int fd, short int flags, void *arg)
 				// this client is actually a node connection.  We need to create an event to wait 
 				// and then try connecting again.
 
-				_active_nodes --;
-				assert(_active_nodes >= 0);
+				_stats.active_nodes --;
+				assert(_stats.active_nodes >= 0);
 
 				node_retry(client->node);
 			}
@@ -2397,6 +2527,14 @@ static void node_connect_handler(int fd, short int flags, void *arg)
 			int s = event_add(node->client->read_event, &_standard_timeout);
 			assert(s == 0);
 			
+			// set an event to start asking for load levels.
+			// --- 
+			assert(node->loadlevel_event == NULL);
+			assert(_evbase);
+			node->loadlevel_event = evtimer_new(_evbase, node_loadlevel_handler, (void *) node);
+			assert(node->loadlevel_event);
+			evtimer_add(node->loadlevel_event, &_node_loadlevel_timeout);
+
 			// should send a SERVERHELLO command to the server we've connected to.
 			push_serverhello(node->client);
 }	}	}
@@ -2435,7 +2573,7 @@ static void all_hashmask(unsigned int hashmask, int level)
 	assert(_payload_length == 0);
 	
 	assert(_mask > 0);
-	assert(_bucket_count > 0);
+	assert(_stats.primary_buckets > 0 || _stats.secondary_buckets > 0);
 	
 	// build the message first.
 	// first comes the mask.
@@ -2500,7 +2638,7 @@ static void settle_handler(int fd, short int flags, void *arg)
 
 	if (_verbose) printf("SETTLE: handle=%d\n", fd);
 	
-	if (_active_nodes == 0) {
+	if (_stats.active_nodes == 0) {
 		if (_verbose) printf("Settle timeout.  No Node connections.  Setting up cluster.\n");
 		
 		assert(_mask == 0);
@@ -2510,11 +2648,13 @@ static void settle_handler(int fd, short int flags, void *arg)
 		_buckets = malloc(sizeof(bucket_t *) * (_mask + 1));
 		assert(_buckets);
 		
-		_bucket_count = _mask + 1;
+		assert(_stats.primary_buckets == 0);
+		assert(_stats.secondary_buckets == 0);
 		
 		// for starters we will need to create a bucket for each hash.
 		for (i=0; i<=_mask; i++) {
 			_buckets[i] = bucket_new(i);
+			_stats.primary_buckets ++;
 
 			// send out a message to all connected clients, to let them know that the buckets have changed.
 			all_hashmask(i, 0);
@@ -2522,7 +2662,7 @@ static void settle_handler(int fd, short int flags, void *arg)
 		
 		_settling = 0;
 		
-		if (_verbose) printf("Current buckets: %d\n", _bucket_count);
+		if (_verbose) printf("Current buckets: %d\n", _stats.primary_buckets + _stats.secondary_buckets);
 	}
 }
 
@@ -2545,16 +2685,39 @@ static void seconds_handler(int fd, short int flags, void *arg)
 // If we have migrating stats, then we need to migrate to the next slot.
 static void stats_handler(int fd, short int flags, void *arg)
 {
+	int changed = 0;
+	
 	assert(fd == -1);
 	assert(flags & EV_TIMEOUT);
 	assert(arg == NULL);
 
-// 	if (_verbose) printf("Stats. Nodes:%d\n", _active_nodes);
+	if (_stats.last.active_nodes != _stats.active_nodes) {
+		_stats.last.active_nodes = _stats.active_nodes;
+		changed++;
+	}
+	
+	if (_stats.last.clients != _stats.clients) {
+		_stats.last.clients = _stats.clients;
+		changed++;
+	}
+	
+	if (changed > 0) {
+		if (_verbose) {
+			printf("Stats. Nodes:%d\n", _stats.active_nodes);
+		}
+	}
 	
 	evtimer_add(_stats_event, &_stats_timeout);
 }
 
 
+// we have a stats object that is used throughout the code to log some statistics.  WHen the service is started up, it needs to be cleared.
+static void init_stats(void)
+{
+	// just clear out the whole structure to zero.
+	memset(&_stats, 0, sizeof(_stats));
+}
+	
 
 
 //-----------------------------------------------------------------------------
@@ -2617,6 +2780,8 @@ int main(int argc, char **argv)
 	assert(_stats_event);
 	evtimer_add(_stats_event, &_stats_timeout);
 
+	init_stats();
+	
 
 	// initialise the servers that we listen on.
 	server_listen();
