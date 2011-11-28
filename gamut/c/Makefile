@@ -13,7 +13,7 @@ OBJS=
 
 
 gamut: gamut.c $(OBJS)
-	gcc -o $@ gamut.c $(OBJS) $(LIBS) $(ARGS)
+	gcc `pkg-config --cflags --libs glib-2.0` -o $@ gamut.c $(OBJS) $(LIBS) $(ARGS)
 
 
 
