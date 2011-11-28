@@ -61,29 +61,29 @@ return a single 'reply', although it may trigger further commands to come.  The 
 a param that indicates the commandID that it is replying to.
 
 The commands are:
-  10    hello        initiate communications.
-  11    capabilities determine if a command is accepted or not, without issuing the command.
-  15    shuttingdown tells the other node that this node is shutting down and not to send any 
-                     buckets to it, or other data.
-  20    goodbye      terminate communications cleanly
-  30    ping         check that the node is responding.
-  50    serverhello  when a server is connecting to another server.
-  100   serverlist   sends a list of servers in the cluster.
-  110   hashmasks    list of all the hashmasks that are in the system.
-  120   maskupdate   when a set of hashes is being moved to a different server, let the clients and
-                     other servers know. 
-  130   newserver    when a new server joins the cluster, a message is sent out to the other
-                     members of the cluster.
-  200   loadlevel    nodes will let other nodes know how full they are.
-  1000  lock         obtain a cluster lock
-  1010  unlock       release a cluster lock
-  2000  set_int      set an integer (32-bit) key/value, overwriting if it exists.
-  2010  set_long     set an long (64-bit) key/value, overwriting it it exists.
-  2020  set_string   set a variable length string key/value.
-  2100  get_int      get a integer (32-bit) key/value pair.
-  2110  get_long     get a long (32-bit) key/value pair.
-  2120  get_string   get a variable length string key/value.
-  2200  get_type     get the type of the data.
+  10    hello         initiate communications.
+  11    capabilities  determine if a command is accepted or not, without issuing the command.
+  15    shuttingdown  tells the other node that this node is shutting down and not to send any 
+                      buckets to it, or other data.
+  20    goodbye       terminate communications cleanly
+  30    ping          check that the node is responding.
+  50    serverhello   when a server is connecting to another server.
+  100   serverlist    sends a list of servers in the cluster.
+  110   hashmasks     list of all the hashmasks that are in the system.
+  120   maskupdate    when a set of hashes is being moved to a different server, let the clients and
+                      other servers know. 
+  130   newserver     when a new server joins the cluster, a message is sent out to the other
+                      members of the cluster.
+  200   req_loadlevel nodes will ask other nodes how full they are.
+  1000  lock          obtain a cluster lock
+  1010  unlock        release a cluster lock
+  2000  set_int       set an integer (32-bit) key/value, overwriting if it exists.
+  2010  set_long      set an long (64-bit) key/value, overwriting it it exists.
+  2020  set_string    set a variable length string key/value.
+  2100  get_int       get a integer (32-bit) key/value pair.
+  2110  get_long      get a long (32-bit) key/value pair.
+  2120  get_string    get a variable length string key/value.
+  2200  get_type      get the type of the data.
 
 Note: To promote performance on the server, CommandID's less than 1000 do not require access to the
       clustered data.  CommandID's over 1000 internally require pipeline locks and need to be done
@@ -452,6 +452,44 @@ Payload:
 Replies:
   ack(1)
   tryelsewhere(4), if the server is shutting down, or not accepting client connections.
+
+
+-----------------------------------------------------------------------
+request_loadlevels(200)
+
+Requests a server for its loadlevels.
+
+Type of message:
+  Command
+
+Conditions of use:
+  Sent from server to server.
+  
+Payload:
+  none
+
+Replies:
+  loadlevels(1)
+  tryelsewhere(4), if the server is shutting down, or not accepting client connections.
+
+
+-----------------------------------------------------------------------
+loadlevels(210)
+
+Reply with the nodes current load levels.  This is used to determine if the data in the cluster 
+needs to be balanced.
+
+Type of message:
+  Reply
+
+Conditions of use:
+  Sent from server to server.
+
+Payload:
+  integer - primary buckets
+  integer - backup buckets
+  integer - transfer states (0 = not currently transferring a bucket, 1 = currently transferring a bucket).
+
 
 
 -----------------------------------------------------------------------
