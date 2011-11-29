@@ -31,6 +31,7 @@
 #define CMD_SERVERLIST  100
 #define CMD_HASHMASKS   110
 #define CMD_SET_INT     2000
+#define CMD_SET_STR     2020
 #define CMD_GET_INT     2100
 #define CMD_DATA_INT    2105
 
@@ -1424,6 +1425,68 @@ int cluster_setint(cluster_t *cluster, const char *name, const int value, const 
 	
 	return(res);
 }
+
+
+
+int cluster_setstr(cluster_t *cluster, const char *name, const char *value, const int expires)
+{
+	int res = 0;
+	int name_hash;
+	int mask_index;
+	server_t *server;
+	hashmask_t *hashmask;
+	message_t *msg;
+	
+	assert(cluster);
+	assert(name);
+	assert(expires >= 0);
+	
+	// get a hash of the name
+	name_hash = generate_hash_str(name, strlen(name));
+	
+	// get the index from the hash mask.
+	assert(cluster->mask > 0);
+	mask_index = name_hash & cluster->mask;
+	
+	// get the server object from the index.
+	assert(cluster->hashmasks);
+	hashmask = cluster->hashmasks[mask_index];
+	assert(hashmask);
+	server = hashmask->server;
+	
+	// make sure server is connected.  if not, then connect and wait for the initial handshaking.
+	if (server == NULL) {
+		// we are not connected to this server yet.  So we need to connect first.
+		assert(0);
+	}
+	
+	// build the message and send it off.
+	msg = message_new(cluster, CMD_SET_STR);
+	assert(msg);
+	msg_setint(msg, 0); 		// integer - map hash (0 for non-map items)
+	msg_setint(msg, name_hash);	// integer - key hash
+	msg_setint(msg, expires);	// integer - expires (in seconds from now, 0 means it never expires)
+	msg_setint(msg, 0);			// integer - full wait (0 indicates dont wait for sync to backup servers, 1 indicates to wait).
+	msg_setstr(msg, name);		// string  - name
+	msg_setstr(msg, value);		// integer - value (to be stored).
+
+	send_request(cluster, server, msg, WAIT_FOR_REPLY);
+	
+	// process pending data on server (blocking), until reply is received.
+	while (msg->in.result == 0 && server->handle > 0) {
+		pending_server(cluster, server, OC_NON_BLOCKING);
+	}
+
+	// now we've got a reply, we free the message, because there is no 
+	assert(msg->in.result == CMD_ACK);
+	
+	
+	message_return(msg);
+	
+	return(res);
+}
+
+
 
 static void msg_getint(message_t *msg, int *value)
 {

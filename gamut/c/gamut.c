@@ -38,8 +38,13 @@ int main(int argc, char **argv)
 	if (nodes > 0) {
 	
 		// set an item in the cluster with some data.
-		printf("Setting data in the cluster\n");
+		printf("Setting data in the cluster (integer)\n");
 		cluster_setint(cluster, "testdata", 45, 0);
+
+		// set an item in the cluster with some data.
+		printf("Setting data in the cluster (string)\n");
+		cluster_setstr(cluster, "clientname", "Bill Grady", 0);
+		
 		
 		// pull some data out of the cluster.
 		data = 0;
