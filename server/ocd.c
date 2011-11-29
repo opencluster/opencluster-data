@@ -260,6 +260,7 @@ struct event *_settle_event = NULL;
 struct event *_seconds_event = NULL;
 struct timeval _current_time = {0,0};
 struct timeval _start_time = {0,0};
+unsigned int _seconds = 0;
 
 // The stats event fires every second, and it collates the stats it has and logs some statistics 
 // (if there were any).
@@ -280,7 +281,7 @@ struct timeval _shutdown_timeout = {0,500000};
 struct timeval _settle_timeout = {.tv_sec = 5, .tv_usec = 0};
 struct timeval _seconds_timeout = {.tv_sec = 0, .tv_usec = 100000};
 struct timeval _stats_timeout = {.tv_sec = 1, .tv_usec = 0};
-struct timeval _loadlevel_timeout = {.tv_sec = 30, .tv_usec = 0};
+struct timeval _loadlevel_timeout = {.tv_sec = 5, .tv_usec = 0};
 struct timeval _connect_timeout = {.tv_sec = 30, .tv_usec = 0};
 struct timeval _node_wait_timeout = {.tv_sec = 5, .tv_usec = 0};
 struct timeval _node_loadlevel_timeout = {.tv_sec = 30, .tv_usec = 0};
@@ -454,7 +455,7 @@ static void client_accept(client_t *client, evutil_socket_t handle, struct socka
 	assert(client->handle < 0);
 	client->handle = handle;
 	
-	if (_verbose) printf("[%d] New client - handle=%d\n", (int)(_current_time.tv_sec-_start_time.tv_sec), handle);
+	if (_verbose) printf("[%u] New client - handle=%d\n", _seconds, handle);
 
 	assert(_evbase);
 	assert(client->handle > 0);
@@ -503,7 +504,7 @@ static void client_free(client_t *client)
 	
 	assert(client);
 	
-	if (_verbose >= 2) printf("[%d] client_free: handle=%d\n", (int)(_current_time.tv_sec-_start_time.tv_sec), client->handle);
+	if (_verbose >= 2) printf("[%u] client_free: handle=%d\n", _seconds, client->handle);
 
 	if (client->node) {
 		node = client->node;
@@ -562,7 +563,8 @@ static void client_free(client_t *client)
 				resize ++;
 	}	}	}
 	
-	printf("[%d] found:%d, client_count:%d\n", (int)(_current_time.tv_sec-_start_time.tv_sec), found, _client_count);
+	if (_verbose > 0) 
+		printf("[%u] found:%d, client_count:%d\n", _seconds, found, _client_count);
 	
 	assert(found == 1);
 	
@@ -762,6 +764,8 @@ static void bucket_destroy(bucket_t *bucket)
 
 
 //-----------------------------------------------------------------------------
+// NOTE: there is no real reason why we need a transfer event.  Instead we will send one item at a 
+//       time to the other server, and we will use the 'ack' as a trigger to send the next item.
 static void bucket_transfer_handler(evutil_socket_t fd, short what, void *arg)
 {
 	int waiting = 0;
@@ -773,7 +777,7 @@ static void bucket_transfer_handler(evutil_socket_t fd, short what, void *arg)
 
 	if (_verbose) printf("Bucket transfer handler\n");
 
-	// check the state of the bucket.  If it is a backup bucket, then we can deleete it.
+	// check the state of the bucket.  If it is a backup bucket, then we can delete it.
 	if (bucket->level > 0) {
 		bucket_destroy(bucket);
 	}
@@ -790,8 +794,6 @@ static void bucket_transfer_handler(evutil_socket_t fd, short what, void *arg)
 		assert(bucket->transfer_event);
 		event_free(bucket->transfer_event);
 		bucket->transfer_event = NULL;
-		
-		
 	}
 }
 
@@ -1286,7 +1288,7 @@ static void push_serverhello(client_t *client)
 	assert(_payload_length == 0);
 	payload_string(_interface);
 	
-	printf("[%d] SERVERHELLO: Interface:'%s', length=%d, payload=%d\n", (int)(_current_time.tv_sec-_start_time.tv_sec), _interface, (int)strlen(_interface), _payload_length);
+	printf("[%u] SERVERHELLO: Interface:'%s', length=%d, payload=%d\n", _seconds, _interface, (int)strlen(_interface), _payload_length);
 	
 	send_message(client, NULL, CMD_SERVERHELLO, _payload_length, _payload);
 	_payload_length = 0;
@@ -1726,7 +1728,7 @@ static int store_value(int map_hash, int key_hash, char *name, int expires, valu
 			}
 			
 			if (expires == 0) { item->expires = 0; }
-			else { item->expires = _current_time.tv_sec + expires; }
+			else { item->expires = _seconds + expires; }
 			
 			assert(result < 0);
 			result = 0;
@@ -1788,7 +1790,7 @@ static int get_value(int map_hash, int key_hash, value_t **value)
 					assert(item->name);
 					assert(item->value);
 					
-					if (item->expires > 0 && item->expires < _current_time.tv_sec) {
+					if (item->expires > 0 && item->expires < _seconds) {
 						// item has expired.   We need to remove it from the map list.
 						assert(result < 0);
 						assert(0);
@@ -1845,7 +1847,7 @@ static void cmd_set_int(client_t *client, header_t *header, char *payload)
 	memcpy(name, str, name_len);
 	name[name_len] = 0;
 	
-	if (_verbose > 2) printf("[%d] CMD: set (integer): [%d/%d]'%s'=%d\n\n", (int)(_current_time.tv_sec-_start_time.tv_sec), map_hash, key_hash, name, value->data.i);
+	if (_verbose > 2) printf("[%u] CMD: set (integer): [%d/%d]'%s'=%d\n\n", _seconds, map_hash, key_hash, name, value->data.i);
 
 	// eventually we will add the ability to wait until the data has been competely distributed 
 	// before returning an ack.
@@ -1889,7 +1891,7 @@ static void cmd_get_int(client_t *client, header_t *header, char *payload)
 	key_hash = data_int(&next);
 	
 	
-	if (_verbose > 2) printf("[%d] CMD: get (integer)\n\n", (int)(_current_time.tv_sec-_start_time.tv_sec));
+	if (_verbose > 3) printf("[%u] CMD: get (integer)\n\n", _seconds);
 
 
 	// store the value into the trees.  If a value already exists, it will get released and this one 
@@ -2062,9 +2064,22 @@ static void process_loadlevels(client_t *client, header_t *header, void *ptr)
 	backups = data_int(&next);
 	transferring = data_int(&next);
 	
-	if ((_stats.primary_buckets + _stats.secondary_buckets) > (primary + backups + 1)) {
-		// need to migrate a bucket to this node.
-		assert(0);
+	// if the target node is not currently transferring, and we are not currently transferring
+	if (_stats.bucket_transfer == 0 && transferring == 0) {
+	
+		if ((_stats.primary_buckets + _stats.secondary_buckets) > (primary + backups + 1)) {
+			// need to migrate a bucket to this node.
+			
+			if (_stats.primary_buckets >= _stats.secondary_buckets) {
+				// we need to send a primary bucket.
+				assert(0);
+				
+			}
+			else {
+				// we need to hand off one of our backup buckets.
+				assert(0);
+			}
+		}
 	}
 }
 
@@ -2077,6 +2092,9 @@ static void process_unknown(client_t *client, header_t *header)
 
 	// we sent a command, and the client didn't know what to do with it.  If we had certain modes 
 	// we could enable for compatible capabilities (for this client), we would do it here.
+	
+	// during initial development, leave this here to catch protocol errors. but once initial 
+	// development is complete, should not do an assert here.
 	assert(0);
 }
 
@@ -2125,7 +2143,9 @@ static int process_data(client_t *client)
 			header.length = ntohl(raw->length);
 			
 			if (_verbose > 4) {
-				printf("[%d] New telegram: Command=%d, repcmd=%d, userid=%d, length=%d, buffer_length=%d\n", (int)(_current_time.tv_sec-_start_time.tv_sec), header.command, header.repcmd, header.userid, header.length, client->in.length);
+				printf("[%u] New telegram: Command=%d, repcmd=%d, userid=%d, length=%d, buffer_length=%d\n", 
+					_seconds, header.command, header.repcmd, 
+					header.userid, header.length, client->in.length);
 			}
 			
 			if ((client->in.length-HEADER_SIZE) < header.length) {
@@ -2147,8 +2167,8 @@ static int process_data(client_t *client)
 						case REPLY_UNKNOWN:		process_unknown(client, &header); 			break;
 						default:
 							if (_verbose > 1) {
-								printf("[%d] Unknown reply: Reply=%d, Command=%d, userid=%d, length=%d\n", 
-									(int)(_current_time.tv_sec-_start_time.tv_sec), header.repcmd, header.command, header.userid, header.length);
+								printf("[%u] Unknown reply: Reply=%d, Command=%d, userid=%d, length=%d\n", 
+									_seconds, header.repcmd, header.command, header.userid, header.length);
 							}
 							break;
 					}
@@ -2168,7 +2188,7 @@ static int process_data(client_t *client)
 							// got an invalid command, so we need to reply with an 'unknown' reply.
 							// since we have the raw command still in our buffer, we can use that 
 							// without having to build a normal reply.
-							if (_verbose > 1) { printf("[%d] Unknown command received: Command=%d, userid=%d, length=%d\n", (int)(_current_time.tv_sec-_start_time.tv_sec), header.command, header.userid, header.length); }
+							if (_verbose > 1) { printf("[%u] Unknown command received: Command=%d, userid=%d, length=%d\n", _seconds, header.command, header.userid, header.length); }
 							send_message(client, &header, REPLY_UNKNOWN, 0, NULL);
 							break;
 					}
@@ -2307,7 +2327,7 @@ static void read_handler(int fd, short int flags, void *arg)
 		
 			// we timed out, so we should kill the client.
 			if (_verbose > 2) {
-				printf("[%d] client timed out. handle=%d\n", (int)(_current_time.tv_sec-_start_time.tv_sec), fd);
+				printf("[%u] client timed out. handle=%d\n", _seconds, fd);
 			}
 			
 			// because the client has timed out, we need to clear out any data that we currently have for it.
@@ -2748,6 +2768,7 @@ static void seconds_handler(int fd, short int flags, void *arg)
 	assert(arg == NULL);
 
 	gettimeofday(&_current_time, NULL);
+	_seconds = _current_time.tv_sec - _start_time.tv_sec;
 
 	evtimer_add(_seconds_event, &_seconds_timeout);
 }
