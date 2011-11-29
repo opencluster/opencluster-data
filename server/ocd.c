@@ -54,6 +54,7 @@
 #define CMD_LOADLEVELS   200
 #define REPLY_LOADLEVELS 210
 #define CMD_SET_INT      2000
+#define CMD_SET_STR      2020
 #define CMD_GET_INT      2100
 #define REPLY_DATA_INT   2105
 
@@ -1928,6 +1929,76 @@ static void cmd_get_int(client_t *client, header_t *header, char *payload)
 }
 
 
+
+// Set a value into the hash storage.
+static void cmd_set_str(client_t *client, header_t *header, char *payload)
+{
+	char *next;
+	int map_hash;
+	int key_hash;
+	int expires;
+	int fullwait;
+	value_t *value;
+	char *str;
+	char *name;
+	int name_len;
+	int result;
+	int str_len;
+	
+	assert(client);
+	assert(header);
+	assert(payload);
+
+	// create a new value.
+	value = calloc(1, sizeof(value_t));
+	assert(value);
+	
+	next = payload;
+	
+	map_hash = data_int(&next);
+	key_hash = data_int(&next);
+	expires = data_int(&next);
+	fullwait = data_int(&next);
+
+	str = data_string(&next, &name_len);
+	assert(str && name_len > 0);
+	name = malloc(name_len + 1);
+	memcpy(name, str, name_len);
+	name[name_len] = 0;
+
+	value->type = VALUE_STRING;
+	str = data_string(&next, &str_len);
+	value->data.s.data = malloc(str_len + 1);
+	memcpy(value->data.s.data, str, str_len);
+	value->data.s.data[str_len] = 0;
+	value->data.s.length = str_len;
+	
+	if (_verbose > 2) printf("[%u] CMD: set (string): [%d/%d]'%s'\n\n", _seconds, map_hash, key_hash, name);
+
+	// eventually we will add the ability to wait until the data has been competely distributed 
+	// before returning an ack.
+	assert(fullwait == 0);
+
+	// store the value into the trees.  If a value already exists, it will get released and this one 
+	// will replace it, so control of this value is given to the tree structure.
+	// NOTE: value is controlled by the tree after this function call.
+	// NOTE: name is controlled by the tree after this function call.
+	result = store_value(map_hash, key_hash, name, expires, value);
+	value = NULL;
+	name = NULL;
+	
+	// send the ACK reply.
+	if (result == 0) {
+		send_message(client, header, REPLY_ACK, 0, NULL);
+		_payload_length = 0;
+	}
+	else {
+		assert(0);
+	}
+}
+
+
+
 // the hello command does not require a payload, and simply does a reply.   
 // However, it triggers a servermap, and a hashmasks command to follow it.
 static void cmd_loadlevels(client_t *client, header_t *header)
@@ -2091,6 +2162,7 @@ static int process_data(client_t *client)
 						case CMD_PING: 	        cmd_ping(client, &header); 				break;
 						case CMD_LOADLEVELS: 	cmd_loadlevels(client, &header);		break;
 						case CMD_SET_INT: 		cmd_set_int(client, &header, ptr); 		break;
+						case CMD_SET_STR: 		cmd_set_str(client, &header, ptr); 		break;
 						case CMD_GET_INT: 		cmd_get_int(client, &header, ptr); 		break;
 						default:
 							// got an invalid command, so we need to reply with an 'unknown' reply.
