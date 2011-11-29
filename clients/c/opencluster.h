@@ -70,6 +70,7 @@ int cluster_setint(cluster_t *cluster, const char *name, const int value, const 
 int cluster_getint(cluster_t *cluster, const char *name, int *value);
 
 int cluster_setstr(cluster_t *cluster, const char *name, const char *value, const int expires);
+int cluster_getstr(cluster_t *cluster, const char *name, char **value, int *length);
 
 
 #endif

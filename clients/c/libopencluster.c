@@ -34,6 +34,8 @@
 #define CMD_SET_STR     2020
 #define CMD_GET_INT     2100
 #define CMD_DATA_INT    2105
+#define CMD_GET_STR     2120
+#define CMD_DATA_STR    2125
 
 // this structure is not packed on word boundaries, so it should represent the 
 // data received over the network.
@@ -229,8 +231,7 @@ void cluster_free(cluster_t *cluster)
 				assert(hashmasks[i]->server == NULL);
 				assert(hashmasks[i]->backup == NULL);
 				if (hashmasks[i]->host) {
-					assert(hashmasks[i] != hashmasks[i]->host);
-// 					free(hashmasks[i]->host);
+ 					free(hashmasks[i]->host);
 					hashmasks[i]->host = NULL;
 				}
 				assert(hashmasks[i]);
@@ -1502,6 +1503,34 @@ static void msg_getint(message_t *msg, int *value)
 	msg->in.offset += sizeof(int);
 }
 
+
+static void msg_getstr(message_t *msg, char **value, int *length)
+{
+	int *ptr_len;
+	char *ptr_str;
+	int len;
+	char *str;
+
+	assert(msg);
+	assert(value);
+	assert(msg->in.offset >= 0);
+	
+	ptr_len = ((void*)(msg->in.payload) + msg->in.offset);
+	len = ntohl(*ptr_len);
+	msg->in.offset += sizeof(int);
+	
+	ptr_str = ((void*)(msg->in.payload) + msg->in.offset);
+	assert(len > 0);
+	str = malloc(len + 1);
+	memcpy(str, ptr_str, len);
+	str[len] = 0;
+	
+	*value = str;
+	*length = len;
+}
+
+
+
 int cluster_getint(cluster_t *cluster, const char *name, int *value)
 {
 	int res = 0;
@@ -1556,6 +1585,79 @@ int cluster_getint(cluster_t *cluster, const char *name, int *value)
 	msg_getint(msg, &map_hash);
 	msg_getint(msg, &key_hash);
 	msg_getint(msg, value);
+
+// printf("---- map_hash:%d, key_hash:%d, name_hash:%d, value:%d\n", map_hash, key_hash, name_hash, *value);
+	
+	assert(key_hash == name_hash);
+	
+	message_return(msg);
+	
+	return(res);
+}
+
+
+int cluster_getstr(cluster_t *cluster, const char *name, char **value, int *length)
+{
+	int res = 0;
+	int name_hash;
+	int mask_index;
+	int map_hash;
+	int key_hash;
+	server_t *server;
+	hashmask_t *hashmask;
+	message_t *msg;
+	char *str;
+	int str_len;
+	
+	assert(cluster);
+	assert(name);
+	assert(value);
+	
+	// get a hash of the name
+	name_hash = generate_hash_str(name, strlen(name));
+	
+	// get the index from the hash mask.
+	assert(cluster->mask > 0);
+	mask_index = name_hash & cluster->mask;
+	
+	// get the server object from the index.
+	assert(cluster->hashmasks);
+	hashmask = cluster->hashmasks[mask_index];
+	assert(hashmask);
+	server = hashmask->server;
+	
+	// make sure server is connected.  if not, then connect and wait for the initial handshaking.
+	if (server == NULL) {
+		// we are not connected to this server yet.  So we need to connect first.
+		assert(0);
+	}
+	
+	// build the message and send it off.
+	msg = message_new(cluster, CMD_GET_STR);
+	assert(msg);
+	msg_setint(msg, 0); 		// integer - map hash (0 for non-map items)
+	msg_setint(msg, name_hash);	// integer - key hash
+
+	send_request(cluster, server, msg, WAIT_FOR_REPLY);
+	
+	// process pending data on server (blocking), until reply is received.
+	while (msg->in.result == 0 && server->handle > 0) {
+		pending_server(cluster, server, OC_NON_BLOCKING);
+	}
+
+	// now we've got a reply, we free the message, because there is no 
+// 	printf("msg result == %d\n", msg->in.result);
+	assert(msg->in.result == CMD_DATA_STR);
+
+	msg_getint(msg, &map_hash);
+	msg_getint(msg, &key_hash);
+	msg_getstr(msg, &str, &str_len);
+	
+	assert(str);
+	assert(str_len > 0);
+	
+	*value = str;
+	*length = str_len;
 
 // printf("---- map_hash:%d, key_hash:%d, name_hash:%d, value:%d\n", map_hash, key_hash, name_hash, *value);
 	

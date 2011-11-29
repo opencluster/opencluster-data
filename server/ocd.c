@@ -57,6 +57,8 @@
 #define CMD_SET_STR      2020
 #define CMD_GET_INT      2100
 #define REPLY_DATA_INT   2105
+#define CMD_GET_STR      2120
+#define REPLY_DATA_STR   2125
 
 
 #define CLIENT_TIMEOUT_LIMIT	6
@@ -1932,6 +1934,66 @@ static void cmd_get_int(client_t *client, header_t *header, char *payload)
 
 
 
+// Get a value from storage.
+static void cmd_get_str(client_t *client, header_t *header, char *payload)
+{
+	char *next;
+	int map_hash;
+	int key_hash;
+	value_t *value;
+	int result;
+	
+	assert(client);
+	assert(header);
+	assert(payload);
+
+	next = payload;
+	
+	map_hash = data_int(&next);
+	key_hash = data_int(&next);
+	
+	
+	if (_verbose > 3) printf("[%u] CMD: get (string)\n\n", _seconds);
+
+
+	// store the value into the trees.  If a value already exists, it will get released and this one 
+	// will replace it, so control of this value is given to the tree structure.
+	// NOTE: value is controlled by the tree after this function call.
+	// NOTE: name is controlled by the tree after this function call.
+	value = NULL;
+	result = get_value(map_hash, key_hash, &value);
+	
+	// send the ACK reply.
+	if (result == 0) {
+		assert(value);
+		
+		if (value->type != VALUE_STRING) {
+			// need to indicate stored value is a different type.
+			assert(0);
+		}
+		else {
+		
+			// build the reply.
+			assert(_payload);
+			assert(_payload_length == 0);
+			assert(_payload_max > 0);
+			
+			payload_int(map_hash);
+			payload_int(key_hash);
+			payload_data(value->data.s.length, value->data.s.data);
+		}
+		
+		assert(_payload_length > 0);
+		send_message(client, header, REPLY_DATA_STR, _payload_length, _payload);
+		_payload_length = 0;
+	}
+	else {
+		assert(0);
+	}
+}
+
+
+
 // Set a value into the hash storage.
 static void cmd_set_str(client_t *client, header_t *header, char *payload)
 {
@@ -2184,6 +2246,7 @@ static int process_data(client_t *client)
 						case CMD_SET_INT: 		cmd_set_int(client, &header, ptr); 		break;
 						case CMD_SET_STR: 		cmd_set_str(client, &header, ptr); 		break;
 						case CMD_GET_INT: 		cmd_get_int(client, &header, ptr); 		break;
+						case CMD_GET_STR: 		cmd_get_str(client, &header, ptr); 		break;
 						default:
 							// got an invalid command, so we need to reply with an 'unknown' reply.
 							// since we have the raw command still in our buffer, we can use that 

@@ -23,6 +23,8 @@ int main(int argc, char **argv)
 	register int i;
 	gdouble sec;
 	gulong msec;
+	char *str;
+	int str_len;
 
 	timer = g_timer_new();
 	
@@ -44,7 +46,15 @@ int main(int argc, char **argv)
 		// set an item in the cluster with some data.
 		printf("Setting data in the cluster (string)\n");
 		cluster_setstr(cluster, "clientname", "Bill Grady", 0);
-		
+
+		printf("Getting str data from the cluster\n");
+		result = cluster_getstr(cluster, "clientname", &str, &str_len);
+		assert(result == 0);
+		assert(str);
+		assert(str_len > 0);
+		printf("result='%s'\n", str);
+		free(str);
+		str = NULL;
 		
 		// pull some data out of the cluster.
 		data = 0;
