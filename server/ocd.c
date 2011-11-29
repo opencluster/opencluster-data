@@ -259,7 +259,7 @@ struct event *_settle_event = NULL;
 struct event *_seconds_event = NULL;
 struct timeval _current_time = {0,0};
 struct timeval _start_time = {0,0};
-struct unsigned int _seconds = 0;
+unsigned int _seconds = 0;
 
 // The stats event fires every second, and it collates the stats it has and logs some statistics 
 // (if there were any).
@@ -280,7 +280,7 @@ struct timeval _shutdown_timeout = {0,500000};
 struct timeval _settle_timeout = {.tv_sec = 5, .tv_usec = 0};
 struct timeval _seconds_timeout = {.tv_sec = 0, .tv_usec = 100000};
 struct timeval _stats_timeout = {.tv_sec = 1, .tv_usec = 0};
-struct timeval _loadlevel_timeout = {.tv_sec = 30, .tv_usec = 0};
+struct timeval _loadlevel_timeout = {.tv_sec = 5, .tv_usec = 0};
 struct timeval _connect_timeout = {.tv_sec = 30, .tv_usec = 0};
 struct timeval _node_wait_timeout = {.tv_sec = 5, .tv_usec = 0};
 struct timeval _node_loadlevel_timeout = {.tv_sec = 30, .tv_usec = 0};
@@ -763,6 +763,8 @@ static void bucket_destroy(bucket_t *bucket)
 
 
 //-----------------------------------------------------------------------------
+// NOTE: there is no real reason why we need a transfer event.  Instead we will send one item at a 
+//       time to the other server, and we will use the 'ack' as a trigger to send the next item.
 static void bucket_transfer_handler(evutil_socket_t fd, short what, void *arg)
 {
 	int waiting = 0;
@@ -774,7 +776,7 @@ static void bucket_transfer_handler(evutil_socket_t fd, short what, void *arg)
 
 	if (_verbose) printf("Bucket transfer handler\n");
 
-	// check the state of the bucket.  If it is a backup bucket, then we can deleete it.
+	// check the state of the bucket.  If it is a backup bucket, then we can delete it.
 	if (bucket->level > 0) {
 		bucket_destroy(bucket);
 	}
@@ -791,8 +793,6 @@ static void bucket_transfer_handler(evutil_socket_t fd, short what, void *arg)
 		assert(bucket->transfer_event);
 		event_free(bucket->transfer_event);
 		bucket->transfer_event = NULL;
-		
-		
 	}
 }
 
@@ -1993,9 +1993,22 @@ static void process_loadlevels(client_t *client, header_t *header, void *ptr)
 	backups = data_int(&next);
 	transferring = data_int(&next);
 	
-	if ((_stats.primary_buckets + _stats.secondary_buckets) > (primary + backups + 1)) {
-		// need to migrate a bucket to this node.
-		assert(0);
+	// if the target node is not currently transferring, and we are not currently transferring
+	if (_stats.bucket_transfer == 0 && transferring == 0) {
+	
+		if ((_stats.primary_buckets + _stats.secondary_buckets) > (primary + backups + 1)) {
+			// need to migrate a bucket to this node.
+			
+			if (_stats.primary_buckets >= _stats.secondary_buckets) {
+				// we need to send a primary bucket.
+				assert(0);
+				
+			}
+			else {
+				// we need to hand off one of our backup buckets.
+				assert(0);
+			}
+		}
 	}
 }
 
