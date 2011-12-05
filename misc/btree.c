@@ -108,7 +108,7 @@ int main(int argc, char **argv)
 	
  	printf("3='%s'\n", g_tree_lookup(tree, &keys[2]));
 	
- 	printf("\nAll items:\n");
+ 	printf("\nAll items (well... first 10):\n");
 	
  	g_tree_foreach(tree, traverse_fn, NULL);
 	

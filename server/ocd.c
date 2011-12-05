@@ -5,6 +5,7 @@
 
 
 #include "event-compat.h"
+#include "queue.h"
 
 // includes
 
@@ -103,10 +104,11 @@ typedef struct {
 
 
 
-#define VALUE_SHORT  1
-#define VALUE_INT    2
-#define VALUE_LONG   3
-#define VALUE_STRING 4
+#define VALUE_DELETED  0
+#define VALUE_SHORT    1
+#define VALUE_INT      2
+#define VALUE_LONG     3
+#define VALUE_STRING   4
 typedef struct {
 	int type;
 	union {
@@ -171,6 +173,16 @@ typedef struct {
 	node_t *backup_node;
 	node_t *logging_node;
 
+	// when updates are made in the bucket, it needs to be added to this list if there is a backup_node specified.
+	queue_t *changelist;
+
+	// client we are transferring this bucket to.  if this is not null, then a transfer is in progress.
+	client_t *transfer_client;
+
+	// all the items that need to be transferred to the new transfer_client.  When updates to the bucket occur, this queue needs to be updated also.
+	queue_t *transfer_queue;
+	
+	
 	struct event *shutdown_event;
 	struct event *transfer_event;
 
@@ -181,15 +193,16 @@ typedef struct {
 
 typedef struct {
 	GTree *mapstree;
-	hash_t key;
+	hash_t item_key;
 } maplist_t;
 
 
 typedef struct {
-	hash_t key;
+	hash_t item_key;
 	hash_t map_key;
 	int expires;
 	char *name;
+	int ref;		// number of times this item is in a queue or list.  Cannot be deleted if ref is not zero.
 	value_t *value;
 } item_t;
 
@@ -699,6 +712,10 @@ static void bucket_destroy(bucket_t *bucket)
 	item_t *item;
 	
 	assert(bucket);
+
+	assert(bucket->transfer_client == NULL);
+	assert(bucket->transfer_queue == NULL);
+	assert(queue_count(bucket->changelist) == 0);
 	
 	// while going through the tree, cannot modify the tree, so we will continuously go through the 
 	// list, getting an item one at a time, clearing it and removing it from the tree.  Continue the 
@@ -722,7 +739,7 @@ static void bucket_destroy(bucket_t *bucket)
 			g_tree_foreach(maplist->mapstree, traverse_hash_fn, &item);
 			assert(item);
 			
-			assert(item->key == maplist->key);
+			assert(item->item_key == maplist->item_key);
 			
 			assert(item->name);
 			free(item->name);
@@ -750,7 +767,7 @@ static void bucket_destroy(bucket_t *bucket)
 		g_tree_destroy(maplist->mapstree);
 		maplist->mapstree = NULL;
 		
-		g_tree_remove(bucket->tree, &maplist->key);
+		g_tree_remove(bucket->tree, &maplist->item_key);
 		free(maplist);
 	}
 	
@@ -1695,11 +1712,11 @@ static int store_value(int map_hash, int key_hash, char *name, int expires, valu
 				// the key is not in the btree at all.  Need to create a new maplist and add it to the btree.
 				list = malloc(sizeof(maplist_t));
 				assert(list);
-				list->key = key_hash;
+				list->item_key = key_hash;
 				list->mapstree = g_tree_new(key_compare_fn);
 				assert(list->mapstree);
 
-				g_tree_insert(bucket->tree, &list->key, list);
+				g_tree_insert(bucket->tree, &list->item_key, list);
 			}
 			
 			assert(list);
@@ -1712,7 +1729,7 @@ static int store_value(int map_hash, int key_hash, char *name, int expires, valu
 				item = malloc(sizeof(item_t));
 				assert(item);
 
-				item->key = key_hash;
+				item->item_key = key_hash;
 				item->map_key = map_hash;
 				item->name = name;
 				item->value = value;
@@ -1952,10 +1969,6 @@ static void cmd_get_str(client_t *client, header_t *header, char *payload)
 	map_hash = data_int(&next);
 	key_hash = data_int(&next);
 	
-	
-	if (_verbose > 3) printf("[%u] CMD: get (string)\n\n", _seconds);
-
-
 	// store the value into the trees.  If a value already exists, it will get released and this one 
 	// will replace it, so control of this value is given to the tree structure.
 	// NOTE: value is controlled by the tree after this function call.
@@ -2037,8 +2050,6 @@ static void cmd_set_str(client_t *client, header_t *header, char *payload)
 	value->data.s.data[str_len] = 0;
 	value->data.s.length = str_len;
 	
-	if (_verbose > 2) printf("[%u] CMD: set (string): [%d/%d]'%s'\n\n", _seconds, map_hash, key_hash, name);
-
 	// eventually we will add the ability to wait until the data has been competely distributed 
 	// before returning an ack.
 	assert(fullwait == 0);
@@ -2105,6 +2116,23 @@ static void process_ack(client_t *client, header_t *header)
 
 
 
+gboolean traverse_fn(gpointer p_key, gpointer p_value, gpointer data)
+{
+	unsigned int *aa = key;
+	static counter=0;
+	
+	counter++;
+	
+ 	printf("%u='%s'\n", *aa, value); 
+
+	if (counter > 10) 
+		return(TRUE);
+	else
+		return(FALSE);
+}
+
+
+
 
 static void process_loadlevels(client_t *client, header_t *header, void *ptr)
 {
@@ -2112,6 +2140,8 @@ static void process_loadlevels(client_t *client, header_t *header, void *ptr)
 	int primary;
 	int backups;
 	int transferring;
+	bucket_t *bucket;
+	int i;
 	
 	assert(client);
 	assert(header);
@@ -2132,15 +2162,56 @@ static void process_loadlevels(client_t *client, header_t *header, void *ptr)
 		if ((_stats.primary_buckets + _stats.secondary_buckets) > (primary + backups + 1)) {
 			// need to migrate a bucket to this node.
 			
+			bucket = NULL;
+			
 			if (_stats.primary_buckets >= _stats.secondary_buckets) {
 				// we need to send a primary bucket.
-				assert(0);
 				
+				// simply go through the bucket list until we find a primary bucket.
+				for (i=0; i<=_mask && bucket == NULL; i++) {
+					if (_buckets[i]) {
+						if (_buckets[i]->levels == 0) {
+							bucket = _buckets[i];
+						}
+					}
+				}
 			}
 			else {
 				// we need to hand off one of our backup buckets.
 				assert(0);
 			}
+			
+			assert(bucket);
+			
+			assert(bucket->transfer_client == NULL);
+			bucket->transfer_client = client;
+
+			/*
+			 * If we are transferring a primary bucket as a primary, then we need to deliver the 
+			 * entire bucket first.  
+			 * 
+			 * However, if we are transferring a primary bucket as a backup, then we simply release 
+			 * the old backup, and turn the new node into a backup.  This means that during this 
+			 * process we could lose data if the primary goes down.  May be a better way to do this, 
+			 * but for now, this is what we will do.
+			 */
+
+			if (primary > backups) {
+				// the other node has more primaries than backups, so we will give it another backup.
+				bucket->transfer_level = 1;
+			} 
+			else {
+				bucket->transfer_level = 0;
+			}
+			
+			// now we have to decide if the receiver should take it as a primary or secondary.  We dont tell them yet, we just send them the details of the bucket.
+			push
+			
+			// if there are no items in the bucket, we 
+			if (
+			
+			// now need to go through all the items in the bucket, loading them into the queue.
+			assert(bucket->transfer_queue == NULL);
 		}
 	}
 }
@@ -2773,6 +2844,9 @@ static bucket_t * bucket_new(hash_t hash)
 	assert(bucket->logging_node == NULL);
 	assert(bucket->transfer_event == NULL);
 	assert(bucket->shutdown_event == NULL);
+	assert(bucket->transfer_client == NULL);
+	assert(bucket->transfer_queue == NULL);
+	assert(bucket->changelist == NULL);
 			
 	bucket->tree = g_tree_new(key_compare_fn);
 	assert(bucket->tree);

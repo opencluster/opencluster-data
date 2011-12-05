@@ -120,7 +120,7 @@ int main(void)
 		
 	}
 
-	printf("hash is: %u\n", hash);
+	printf("hash of '%s' is: %u (%08x)\n", teststr, hash, hash);
 
 
 	return 0;

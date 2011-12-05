@@ -75,6 +75,7 @@ The commands are:
   130   newserver     when a new server joins the cluster, a message is sent out to the other
                       members of the cluster.
   200   req_loadlevel nodes will ask other nodes how full they are.
+  300   accept_bucket node telling another node to start accepting data for a bucket.   
   1000  lock          obtain a cluster lock
   1010  unlock        release a cluster lock
   2000  set_int       set an integer (32-bit) key/value, overwriting if it exists.
@@ -455,7 +456,7 @@ Replies:
 
 
 -----------------------------------------------------------------------
-request_loadlevels(200)
+req_loadlevels(200)
 
 Requests a server for its loadlevels.
 
@@ -489,6 +490,58 @@ Payload:
   integer - primary buckets
   integer - backup buckets
   integer - transfer states (0 = not currently transferring a bucket, 1 = currently transferring a bucket).
+
+-----------------------------------------------------------------------
+accept_bucket(300)
+
+Tells a node start accepting data for a hash.
+
+Type of message:
+  Command
+
+Conditions of use:
+  Sent from server to server.
+  
+Payload:
+  integer - mask
+  integer - hash (bucket)
+
+Replies:
+  cant_accept_bucket(305)
+  accepting_bucket(310)
+
+-----------------------------------------------------------------------
+cant_accept_bucket(305)
+
+Indicates that the node cant accept the bucket.  Doesn't need to give a reason, but it could be because hte node already has that bucket in some way, or it is currently in the processing of transferring another bucket.
+
+Type of message:
+  Reply
+
+Conditions of use:
+  Sent from server to server.
+  
+Payload:
+  integer - mask
+  integer - hash (bucket)
+
+
+-----------------------------------------------------------------------
+accepting_bucket(310)
+
+Indicates that the node is now accepting the transfer of that bucket.
+
+Type of message:
+  Reply
+
+Conditions of use:
+  Sent from server to server.
+  
+Payload:
+  integer - mask
+  integer - hash (bucket)
+
+
 
 
 

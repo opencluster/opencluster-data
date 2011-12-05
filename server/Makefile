@@ -7,17 +7,20 @@ DEBUG_LIBS=
 
 ARGS=-Wall -O2 -g $(DEBUG_LIBS)
 LIBS=-levent 
-OBJS=event-compat.o
+OBJS=event-compat.o queue.o
 
 
 
 
-ocd: ocd.c $(OBJS) event-compat.h
+ocd: ocd.c $(OBJS) event-compat.h queue.h
 	gcc `pkg-config --cflags --libs glib-2.0` -o $@ ocd.c $(OBJS) $(LIBS) $(ARGS)
 
 
 
 # shared objects
+
+queue.o: queue.c queue.h
+	gcc -c -o $@ queue.c $(ARGS)
 
 event-compat.o: event-compat.c event-compat.h
 	gcc -c -o $@ event-compat.c $(ARGS)
