@@ -43,23 +43,26 @@
 
 
 // commands and replies
-#define REPLY_ACK        1
-#define REPLY_UNKNOWN    9
-#define CMD_HELLO        10
-#define CMD_SHUTTINGDOWN 15
-#define CMD_PING         30
-#define CMD_SERVERHELLO  50
-#define CMD_SERVERLIST   100
-#define CMD_HASHMASKS    110
-#define CMD_HASHMASK     120
-#define CMD_LOADLEVELS   200
-#define REPLY_LOADLEVELS 210
-#define CMD_SET_INT      2000
-#define CMD_SET_STR      2020
-#define CMD_GET_INT      2100
-#define REPLY_DATA_INT   2105
-#define CMD_GET_STR      2120
-#define REPLY_DATA_STR   2125
+#define REPLY_ACK						1
+#define REPLY_UNKNOWN					9
+#define CMD_HELLO						10
+#define CMD_SHUTTINGDOWN				15
+#define CMD_PING						30
+#define CMD_SERVERHELLO					50
+#define CMD_SERVERLIST					100
+#define CMD_HASHMASKS					110
+#define CMD_HASHMASK					120
+#define CMD_LOADLEVELS					200
+#define REPLY_LOADLEVELS				210
+#define CMD_ACCEPT_BUCKET				300
+#define REPLY_CANT_ACCEPT_BUCKET		305
+#define REPLY_ACCEPTING_BUCKET			310
+#define CMD_SET_INT						2000
+#define CMD_SET_STR						2020
+#define CMD_GET_INT						2100
+#define REPLY_DATA_INT					2105
+#define CMD_GET_STR						2120
+#define REPLY_DATA_STR					2125
 
 
 #define CLIENT_TIMEOUT_LIMIT	6
@@ -100,6 +103,9 @@ typedef struct {
 	int tries;
 	
 	int closing;
+
+	void *transfer_bucket;
+
 } client_t;
 
 
@@ -110,7 +116,7 @@ typedef struct {
 #define VALUE_LONG     3
 #define VALUE_STRING   4
 typedef struct {
-	int type;
+	short type;
 	union {
 		int i;			// integer
 		long l;			// long
@@ -181,10 +187,12 @@ typedef struct {
 
 	// all the items that need to be transferred to the new transfer_client.  When updates to the bucket occur, this queue needs to be updated also.
 	queue_t *transfer_queue;
-	
+	int in_transit;
+	int transfer_level;
 	
 	struct event *shutdown_event;
 	struct event *transfer_event;
+	
 
 } bucket_t;
 
@@ -315,6 +323,12 @@ int _settling = 1;
 // NOTE: When determining how many things need to be closed, it is important to get this right, or 
 // the system will stop before it has really completed.
 int _shutdown = -1;
+
+
+// If we are currently in the process of receiving a bucket, we do not want to receive any more.  
+//   0 = not currently transferring a bucket.
+//   1 = transferring a bucket.
+int _bucket_transfer = 0;
 
 
 
@@ -453,6 +467,8 @@ static client_t * client_new(void)
 	}
 	assert(_clients && _client_count > 0);
 	
+	assert(client->transfer_bucket == NULL);
+	
 	assert(client);
 	return(client);
 }
@@ -521,6 +537,8 @@ static void client_free(client_t *client)
 	
 	if (_verbose >= 2) printf("[%u] client_free: handle=%d\n", _seconds, client->handle);
 
+	assert(client->transfer_bucket == NULL);
+	
 	if (client->node) {
 		node = client->node;
 		node->client = NULL;
@@ -603,6 +621,7 @@ static void client_free(client_t *client)
 	free(client);
 	
 	assert(_client_count >= 0);
+	
 }
 
 
@@ -2099,6 +2118,109 @@ static void cmd_loadlevels(client_t *client, header_t *header)
 }
 
 
+static bucket_t * bucket_new(hash_t hash)
+{
+	bucket_t *bucket;
+	
+	assert(_buckets[hash] == NULL);
+	
+	bucket = calloc(1, sizeof(bucket_t));
+	bucket->hash = hash;
+	assert(bucket->level == 0);
+			
+	assert(bucket->backup_host == NULL);
+	assert(bucket->backup_node == NULL);
+	assert(bucket->target_host == NULL);
+	assert(bucket->target_node == NULL);
+	assert(bucket->logging_host == NULL);
+	assert(bucket->logging_node == NULL);
+	assert(bucket->transfer_event == NULL);
+	assert(bucket->shutdown_event == NULL);
+	assert(bucket->transfer_client == NULL);
+	assert(bucket->transfer_queue == NULL);
+	assert(bucket->changelist == NULL);
+	assert(bucket->in_transit == 0);
+	assert(bucket->transfer_level == 0);
+			
+	bucket->tree = g_tree_new(key_compare_fn);
+	assert(bucket->tree);
+	
+	return(bucket);
+}
+
+
+
+// Get a value from storage.
+static void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
+{
+	char *next;
+	hash_t mask;
+	hash_t key_hash;
+	int reply = 0;
+	bucket_t *bucket;
+	
+	assert(client);
+	assert(header);
+	assert(payload);
+
+	next = payload;
+	
+	mask = data_int(&next);
+	key_hash = data_int(&next);
+	
+	if (_verbose > 3) printf("[%u] CMD: accept bucket (%08X/%08X)\n\n", _seconds, mask, key_hash);
+
+	assert(_payload);
+	assert(_payload_length == 0);
+	assert(_payload_max > 0);
+
+	// regardless of the reply, the payload will be the same.
+	payload_int(mask);
+	payload_int(key_hash);
+
+	if (_bucket_transfer != 0) {
+		//  we are currently transferring another bucket, therefore we cannot accept another one.
+		reply = REPLY_CANT_ACCEPT_BUCKET;
+	}
+	else if (mask != _mask) {
+		// the masks are different, we cannot accept a bucket unless our masks match... which should 
+		// balance out once hashmasks have proceeded through all the nodes.
+		reply = REPLY_CANT_ACCEPT_BUCKET;
+	}
+	else {
+		// now we need to check that this bucket isn't already handled by this server.
+		assert(key_hash <= mask);
+		assert(_mask == mask);
+		if (_buckets[key_hash]) {
+			reply = REPLY_CANT_ACCEPT_BUCKET;
+		}
+		else {
+			reply = REPLY_ACCEPTING_BUCKET;
+			
+			assert(_bucket_transfer == 0);
+			_bucket_transfer = 1;
+			
+			// need to create the bucket, and mark it as in-transit.
+			bucket = bucket_new(key_hash);
+			_buckets[key_hash] = bucket;
+			bucket->in_transit = 1;
+			bucket->level = 1;
+		}
+	}
+
+	assert(_payload_length > 0);
+	assert(_payload);
+	assert(reply > 0);
+	send_message(client, header, reply, _payload_length, _payload);
+
+	
+	
+	
+	_payload_length = 0;
+}
+
+
+
 
 static void process_ack(client_t *client, header_t *header)
 {
@@ -2118,22 +2240,43 @@ static void process_ack(client_t *client, header_t *header)
 
 gboolean traverse_fn(gpointer p_key, gpointer p_value, gpointer data)
 {
-	unsigned int *aa = key;
-	static counter=0;
+// 	unsigned int *aa = p_key;
+// 	static int counter=0;
 	
-	counter++;
+// 	counter++;
 	
- 	printf("%u='%s'\n", *aa, value); 
+//  	printf("%u='%s'\n", *aa, value); 
 
-	if (counter > 10) 
-		return(TRUE);
-	else
+// 	if (counter > 10) 
+// 		return(TRUE);
+// 	else
 		return(FALSE);
 }
 
 
+static void push_accept_bucket(client_t *client, hash_t key)
+{
+	assert(client);
+	assert(client->handle > 0);
+	
+	assert(_payload_length == 0);
+	payload_int(_mask);
+	payload_int(key);
+	
+	printf("[%d] ACCEPT_BUCKET: (%08X/%08X)\n", _seconds, _mask, key);
+	
+	send_message(client, NULL, CMD_ACCEPT_BUCKET, _payload_length, _payload);
+	_payload_length = 0;
+	assert(_payload_length == 0);
+}
 
 
+
+// this function is called when it receives a LOADLEVELS reply from a server node.  Based on that 
+// reply, and the state of this currrent node, we determine if we are going to try and send a bucket 
+// to that node or not.  If we are going to send the bucket to the node, we will send out a message 
+// to the node, indicating what we are going to do, and then we wait for a reply back.  Once we 
+// decide to send a bucket, we do not attempt to send buckets to any other node.
 static void process_loadlevels(client_t *client, header_t *header, void *ptr)
 {
 	char *next;
@@ -2170,7 +2313,7 @@ static void process_loadlevels(client_t *client, header_t *header, void *ptr)
 				// simply go through the bucket list until we find a primary bucket.
 				for (i=0; i<=_mask && bucket == NULL; i++) {
 					if (_buckets[i]) {
-						if (_buckets[i]->levels == 0) {
+						if (_buckets[i]->level == 0) {
 							bucket = _buckets[i];
 						}
 					}
@@ -2186,16 +2329,6 @@ static void process_loadlevels(client_t *client, header_t *header, void *ptr)
 			assert(bucket->transfer_client == NULL);
 			bucket->transfer_client = client;
 
-			/*
-			 * If we are transferring a primary bucket as a primary, then we need to deliver the 
-			 * entire bucket first.  
-			 * 
-			 * However, if we are transferring a primary bucket as a backup, then we simply release 
-			 * the old backup, and turn the new node into a backup.  This means that during this 
-			 * process we could lose data if the primary goes down.  May be a better way to do this, 
-			 * but for now, this is what we will do.
-			 */
-
 			if (primary > backups) {
 				// the other node has more primaries than backups, so we will give it another backup.
 				bucket->transfer_level = 1;
@@ -2205,16 +2338,15 @@ static void process_loadlevels(client_t *client, header_t *header, void *ptr)
 			}
 			
 			// now we have to decide if the receiver should take it as a primary or secondary.  We dont tell them yet, we just send them the details of the bucket.
-			push
+ 			push_accept_bucket(client, bucket->hash);
 			
-			// if there are no items in the bucket, we 
-			if (
-			
-			// now need to go through all the items in the bucket, loading them into the queue.
+			// at this point, the transfer queue should be empty.
 			assert(bucket->transfer_queue == NULL);
 		}
 	}
 }
+
+
 
 
 
@@ -2310,14 +2442,15 @@ static int process_data(client_t *client)
 				
 					// we have enough data, so we need to pass it on to the functions that handle it.
 					switch (header.command) {
-						case CMD_HELLO: 		cmd_hello(client, &header); 			break;
-						case CMD_SERVERHELLO: 	cmd_serverhello(client, &header, ptr); 	break;
-						case CMD_PING: 	        cmd_ping(client, &header); 				break;
-						case CMD_LOADLEVELS: 	cmd_loadlevels(client, &header);		break;
-						case CMD_SET_INT: 		cmd_set_int(client, &header, ptr); 		break;
-						case CMD_SET_STR: 		cmd_set_str(client, &header, ptr); 		break;
-						case CMD_GET_INT: 		cmd_get_int(client, &header, ptr); 		break;
-						case CMD_GET_STR: 		cmd_get_str(client, &header, ptr); 		break;
+						case CMD_GET_INT: 		cmd_get_int(client, &header, ptr); 			break;
+						case CMD_GET_STR: 		cmd_get_str(client, &header, ptr); 			break;
+						case CMD_SET_INT: 		cmd_set_int(client, &header, ptr); 			break;
+						case CMD_SET_STR: 		cmd_set_str(client, &header, ptr); 			break;
+						case CMD_HELLO: 		cmd_hello(client, &header); 				break;
+						case CMD_SERVERHELLO: 	cmd_serverhello(client, &header, ptr); 		break;
+						case CMD_PING: 	        cmd_ping(client, &header); 					break;
+						case CMD_LOADLEVELS: 	cmd_loadlevels(client, &header);			break;
+						case CMD_ACCEPT_BUCKET: cmd_accept_bucket(client, &header, ptr);	break;
 						default:
 							// got an invalid command, so we need to reply with an 'unknown' reply.
 							// since we have the raw command still in our buffer, we can use that 
@@ -2826,33 +2959,6 @@ static void all_hashmask(unsigned int hashmask, int level)
 }
 
 
-static bucket_t * bucket_new(hash_t hash)
-{
-	bucket_t *bucket;
-	
-	assert(_buckets[hash] == NULL);
-	
-	bucket = calloc(1, sizeof(bucket_t));
-	bucket->hash = hash;
-	assert(bucket->level == 0);
-			
-	assert(bucket->backup_host == NULL);
-	assert(bucket->backup_node == NULL);
-	assert(bucket->target_host == NULL);
-	assert(bucket->target_node == NULL);
-	assert(bucket->logging_host == NULL);
-	assert(bucket->logging_node == NULL);
-	assert(bucket->transfer_event == NULL);
-	assert(bucket->shutdown_event == NULL);
-	assert(bucket->transfer_client == NULL);
-	assert(bucket->transfer_queue == NULL);
-	assert(bucket->changelist == NULL);
-			
-	bucket->tree = g_tree_new(key_compare_fn);
-	assert(bucket->tree);
-	
-	return(bucket);
-}
 
 // this handler is fired 5 seconds after the daemon starts up.  It checks to see if it has connected 
 // to other nodes, if it hasn't then it initialises the cluster as if it is the first node in the 
