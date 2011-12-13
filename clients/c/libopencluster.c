@@ -567,10 +567,9 @@ static void * data_int(void *data, int *server_count)
 
 
 
-static void process_serverlist(cluster_t *cluster, server_t *server, int userid, int length, void *data)
+static void process_serverinfo(cluster_t *cluster, server_t *server, int userid, int length, void *data)
 {
 	char *next;
-	int server_count;
 	
 	assert(cluster);
 	assert(server);
@@ -578,13 +577,11 @@ static void process_serverlist(cluster_t *cluster, server_t *server, int userid,
 
 	next = data;
 	
-	next = data_int(next, &server_count);
-	if (server_count > 0) {
+// 	next = data_int(next, &server_count);
 		// if we receive actual servers, we need to process them somehow.
 		assert(0);
-	}
 	
-	reply_ack(cluster, server, CMD_SERVERLIST, userid);
+	reply_ack(cluster, server, CMD_SERVER_INFO, userid);
 }
 
 
@@ -638,7 +635,7 @@ static void split_mask(cluster_t *cluster, int mask)
 			newlist[i]->port = oldlist[index]->port;
 		}
 		else {
-			newlist[index]->host = NULL;
+			newlist[i]->host = NULL;
 		}
 		newlist[i]->server = oldlist[index]->server;
 		newlist[i]->backup = oldlist[index]->backup;
@@ -669,14 +666,12 @@ static void split_mask(cluster_t *cluster, int mask)
 //     receive particular data.
 //  2. Mark the server object so that it knows that it has received hashmasks.  It cannot really do 
 //     anything until it has.
-static void process_hashmasks(cluster_t *cluster, server_t *server, int userid, int length, void *data)
+static void process_hashmask(cluster_t *cluster, server_t *server, int userid, int length, void *data)
 {
 	char *next;
 	int mask;
-	int bucket_count;
 	int hash;
 	int level;
-	int i;
 	hashmask_t **hashmasks;
 	
 	assert(cluster);
@@ -688,10 +683,14 @@ static void process_hashmasks(cluster_t *cluster, server_t *server, int userid, 
 	next = data_int(next, &mask);
 	assert(mask >= 0);
 
+	// is it possible to receive a mask of 0?
+	assert(mask > 0);
+	
 	if (mask > 0) {
 		
 		if (mask > cluster->mask) {
-			// this server is using a mask that is more fine tuned than the mask we've been using.  Therefore, we need to migrade to the new mask.
+			// this server is using a mask that is more fine tuned than the mask we've been using.  
+			// Therefore, we need to migrade to the new mask.
 			split_mask(cluster, mask);
 		}
 		
@@ -699,45 +698,46 @@ static void process_hashmasks(cluster_t *cluster, server_t *server, int userid, 
 		hashmasks = (hashmask_t **) cluster->hashmasks;
 		assert(hashmasks);
 		
-		next = data_int(next, &bucket_count);
-		assert(bucket_count >= 0);
-		for (i=0; i<bucket_count; i++) {
-			next = data_int(next, &hash);
-			next = data_int(next, &level);
+		next = data_int(next, &hash);
+		next = data_int(next, &level);
 			
-			assert(level >= 0);
+		assert(level >= 0 || level == -1);
 			
-			if (level == 0) {
-				
-				assert(mask == cluster->mask);
-				assert(hash == (mask & hash));
-				assert(hashmasks[hash]);
-				
-				if (hashmasks[hash]->server != server) {
-					if(hashmasks[hash]->host) {
-						free(hashmasks[hash]->host);
-						hashmasks[hash]->host = NULL;
-					}
-					assert(server->host);
-					hashmasks[hash]->host = strdup(server->host);
-					hashmasks[hash]->port = server->port;
-					hashmasks[hash]->server = server;
+		if (level == 0) {
+			
+			assert(mask == cluster->mask);
+			assert(hash == (mask & hash));
+			assert(hashmasks[hash]);
+			
+			if (hashmasks[hash]->server != server) {
+				if(hashmasks[hash]->host) {
+					free(hashmasks[hash]->host);
+					hashmasks[hash]->host = NULL;
 				}
-				else if (level == 1) {
+				assert(server->host);
+				hashmasks[hash]->host = strdup(server->host);
+				hashmasks[hash]->port = server->port;
+				hashmasks[hash]->server = server;
+			}
+			else if (level == 1) {
+				hashmasks[hash]->backup = server;
+			}
+			else if (level == -1) {
+				// the server is no longer supporting this mask, so it should be removed from the list.
+				assert(0);
+			}
+			else {
+				
+				// we are not the primary or secondary backup of the bucket, but if we dont already 
+				// have a backup listed, then we should mark it.
+				if (hashmasks[hash]->backup == NULL) {
 					hashmasks[hash]->backup = server;
-				}
-				else {
-					// we are not the primary or secondary backup of the bucket, but if we dont already 
-					// have a backup listed, then we should mark it.
-					if (hashmasks[hash]->backup == NULL) {
-						hashmasks[hash]->backup = server;
-					}
 				}
 			}
 		}
 	}
 	
-	reply_ack(cluster, server, CMD_SERVERLIST, userid);
+	reply_ack(cluster, server, CMD_HASHMASK, userid);
 	
 	// now that this server has supplied hashmasks, we can mark this server as active.
 	assert(server->active == 0);
@@ -881,6 +881,7 @@ static void pending_server(cluster_t *cluster, server_t *server, int blocking)
 								case CMD_HASHMASK:    process_hashmask(cluster, server, userid, length, ptr);  break;
 			
 								default:
+									printf("Unexpected command: cmd=%d\n", command);
 									assert(0);
 									break;
 								

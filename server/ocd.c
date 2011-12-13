@@ -43,29 +43,28 @@
 
 
 // commands and replies
-#define REPLY_ACK						1
-#define REPLY_UNKNOWN					9
-#define CMD_HELLO						10
-#define CMD_SHUTTINGDOWN				15
-#define CMD_PING						30
-#define CMD_SERVERHELLO					50
-#define CMD_SERVERLIST					100
-#define CMD_HASHMASKS					110
-#define CMD_HASHMASK					120
-#define CMD_LOADLEVELS					200
-#define REPLY_LOADLEVELS				210
-#define CMD_ACCEPT_BUCKET				300
-#define REPLY_CANT_ACCEPT_BUCKET		305
-#define REPLY_ACCEPTING_BUCKET			310
-#define CMD_SET_INT						2000
-#define CMD_SET_STR						2020
-#define CMD_GET_INT						2100
-#define REPLY_DATA_INT					2105
-#define CMD_GET_STR						2120
-#define REPLY_DATA_STR					2125
+#define REPLY_ACK						 1
+#define REPLY_UNKNOWN					 9
+#define CMD_HELLO						 10
+#define CMD_SHUTTINGDOWN				 15
+#define CMD_PING						 30
+#define CMD_SERVERHELLO					 50
+#define CMD_SERVERINFO					 100
+#define CMD_HASHMASK					 120
+#define CMD_LOADLEVELS					 200
+#define REPLY_LOADLEVELS				 210
+#define CMD_ACCEPT_BUCKET				 300
+#define REPLY_CANT_ACCEPT_BUCKET		 305
+#define REPLY_ACCEPTING_BUCKET			 310
+#define CMD_SET_INT						 2000
+#define CMD_SET_STR						 2020
+#define CMD_GET_INT						 2100
+#define REPLY_DATA_INT					 2105
+#define CMD_GET_STR						 2120
+#define REPLY_DATA_STR					 2125
 
 
-#define CLIENT_TIMEOUT_LIMIT	6
+#define CLIENT_TIMEOUT_LIMIT 6
 
 
 //-----------------------------------------------------------------------------
@@ -1358,7 +1357,7 @@ static void push_ping(client_t *client)
 
 
 
-// Pushes out a command to the specified client, with the list of servers taht are maintained.
+// Pushes out a command to the specified client, with the list of servers that are maintained.
 static void push_serverlist(client_t *client)
 {
 	int i;
@@ -1368,14 +1367,14 @@ static void push_serverlist(client_t *client)
 	assert(_payload_length == 0);
 	assert(_node_count >= 0);
 	
-	payload_int(_node_count);
 	for (i=0; i<_node_count; i++) {
+		assert(_payload_length == 0);
 		payload_string(_nodes[i]->name);
+		send_message(client, NULL, CMD_SERVERINFO, _payload_length, _payload);
+		_payload_length = 0;
 	}
 	
-	send_message(client, NULL, CMD_SERVERLIST, _payload_length, _payload);
-	
-	_payload_length = 0;
+	assert(_payload_length == 0);
 }
 
 
@@ -1388,41 +1387,29 @@ static void push_hashmasks(client_t *client)
 	assert(client);
 	assert(client->handle > 0);
 	
-	assert(_payload_length == 0);
-
 	assert(_mask >= 0);
 	
 	// first we set the number of buckets this server contains.
-	payload_int(_mask);
-	payload_int(_stats.primary_buckets + _stats.secondary_buckets);
 	
 	check = 0;
 	for (i=0; i<=_mask; i++) {
 
-		if (_buckets[i]->level == 0) {
+		if (_buckets[i]->level >= 0) {
 			
 			// we have the bucket, and we are the 'primary for it'
 			
 			assert(_buckets[i]->tree);
 			assert(_buckets[i]->target_host == NULL);
 			assert(_buckets[i]->target_node == NULL);
-			
-			payload_int(i);
-			payload_int(0);
-			
-			check++;
-		}
-		else if (_buckets[i]->level > 0) {
-			
-			// we have the bucket, but we are a backup for it. 
-			
-			assert(_buckets[i]->tree);
-			assert(_buckets[i]->target_host);
-			assert(_buckets[i]->target_node);
 
-			payload_int(i);
-			payload_int(_buckets[i]->level);
-			
+			assert(_payload_length == 0);
+			payload_int(_mask);					// mask
+			payload_int(i);						// hash
+			payload_int(_buckets[i]->level);	// instance
+
+			send_message(client, NULL, CMD_HASHMASK, _payload_length, _payload);
+			_payload_length = 0;
+
 			check++;
 		}
 		else  {
@@ -1438,8 +1425,6 @@ static void push_hashmasks(client_t *client)
 	}
 
 	assert((_stats.primary_buckets + _stats.secondary_buckets) == 0 || (check) == (_stats.primary_buckets + _stats.secondary_buckets));
-
-	send_message(client, NULL, CMD_HASHMASKS, _payload_length, _payload);
 
 	_payload_length = 0;
 }
@@ -1735,48 +1720,50 @@ static void split_mask(int mask)
 		index = i & _mask;
 		assert(_mask == 0 || index < _mask);
 		if (oldlist[index]->primary) {
-			newlist[i]->host = strdup(oldlist[index]->primary);
-			newlist[i]->port = oldlist[index]->port;
+			newlist[i]->primary = strdup(oldlist[index]->primary);
 		}
 		else {
-			newlist[index]->host = NULL;
+			newlist[i]->primary = NULL;
 		}
-		newlist[i]->server = oldlist[index]->server;
-		newlist[i]->backup = oldlist[index]->backup;
-		
-// 		printf("New Mask: %08X/%08X --> '%s:%d'\n", mask, i, newlist[i]->host, newlist[i]->port);
+
+		if (oldlist[index]->secondary) {
+			newlist[i]->secondary = strdup(oldlist[index]->secondary);
+		}
+		else {
+			newlist[i]->primary = NULL;
+		}
 	}
 
 	
 	// now we clean up the old list.
-	for (i=0; i<=cluster->mask; i++) {
+	for (i=0; i<=_mask; i++) {
 		assert(oldlist[i]);
-		if (oldlist[i]->host) {
-			free(oldlist[i]->host);
-			assert(oldlist[i]->port > 0);
+		if (oldlist[i]->primary) {
+			free(oldlist[i]->primary);
+		}
+		if (oldlist[i]->secondary) {
+			free(oldlist[i]->secondary);
 		}
 		free(oldlist[i]);
 	}
 	free(oldlist);
 	oldlist = NULL;
 	
-	cluster->hashmasks = (void *) newlist;
-	cluster->mask = mask;
-	
+	_hashmasks = (void *) newlist;
+	_mask = mask;
 }
 
 
 
 /* 
- * This command is recieved from other nodes, which describe all the buckets that node handles.
+ * This command is recieved from other nodes, which describe a bucket that node handles.
  * Over-write current internal data with whatever is in here.
  */
-static void cmd_hashmasks(client_t *client, header_t *header, char *payload)
+static void cmd_hashmask(client_t *client, header_t *header, char *payload)
 {
 	int length;
 	char *next;
 	hash_t mask;
-	int buckets;
 	hash_t hash;
 	int level;
 	
@@ -1791,28 +1778,29 @@ static void cmd_hashmasks(client_t *client, header_t *header, char *payload)
 	// the only parameter is a string indicating the servers connection data.  
 	// Normally an IP and port.
 	mask = data_int(&next);
-	assert(mask != 0):
+	assert(mask != 0);
 
-	buckets = data_int(&next);
-	assert(buckets > 0):
+	hash = data_int(&next);
+	assert(hash >= 0 && hash <= mask);
 
 	
 	// check that the mask is the same as our existing mask... 
 	
-	// if the mask supplied is LESS than the mask we use, then when we read in the data, we need to 
-	// convert it to the new mask as we process it.
 	if (mask < _mask) {
+		// if the mask supplied is LESS than the mask we use, then when we read in the data, we need 
+		// to convert it to the new mask as we process it.
 		assert(0);
 	}
 	else if (mask > _mask) {
-		// if the mask supplied is GREATER than the mask we use, we need to first permenantly update our own mask to match the new one received.  Then process the incoming data.
-		assert(0);
+		// if the mask supplied is GREATER than the mask we use, we need to first permenantly update 
+		// our own mask to match the new one received.  Then process the incoming data.
+		split_mask(mask);
+		assert(_mask == mask);
 	}
 	else {
 		// the masks match, so the data should be ok.
 	}
 	
-
 	// now we process the bucket info that was provided.
 	int i;
 	assert(0);
@@ -2364,8 +2352,6 @@ static void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
 	send_message(client, header, reply, _payload_length, _payload);
 
 	
-	
-	
 	_payload_length = 0;
 }
 
@@ -2631,7 +2617,7 @@ static int process_data(client_t *client)
 						case CMD_GET_STR: 		cmd_get_str(client, &header, ptr); 			break;
 						case CMD_SET_INT: 		cmd_set_int(client, &header, ptr); 			break;
 						case CMD_SET_STR: 		cmd_set_str(client, &header, ptr); 			break;
-						case CMD_HASHMASKS:		cmd_hashmasks(client, &header, ptr);		break;
+						case CMD_HASHMASK:		cmd_hashmask(client, &header, ptr);			break;
 						case CMD_HELLO: 		cmd_hello(client, &header); 				break;
 						case CMD_SERVERHELLO: 	cmd_serverhello(client, &header, ptr); 		break;
 						case CMD_PING: 	        cmd_ping(client, &header); 					break;
