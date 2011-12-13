@@ -68,12 +68,9 @@ The commands are:
   20    goodbye       terminate communications cleanly
   30    ping          check that the node is responding.
   50    serverhello   when a server is connecting to another server.
-  100   serverlist    sends a list of servers in the cluster.
-  110   hashmasks     list of all the hashmasks that are in the system.
-  120   maskupdate    when a set of hashes is being moved to a different server, let the clients and
+  100   server_info   sends a list of servers in the cluster.
+  120   hashmask      when a set of hashes is being moved to a different server, let the clients and
                       other servers know. 
-  130   newserver     when a new server joins the cluster, a message is sent out to the other
-                      members of the cluster.
   200   req_loadlevel nodes will ask other nodes how full they are.
   300   accept_bucket node telling another node to start accepting data for a bucket.   
   1000  lock          obtain a cluster lock
@@ -385,9 +382,11 @@ Replies:
 
 
 -----------------------------------------------------------------------
-serverlist(100)
+server_info(100)
 
-Sends a list of servers in the cluster.
+Sends a server that is in the cluster.  Normally is sent when a client or node connects, and needs a 
+list of all the server nodes in the cluster.  The client should attempt to connect to each server 
+that it knows about.
 
 Type of message:
   Command
@@ -397,9 +396,7 @@ Conditions of use:
   Sent from server to cient.
 
 Payload:
-  integer - count of the servers in the cluster
-  string ( x count) - connect info (normally in the form "IP:port", but can be any resolvable
-standard format)
+  string - connect info (normally in the form "IP:port", but can be any resolvable standard format)
 
 Replies:
   ack(1)
@@ -407,30 +404,6 @@ Replies:
 
 
 
------------------------------------------------------------------------
-hashmasks(110)
-
-Sends a list of the hashmasks that this server is responsible for, including backup buckets.
-The mask also acts as a count and you should expect two integers for each mask.  If the mask 
-is 256 (0xFF), then that means that there are 256 hashmask entries.
-
-Type of message:
-  Command
-
-Conditions of use:
-  Sent from server to server.
-  Sent from server to client.
-
-Payload:
-  integer - mask
-  integer - buckets in the following list.
-  row * mask:
-     integer - hashmasks
-     integer - instance count (0 = primary, 1 or more = backup).
-
-Replies:
-  ack(1)
-  tryelsewhere(4), if the server is shutting down, or not accepting client connections.
 
 
 -----------------------------------------------------------------------
@@ -447,7 +420,7 @@ Conditions of use:
 
 Payload:
   integer - mask
-  integer - hash:
+  integer - hash
   integer - instance count (-1 = not hosted, 0 = primary, 1 or more = backup).
 
 Replies:

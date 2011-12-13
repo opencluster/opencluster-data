@@ -28,8 +28,8 @@
 
 #define CMD_ACK         1
 #define CMD_HELLO       10
-#define CMD_SERVERLIST  100
-#define CMD_HASHMASKS   110
+#define CMD_SERVER_INFO 100
+#define CMD_HASHMASK    120
 #define CMD_SET_INT     2000
 #define CMD_SET_STR     2020
 #define CMD_GET_INT     2100
@@ -877,8 +877,8 @@ static void pending_server(cluster_t *cluster, server_t *server, int blocking)
 // 							printf("Command Received: %d\n", command); 
 							switch (command) {
 		
-								case CMD_SERVERLIST: process_serverlist(cluster, server, userid, length, ptr); break;
-								case CMD_HASHMASKS:  process_hashmasks(cluster, server, userid, length, ptr);  break;
+								case CMD_SERVER_INFO: process_serverinfo(cluster, server, userid, length, ptr); break;
+								case CMD_HASHMASK:    process_hashmask(cluster, server, userid, length, ptr);  break;
 			
 								default:
 									assert(0);
@@ -1090,7 +1090,7 @@ int server_connect(cluster_t *cluster, server_t *server)
 	int res=-1;
 	
 	
-	// if server has a handle, then we exit, cause we are already connected to it.
+	// if server has a handle, then we exit, because we are already connected to it.
 	if (server->handle < 0) {
 		
 		assert(server->active == 0);
@@ -1123,10 +1123,9 @@ int server_connect(cluster_t *cluster, server_t *server)
 				if (msg->in.result != 0) {
 					assert(res < 0);
 					
-					// after a HELLO is given, we should expect a serverlist and a 
-					// hashmask to arrive.  We need to keep processing data until they 
-					// arrive, then we can be sure that we have connected to the 
-					// cluster properly.
+					// after a HELLO is given, we should expect a number of SERVER_INFO and HASHMASK 
+					// messages to arrive.  We need to keep processing data until they arrive, then 
+					// we can be sure that we have connected to the cluster properly.
 					//
 					// NOTE: Its possible that this has already been received.  This is just to 
 					//       catch if the server is busy and a delay occurs from it.

@@ -214,6 +214,12 @@ typedef struct {
 	value_t *value;
 } item_t;
 
+typedef struct {
+	int local;
+	char *primary;
+	char *secondary;
+} hashmask_t;
+
 
 //-----------------------------------------------------------------------------
 // Global Variables.    
@@ -224,10 +230,14 @@ typedef struct {
 // the mask is used to determine which bucket a hash belongs to.
 unsigned int _mask = 0;
 
-// the list of buckets that this server is handling.  '_mask' indicates how many entries in the array there is, but 
-// the ones that are not handled by this server, will have a NULL entry.
+// the list of buckets that this server is handling.  '_mask' indicates how many entries in the 
+// array there is, but the ones that are not handled by this server, will have a NULL entry.
 bucket_t ** _buckets = NULL;
 
+// the list of hashmasks is to know which servers are responsible for which buckets.
+// this list of hashmasks will also replace the need to 'settle'.  Instead, a timed event will 
+// occur periodically that checks that the hashmask coverage is complete.
+hashmask_t ** _hashmasks = NULL;
 
 
 // event base for listening on the sockets, and timeout events.
@@ -331,7 +341,7 @@ int _shutdown = -1;
 int _bucket_transfer = 0;
 
 
-
+// not a typedef, this is the actual instance.
 struct {
 	struct {
 		int active_nodes;
@@ -351,7 +361,6 @@ struct {
 	int primary_buckets;
 	int secondary_buckets;
 	int bucket_transfer;
-
 
 } _stats;
 
@@ -1565,10 +1574,6 @@ static void node_loadlevel_handler(int fd, short int flags, void *arg)
 }
 
 
-
-
-// the hello command does not require a payload, and simply does a reply.   
-// However, it triggers a servermap, and a hashmasks command to follow it.
 static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 {
 	int length;
@@ -1631,6 +1636,9 @@ static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 		assert(_stats.active_nodes > 0);
 		
 		found = 0;
+
+		// need to send to the node, the list of hashmasks.
+		push_hashmasks(client);
 		
 		printf("Adding '%s' as a New Node.\n", name);
 	}
@@ -1663,6 +1671,9 @@ static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 					assert(_nodes[found]->client->read_event == NULL);
 					assert(_nodes[found]->client->handle == -1);
 					
+					// need to send to the node, the list of hashmasks.
+					push_hashmasks(client);
+					
 					// the client is waiting to connect, so we can break it down.
 					client_free(_nodes[found]->client);
 					assert(_nodes[found]->client == NULL);
@@ -1679,6 +1690,141 @@ static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 	// send the ACK reply.
 	send_message(client, header, REPLY_ACK, 0, NULL);
 }
+
+
+// this function will take the current array, and put it aside, creating a new array based on the 
+// new mask supplied (we can only make the mask bigger, and cannot shrink it).
+// We create a new hashmasks array, and for each entry, we compare it against the old mask, and use 
+// the data for that hash from the old list.
+// NOTE: We may be starting off with an empty hashmasks lists.  If this is the first time we've 
+//       received some hashmasks.  To implement this easily, if we dont already have hashmasks, we 
+//       may need to create one that has a dummy entry in it.
+static void split_mask(int mask) 
+{
+	hashmask_t **newlist = NULL;
+	hashmask_t **oldlist = NULL;
+	int i;
+	int index;
+	
+	assert(mask > _mask);
+	
+	if (_verbose > 1) printf("Splitting bucket list: oldmask=%08X, newmask=%08X\n", _mask, mask);
+	
+	oldlist = _hashmasks;
+	_hashmasks = NULL;
+	
+	if (oldlist == NULL) {
+		
+		oldlist = malloc(sizeof(hashmask_t *));
+		assert(oldlist);
+		
+		oldlist[0] = malloc(sizeof(hashmask_t));
+		assert(oldlist[0]);
+		
+		oldlist[0]->local = 0;
+		oldlist[0]->primary = NULL;
+		oldlist[0]->secondary = NULL;
+	}
+	
+	newlist = malloc(sizeof(hashmask_t *) * (mask+1));
+	assert(newlist);
+	for (i=0; i<=mask; i++) {
+		
+		newlist[i] = malloc(sizeof(hashmask_t));
+		
+		index = i & _mask;
+		assert(_mask == 0 || index < _mask);
+		if (oldlist[index]->primary) {
+			newlist[i]->host = strdup(oldlist[index]->primary);
+			newlist[i]->port = oldlist[index]->port;
+		}
+		else {
+			newlist[index]->host = NULL;
+		}
+		newlist[i]->server = oldlist[index]->server;
+		newlist[i]->backup = oldlist[index]->backup;
+		
+// 		printf("New Mask: %08X/%08X --> '%s:%d'\n", mask, i, newlist[i]->host, newlist[i]->port);
+	}
+
+	
+	// now we clean up the old list.
+	for (i=0; i<=cluster->mask; i++) {
+		assert(oldlist[i]);
+		if (oldlist[i]->host) {
+			free(oldlist[i]->host);
+			assert(oldlist[i]->port > 0);
+		}
+		free(oldlist[i]);
+	}
+	free(oldlist);
+	oldlist = NULL;
+	
+	cluster->hashmasks = (void *) newlist;
+	cluster->mask = mask;
+	
+}
+
+
+
+/* 
+ * This command is recieved from other nodes, which describe all the buckets that node handles.
+ * Over-write current internal data with whatever is in here.
+ */
+static void cmd_hashmasks(client_t *client, header_t *header, char *payload)
+{
+	int length;
+	char *next;
+	hash_t mask;
+	int buckets;
+	hash_t hash;
+	int level;
+	
+	assert(client);
+	assert(header);
+	assert(payload);
+
+	next = payload;
+	
+	assert(client->node == NULL);
+	
+	// the only parameter is a string indicating the servers connection data.  
+	// Normally an IP and port.
+	mask = data_int(&next);
+	assert(mask != 0):
+
+	buckets = data_int(&next);
+	assert(buckets > 0):
+
+	
+	// check that the mask is the same as our existing mask... 
+	
+	// if the mask supplied is LESS than the mask we use, then when we read in the data, we need to 
+	// convert it to the new mask as we process it.
+	if (mask < _mask) {
+		assert(0);
+	}
+	else if (mask > _mask) {
+		// if the mask supplied is GREATER than the mask we use, we need to first permenantly update our own mask to match the new one received.  Then process the incoming data.
+		assert(0);
+	}
+	else {
+		// the masks match, so the data should be ok.
+	}
+	
+
+	// now we process the bucket info that was provided.
+	int i;
+	assert(0);
+
+	
+	
+	
+
+	// send the ACK reply.
+	send_message(client, header, REPLY_ACK, 0, NULL);
+}
+
 
 
 static gint key_compare_fn(gconstpointer a, gconstpointer b)
@@ -2168,7 +2314,7 @@ static void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
 	mask = data_int(&next);
 	key_hash = data_int(&next);
 	
-	if (_verbose > 3) printf("[%u] CMD: accept bucket (%08X/%08X)\n\n", _seconds, mask, key_hash);
+	if (_verbose > 2) printf("[%u] CMD: accept bucket (%08X/%08X)\n\n", _seconds, mask, key_hash);
 
 	assert(_payload);
 	assert(_payload_length == 0);
@@ -2180,11 +2326,13 @@ static void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
 
 	if (_bucket_transfer != 0) {
 		//  we are currently transferring another bucket, therefore we cannot accept another one.
+		if (_verbose > 2) printf("[%u] cant accept bucket, already transferring one.\n", _seconds);
 		reply = REPLY_CANT_ACCEPT_BUCKET;
 	}
 	else if (mask != _mask) {
 		// the masks are different, we cannot accept a bucket unless our masks match... which should 
 		// balance out once hashmasks have proceeded through all the nodes.
+		if (_verbose > 2) printf("[%u] cant accept bucket, masks are not compatible.\n", _seconds);
 		reply = REPLY_CANT_ACCEPT_BUCKET;
 	}
 	else {
@@ -2192,9 +2340,11 @@ static void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
 		assert(key_hash <= mask);
 		assert(_mask == mask);
 		if (_buckets[key_hash]) {
+			if (_verbose > 2) printf("[%u] cant accept bucket, already have that bucket.\n", _seconds);
 			reply = REPLY_CANT_ACCEPT_BUCKET;
 		}
 		else {
+			if (_verbose > 2) printf("[%u] accepting bucket.\n", _seconds);
 			reply = REPLY_ACCEPTING_BUCKET;
 			
 			assert(_bucket_transfer == 0);
@@ -2263,7 +2413,7 @@ static void push_accept_bucket(client_t *client, hash_t key)
 	payload_int(_mask);
 	payload_int(key);
 	
-	printf("[%d] ACCEPT_BUCKET: (%08X/%08X)\n", _seconds, _mask, key);
+	printf("[%d] sending ACCEPT_BUCKET: (%08X/%08X)\n", _seconds, _mask, key);
 	
 	send_message(client, NULL, CMD_ACCEPT_BUCKET, _payload_length, _payload);
 	_payload_length = 0;
@@ -2348,6 +2498,40 @@ static void process_loadlevels(client_t *client, header_t *header, void *ptr)
 
 
 
+/*
+ * When we receive a reply of REPLY_ACCEPTING_BUCKET, we can start sending the bucket contents to 
+ * this client.  This means that we first need to make a list of all the items that need to be sent.  
+ * Then we need to send the first X messages (we send them in blocks).
+ */
+static void process_accept_bucket(client_t *client, header_t *header, void *ptr)
+{
+	char *next;
+	hash_t mask;
+	hash_t hash;
+	bucket_t *bucket;
+	
+	assert(client && header && ptr);
+	assert(client->node);
+	
+	next = ptr;
+
+	// need to get the data out of the payload.
+	mask = data_int(&next);
+	hash = data_int(&next);
+	
+	// build the list of items.
+	assert(0);
+	
+	// send queued item.
+	assert(0);
+			
+			// now we have to decide if the receiver should take it as a primary or secondary.  We dont tell them yet, we just send them the details of the bucket.
+//  		push_accept_bucket(client, bucket->hash);
+			
+}
+
+
+
 
 
 static void process_unknown(client_t *client, header_t *header)
@@ -2427,9 +2611,10 @@ static int process_data(client_t *client)
 					// we have received a reply to a command we issued.  So we need to process that reply.
 					// we have enough data, so we need to pass it on to the functions that handle it.
 					switch (header.command) {
-						case REPLY_ACK:     	process_ack(client, &header); 				break;
-						case REPLY_LOADLEVELS:	process_loadlevels(client, &header, ptr);	break;
-						case REPLY_UNKNOWN:		process_unknown(client, &header); 			break;
+						case REPLY_ACK:     			process_ack(client, &header); 					break;
+						case REPLY_LOADLEVELS:			process_loadlevels(client, &header, ptr);		break;
+						case REPLY_ACCEPTING_BUCKET:	process_accept_bucket(client, &header, ptr);	break;
+						case REPLY_UNKNOWN:				process_unknown(client, &header); 				break;
 						default:
 							if (_verbose > 1) {
 								printf("[%u] Unknown reply: Reply=%d, Command=%d, userid=%d, length=%d\n", 
@@ -2446,6 +2631,7 @@ static int process_data(client_t *client)
 						case CMD_GET_STR: 		cmd_get_str(client, &header, ptr); 			break;
 						case CMD_SET_INT: 		cmd_set_int(client, &header, ptr); 			break;
 						case CMD_SET_STR: 		cmd_set_str(client, &header, ptr); 			break;
+						case CMD_HASHMASKS:		cmd_hashmasks(client, &header, ptr);		break;
 						case CMD_HELLO: 		cmd_hello(client, &header); 				break;
 						case CMD_SERVERHELLO: 	cmd_serverhello(client, &header, ptr); 		break;
 						case CMD_PING: 	        cmd_ping(client, &header); 					break;
@@ -3117,7 +3303,6 @@ int main(int argc, char **argv)
 	evtimer_add(_stats_event, &_stats_timeout);
 
 	init_stats();
-	
 
 	// initialise the servers that we listen on.
 	server_listen();
