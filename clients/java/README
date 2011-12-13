@@ -1,1 +1,8 @@
 Library for Java clients to connect and use the cluster.
+
+To build you will need a minimum of 
+Apache Ant version 1.8.1 compiled on April 30 2010
+
+All other libraries are included in the lib directory.
+
+To develop you need your favourite IDE.
