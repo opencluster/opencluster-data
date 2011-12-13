@@ -740,7 +740,6 @@ static void process_hashmask(cluster_t *cluster, server_t *server, int userid, i
 	reply_ack(cluster, server, CMD_HASHMASK, userid);
 	
 	// now that this server has supplied hashmasks, we can mark this server as active.
-	assert(server->active == 0);
 	server->active = 1;
 }
 
