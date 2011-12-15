@@ -26,6 +26,7 @@ int main(int argc, char **argv)
 	gulong msec;
 	char *str;
 	int str_len;
+	char key_buffer[128];
 
 	timer = g_timer_new();
 	
@@ -69,6 +70,16 @@ int main(int argc, char **argv)
 		printf ("Result of 'testdata' in cache.  data=%d\n", data);
 		sec = g_timer_elapsed(timer, &msec);
 		printf("Timing of %d gets. %f\n", GET_LIMIT, sec);
+		
+		printf("Setting 5000 items of data\n");
+		g_timer_start(timer);
+		for (i=0; i<5000; i++) {
+			sprintf(key_buffer, "client:%d", i);
+			cluster_setstr(cluster, key_buffer, "Bill Grady", 0);
+		}
+		g_timer_stop(timer);
+		sec = g_timer_elapsed(timer, &msec);
+		printf("Timing of 5000 sets. %f\n", sec);
 		
 // 		sleep(30);
 		
