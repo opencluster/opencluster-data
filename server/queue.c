@@ -63,6 +63,7 @@ void queue_push(queue_t *q, void *ptr)
 	assert(ptr);
 	
 	// first get a free item.
+	item = NULL;
 	if (q->avail) {
 		item = q->avail;
 		q->avail = item->next;
@@ -79,21 +80,21 @@ void queue_push(queue_t *q, void *ptr)
 	// add the pointer payload to the item.
 	item->ptr = ptr;
 	
-	
 	// now add this item to the end of the list.
 	if (q->head == NULL) {
 		assert(q->tail == NULL);
 		assert(q->count == 0);
 		
 		q->head = item;
-		assert(item->next == NULL);
 		q->tail = item;
+		assert(item->next == NULL);
 	}
 	else {
 		assert(q->tail);
 		assert(q->tail->next == NULL);
 		q->tail->next = item;
 		assert(item->next == NULL);
+		q->tail = item;
 	}
 	
 	// increment the count of items in the queue.

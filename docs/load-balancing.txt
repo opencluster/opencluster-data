@@ -123,25 +123,25 @@ with what it currently has and will decide if it wants to push a bucket to the o
 
 So, Server A sends a request asking Server B for its load levels, and Server B, at this point, Sends 
 back that it is not currently holding any primary or secondary buckets.  Server A will then look at 
-how many Primary and Secondary buckets it has, determins that it has more primaries than 
-secondaries, and so decides to send a primary to the other server.
+how many Primary and Secondary buckets it has, determins that it has more buckets than B, and so 
+decides to send send one to the other server.
 
   NOTE: If a node receives a request to take over a bucket, it should do its best to accomodate.  It 
         may be that the other server is shutting down and is offloading buckets.  So the receiving 
         server should always accept new buckets, UNLESS it is already in the process of receiving 
         another bucket from some other node.  A node can only receive one bucket at a time.
 
-When deciding to send a bucket, it first looks for any primary buckets that do not have backup 
-buckets on other nodes.  It decides whether to demote or promote on the other server based on how 
-many primary and secondary buckets that other server already has. Then it will choose the first 
-bucket randomly among that category.
+Servers nodes can ONLY send primary buckets to other servers and marks them as backup buckets.  
+Server nodes cannot transfer a backup bucket to another node.  The actual master of the bucket is 
+the only one that can determine where it goes.
 
-Server A sends a message to B saying "I'm going to be giving you Bucket #16, be prepared for it".  
-At this point Server B would normally respond with an "OK, start sending", but if it is already in 
-the process of being given a bucket from another node, it can say "Sorry, Bucket transfer already in 
-progress".  In this case though, there is only the two nodes, so it will be responding positively.  
+Server A sends a message to B saying "I'm going to be giving you Bucket #1, be prepared for it".  
+At this point Server B would normally respond with an "OK, start sending bucket #1", but if it is 
+already in the process of being given a bucket from another node, it can say "Sorry, Bucket transfer 
+already in progress".  In this case though, there is only the two nodes, so it will be responding 
+positively.  
 
-Server A then starts sending all the data contained in Bucket #16.  It will send it item by item, 
+Server A then starts sending all the data contained in Bucket #1.  It will send it item by item, 
 trying not to overload either server with a sudden rush of traffic, because while this 
 synchronisation is going on, it will also need to service requests from clients, including requests 
 for that bucket being transferred.
@@ -155,32 +155,25 @@ for that bucket being transferred.
 While the sync is going on, it will not trigger any more LoadBalancing events (or, if it does, they 
 will be ignored).  In other words, it will only be attempting to balance one bucket at a time.
 
-When Server A has managed to send ALL the items belonging to Bucket #16 to Server B, the following 
+When Server A has managed to send ALL the items belonging to Bucket #1 to Server B, the following 
 things happen:
-  1.  Server A tells Server B "You are now the primary node responsible for Bucket #16"
-  2.  Server A marks its own copy of the bucket as a backup.
-  3.  Server A removes Server B as a backup of that bucket, so that it doesn't sync data to it 
-      anymore.
-  4.  Server B marks its copy of the bucket as the primary.
-  5.  Server A sends a message to all its connected clients (and nodes) saying that it is a backup 
-      provider of Bucket #16.
-  6.  Server B sends a message to all its connected clients (and nodes) saying that it is a primary 
-      provider of Bucket #16.
-  7.  Server B makes a note that when changes are made on that bucket, the information also needs to 
-      be sent to Server A, because it is a backup of the bucket.
+  1.  Server A tells Server B "Synchronisation is complete, you are now a backup for Bucket #1"
+  2.  If Server A previously had a different backup node for that bucket, then it will send a 
+      message to that node telling it to destroy its copy of the bucket.  In this case, there was no 
+      backup version though.
+  3.  Server A marks Server B as a backup of that bucket, and will continue sending sync info to 
+      that node when contents of the bucket is changed.
+  4.  Server B sends a message to all its connected clients (and nodes) saying that it is a backup 
+      provider of Bucket #1.
+  5.  Server A and B will start doing LoadBalancing events again.
 
-At this point, all the clients now know that if it is accessing data from that bucket, it now needs 
-to go to Server B.  If a client is a little slow to get the message though, and it does send a 
-request to Server A, Server A will respond saying something like "I am not responsible for 
-Bucket #16, please ask Server B".   This allows for the migration to occur safely without extensive 
-co-ordination with the nodes and clients.
 
 Now we have:
 
   +--------------------------+  +--------------------------+
   |                          |  |                          |
   |  Server A                |  |  Server B                |
-  |    Bucket #1  - primary  |  |    Bucket #1  -          |
+  |    Bucket #1  - primary  |  |    Bucket #1  - backup   |
   |    Bucket #2  - primary  |  |    Bucket #2  -          |
   |    Bucket #3  - primary  |  |    Bucket #3  -          |
   |    Bucket #4  - primary  |  |    Bucket #4  -          |
@@ -195,7 +188,7 @@ Now we have:
   |    Bucket #13 - primary  |  |    Bucket #13 -          |
   |    Bucket #14 - primary  |  |    Bucket #14 -          |
   |    Bucket #15 - primary  |  |    Bucket #15 -          |
-  |    Bucket #16 - backup   |  |    Bucket #16 - primary  |
+  |    Bucket #16 - primary  |  |    Bucket #16 -          |
   |                          |  |                          |
   +--------------------------+  +--------------------------+
 
@@ -206,105 +199,142 @@ continue to be fired.
 Server B will ask Server A for its LoadLevel's but will see that A has more buckets, and therefore 
 B should not send any to A.  Remember, a node cannot request buckets, it can only give them away.
 
-Server A, when asking Server B for LoadLevels will now be told, "I have 1 primary and 0 secondary 
-buckets".   Server A will try and keep a balance on the other node between primary and backup 
-buckets, and sees that there are more primaries than there are backups, so it decides to make it be 
-a backup of one of the primary buckets.  The actual algorithm that does this calculation is a little 
-more complex than that, but not by much.
+Server A, when asking Server B for LoadLevels will now be told, "I have 0 primary and 1 secondary 
+buckets".  A sees that its total number of buckets exceeds B's, so decides to send it another 
+bucket.
 
-Server A randomly descides to send bucket #9.  This is a little different to the previous case, 
-because it is merely going to mark Server B as a backup for the bucket and the usual sync process 
-will take place.   Server B will send out a notice to all its connected clients saying that it is a 
-backup node of bucket #9.
-
-Server A will add all the items in Bucket #9 to the sync queue, and will start sending that out to 
-Server B.  While it is doing that, updates will probably occur on Bucket #9 and those items will 
-simply be added to the sync-queue as normal.   The only difference now between this operation and 
-normal sync operations to a backup server, is that the first time the sync data is caught up, it 
-will trigger LoadBalancing events to start firing again.   Remember, we only want to blast out a 
-sync of one bucket at a time to a server.  Normal sync operations on other buckets would still 
-continue though, regardless of the state of the bucket being migrated.  A message from A to B 
-stating "I have finished migrating bucket #9 to you", so that Server B can know that it can accept 
-Buckets from other nodes again.
+Server A can only choose from Primary buckets it has, and the first primary bucket it has in the 
+list is now #2.    
 
 At the begining of this process, we can assume:
 
   +--------------------------+  +--------------------------+
   |                          |  |                          |
   |  Server A                |  |  Server B                |
-  |    Bucket #1  - primary  |  |    Bucket #1  -          |
-  |    Bucket #2  - primary  |  |    Bucket #2  -          |
+  |    Bucket #1  - primary  |  |    Bucket #1  - backup   |
+  |    Bucket #2  - primary  |  |    Bucket #2  - backup   |
   |    Bucket #3  - primary  |  |    Bucket #3  -          |
   |    Bucket #4  - primary  |  |    Bucket #4  -          |
   |    Bucket #5  - primary  |  |    Bucket #5  -          |
   |    Bucket #6  - primary  |  |    Bucket #6  -          |
   |    Bucket #7  - primary  |  |    Bucket #7  -          |
   |    Bucket #8  - primary  |  |    Bucket #8  -          |
-  |    Bucket #9  - primary  |  |    Bucket #9  - backup   |
-  |    Bucket #10 - primary  |  |    Bucket #10  -         |
+  |    Bucket #9  - primary  |  |    Bucket #9  -          |
+  |    Bucket #10 - primary  |  |    Bucket #10 -          |
   |    Bucket #11 - primary  |  |    Bucket #11 -          |
   |    Bucket #12 - primary  |  |    Bucket #12 -          |
   |    Bucket #13 - primary  |  |    Bucket #13 -          |
   |    Bucket #14 - primary  |  |    Bucket #14 -          |
   |    Bucket #15 - primary  |  |    Bucket #15 -          |
-  |    Bucket #16 - backup   |  |    Bucket #16 - primary  |
+  |    Bucket #16 - backup   |  |    Bucket #16 -          |
   |                          |  |                          |
   +--------------------------+  +--------------------------+
 
-The same process will continue, until the buckets on the two servers are balanced.  The algorithm to 
-decide needs to ensure that it never tries to switch between two servers that already have the 
-bucket.   So in the above example where Server A is the primary for Bucket #9 and Server B is the 
-secondary, it would never try and send Bucket #9 to B as a primary.   This can be more evident when 
-there are a large number of nodes, and some start dissapearing and buckets have to get 
-re-introduced.
-
+The same process will continue, until the number of buckets on the two servers are balanced.  
 In the end, we could end up with something like:
 
   +--------------------------+  +--------------------------+
   |                          |  |                          |
   |  Server A                |  |  Server B                |
-  |    Bucket #1  - backup   |  |    Bucket #1  - primary  |
+  |    Bucket #1  - primary  |  |    Bucket #1  - backup   |
   |    Bucket #2  - primary  |  |    Bucket #2  - backup   |
-  |    Bucket #3  - backup   |  |    Bucket #3  - primary  |
+  |    Bucket #3  - primary  |  |    Bucket #3  - backup   |
   |    Bucket #4  - primary  |  |    Bucket #4  - backup   |
-  |    Bucket #5  - backup   |  |    Bucket #5  - primary  |
-  |    Bucket #6  - backup   |  |    Bucket #6  - primary  |
+  |    Bucket #5  - primary  |  |    Bucket #5  - backup   |
+  |    Bucket #6  - primary  |  |    Bucket #6  - backup   |
   |    Bucket #7  - primary  |  |    Bucket #7  - backup   |
   |    Bucket #8  - primary  |  |    Bucket #8  - backup   |
   |    Bucket #9  - primary  |  |    Bucket #9  - backup   |
-  |    Bucket #10 - backup   |  |    Bucket #10 - primary  |
+  |    Bucket #10 - primary  |  |    Bucket #10 - backup   |
   |    Bucket #11 - primary  |  |    Bucket #11 - backup   |
-  |    Bucket #12 - backup   |  |    Bucket #12 - primary  |
+  |    Bucket #12 - primary  |  |    Bucket #12 - backup   |
   |    Bucket #13 - primary  |  |    Bucket #13 - backup   |
-  |    Bucket #14 - backup   |  |    Bucket #14 - primary  |
+  |    Bucket #14 - primary  |  |    Bucket #14 - backup   |
   |    Bucket #15 - primary  |  |    Bucket #15 - backup   |
-  |    Bucket #16 - backup   |  |    Bucket #16 - primary  |
+  |    Bucket #16 - primary  |  |    Bucket #16 - backup   |
   |                          |  |                          |
+  +--------------------------+  +--------------------------+
+
+This is not yet an ideal situation because currently all the primary buckets are on one server, and 
+all the backup buckets are on another.  We need them to be evenly mixed.
+
+The LoadBalancing events will continue to be fired from each one.  B will not be able to really do 
+anything because it does not have any primary buckets.  It has very little control of the backup 
+buckets that it has.
+
+The LoadBalancing event on A will be more productive though, because B will report back that it has 
+0 primaries and 16 backups.  When A sees that B has more backups than it has primaries, and a change
+wont reverse the ratio (we dont want to go from more secondaries, to more primaries), it will decide 
+to send one of its primary buckets to B.  Note that B already has the complete bucket, so all it is 
+doing is flipping the responsibility.  It will generally flip the first bucket that it finds, that 
+is a primary on A, and a secondary on B.  In this case, Bucket #1.
+
+So we end up with:
+
+  +--------------------------+  +--------------------------+
+  |  Server A                |  |  Server B                |
+  |    Bucket #1  - backup   |  |    Bucket #1  - primary  |
+  |    Bucket #2  - primary  |  |    Bucket #2  - backup   |
+  |    Bucket #3  - primary  |  |    Bucket #3  - backup   |
+  |    Bucket #4  - primary  |  |    Bucket #4  - backup   |
+  |    Bucket #5  - primary  |  |    Bucket #5  - backup   |
+  |    Bucket #6  - primary  |  |    Bucket #6  - backup   |
+  |    Bucket #7  - primary  |  |    Bucket #7  - backup   |
+  |    Bucket #8  - primary  |  |    Bucket #8  - backup   |
+  |    Bucket #9  - primary  |  |    Bucket #9  - backup   |
+  |    Bucket #10 - primary  |  |    Bucket #10 - backup   |
+  |    Bucket #11 - primary  |  |    Bucket #11 - backup   |
+  |    Bucket #12 - primary  |  |    Bucket #12 - backup   |
+  |    Bucket #13 - primary  |  |    Bucket #13 - backup   |
+  |    Bucket #14 - primary  |  |    Bucket #14 - backup   |
+  |    Bucket #15 - primary  |  |    Bucket #15 - backup   |
+  |    Bucket #16 - primary  |  |    Bucket #16 - backup   |
+  +--------------------------+  +--------------------------+
+
+This same process would continue until we end up with a balanced cluster, which would look something 
+like:
+
+  +--------------------------+  +--------------------------+
+  |  Server A                |  |  Server B                |
+  |    Bucket #1  - backup   |  |    Bucket #1  - primary  |
+  |    Bucket #2  - backup   |  |    Bucket #2  - primary  |
+  |    Bucket #3  - backup   |  |    Bucket #3  - primary  |
+  |    Bucket #4  - backup   |  |    Bucket #4  - primary  |
+  |    Bucket #5  - backup   |  |    Bucket #5  - primary  |
+  |    Bucket #6  - backup   |  |    Bucket #6  - primary  |
+  |    Bucket #7  - backup   |  |    Bucket #7  - primary  |
+  |    Bucket #8  - backup   |  |    Bucket #8  - primary  |
+  |    Bucket #9  - primary  |  |    Bucket #9  - backup   |
+  |    Bucket #10 - primary  |  |    Bucket #10 - backup   |
+  |    Bucket #11 - primary  |  |    Bucket #11 - backup   |
+  |    Bucket #12 - primary  |  |    Bucket #12 - backup   |
+  |    Bucket #13 - primary  |  |    Bucket #13 - backup   |
+  |    Bucket #14 - primary  |  |    Bucket #14 - backup   |
+  |    Bucket #15 - primary  |  |    Bucket #15 - backup   |
+  |    Bucket #16 - primary  |  |    Bucket #16 - backup   |
   +--------------------------+  +--------------------------+
 
 
 This can get further complicated, when a third server joins the cluster.
 
   +--------------------------+  +--------------------------+  +--------------------------+
-  |                          |  |                          |  |                          |
   |  Server A                |  |  Server B                |  |  Server C                |
   |    Bucket #1  - backup   |  |    Bucket #1  - primary  |  |    Bucket #1  -          |
-  |    Bucket #2  - primary  |  |    Bucket #2  - backup   |  |    Bucket #2  -          |
+  |    Bucket #2  - backup   |  |    Bucket #2  - primary  |  |    Bucket #2  -          |
   |    Bucket #3  - backup   |  |    Bucket #3  - primary  |  |    Bucket #3  -          |
-  |    Bucket #4  - primary  |  |    Bucket #4  - backup   |  |    Bucket #4  -          |
+  |    Bucket #4  - backup   |  |    Bucket #4  - primary  |  |    Bucket #4  -          |
   |    Bucket #5  - backup   |  |    Bucket #5  - primary  |  |    Bucket #5  -          |
   |    Bucket #6  - backup   |  |    Bucket #6  - primary  |  |    Bucket #6  -          |
-  |    Bucket #7  - primary  |  |    Bucket #7  - backup   |  |    Bucket #7  -          |
-  |    Bucket #8  - primary  |  |    Bucket #8  - backup   |  |    Bucket #8  -          |
+  |    Bucket #7  - backup   |  |    Bucket #7  - primary  |  |    Bucket #7  -          |
+  |    Bucket #8  - backup   |  |    Bucket #8  - primary  |  |    Bucket #8  -          |
   |    Bucket #9  - primary  |  |    Bucket #9  - backup   |  |    Bucket #9  -          |
-  |    Bucket #10 - backup   |  |    Bucket #10 - primary  |  |    Bucket #10 -          |
+  |    Bucket #10 - primary  |  |    Bucket #10 - backup   |  |    Bucket #10 -          |
   |    Bucket #11 - primary  |  |    Bucket #11 - backup   |  |    Bucket #11 -          |
-  |    Bucket #12 - backup   |  |    Bucket #12 - primary  |  |    Bucket #12 -          |
+  |    Bucket #12 - primary  |  |    Bucket #12 - backup   |  |    Bucket #12 -          |
   |    Bucket #13 - primary  |  |    Bucket #13 - backup   |  |    Bucket #13 -          |
-  |    Bucket #14 - backup   |  |    Bucket #14 - primary  |  |    Bucket #14 -          |
+  |    Bucket #14 - primary  |  |    Bucket #14 - backup   |  |    Bucket #14 -          |
   |    Bucket #15 - primary  |  |    Bucket #15 - backup   |  |    Bucket #15 -          |
-  |    Bucket #16 - backup   |  |    Bucket #16 - primary  |  |    Bucket #16 -          |
-  |                          |  |                          |  |                          |
+  |    Bucket #16 - primary  |  |    Bucket #16 - backup   |  |    Bucket #16 -          |
   +--------------------------+  +--------------------------+  +--------------------------+
 
 The first server to fire a LoadBalancing event against Server C will see that it has less buckets 
@@ -313,35 +343,33 @@ transferred to the node at a time.
 
 One extra thing to note here, is that by default the servers will be setup to only keep one backup 
 of each bucket.  So if a primary bucket is being migrated to Server C, then the current backup node 
-will be told that it can release the bucket.
+will be told that it can release the bucket (after the synchronisation is complete).
 
 We can use Bucket #1 as an example.  Here we have Server A being the backup, and B being the 
 primary.  If B is wanting to move that bucket to Server C, it would start the process as in the 
 previous examples.   It will start sending the data to C, and when finished, C will become the 
-primary, B will become the backup, and A will be told that it can drop the bucket entirely.
+backup, B will continue to be the primary, and A will be told that it can drop the bucket entirely.
 
 So we end up with:
 
   +--------------------------+  +--------------------------+  +--------------------------+
-  |                          |  |                          |  |                          |
   |  Server A                |  |  Server B                |  |  Server C                |
-  |    Bucket #1  -          |  |    Bucket #1  - backup   |  |    Bucket #1  - primary  |
-  |    Bucket #2  - primary  |  |    Bucket #2  - backup   |  |    Bucket #2  -          |
+  |    Bucket #1  -          |  |    Bucket #1  - primary  |  |    Bucket #1  - backup   |
+  |    Bucket #2  - backup   |  |    Bucket #2  - primary  |  |    Bucket #2  -          |
   |    Bucket #3  - backup   |  |    Bucket #3  - primary  |  |    Bucket #3  -          |
-  |    Bucket #4  - primary  |  |    Bucket #4  - backup   |  |    Bucket #4  -          |
+  |    Bucket #4  - backup   |  |    Bucket #4  - primary  |  |    Bucket #4  -          |
   |    Bucket #5  - backup   |  |    Bucket #5  - primary  |  |    Bucket #5  -          |
   |    Bucket #6  - backup   |  |    Bucket #6  - primary  |  |    Bucket #6  -          |
-  |    Bucket #7  - primary  |  |    Bucket #7  - backup   |  |    Bucket #7  -          |
-  |    Bucket #8  - primary  |  |    Bucket #8  - backup   |  |    Bucket #8  -          |
+  |    Bucket #7  - backup   |  |    Bucket #7  - primary  |  |    Bucket #7  -          |
+  |    Bucket #8  - backup   |  |    Bucket #8  - primary  |  |    Bucket #8  -          |
   |    Bucket #9  - primary  |  |    Bucket #9  - backup   |  |    Bucket #9  -          |
-  |    Bucket #10 - backup   |  |    Bucket #10 - primary  |  |    Bucket #10 -          |
+  |    Bucket #10 - primary  |  |    Bucket #10 - backup   |  |    Bucket #10 -          |
   |    Bucket #11 - primary  |  |    Bucket #11 - backup   |  |    Bucket #11 -          |
-  |    Bucket #12 - backup   |  |    Bucket #12 - primary  |  |    Bucket #12 -          |
+  |    Bucket #12 - primary  |  |    Bucket #12 - backup   |  |    Bucket #12 -          |
   |    Bucket #13 - primary  |  |    Bucket #13 - backup   |  |    Bucket #13 -          |
-  |    Bucket #14 - backup   |  |    Bucket #14 - primary  |  |    Bucket #14 -          |
+  |    Bucket #14 - primary  |  |    Bucket #14 - backup   |  |    Bucket #14 -          |
   |    Bucket #15 - primary  |  |    Bucket #15 - backup   |  |    Bucket #15 -          |
-  |    Bucket #16 - backup   |  |    Bucket #16 - primary  |  |    Bucket #16 -          |
-  |                          |  |                          |  |                          |
+  |    Bucket #16 - primary  |  |    Bucket #16 - backup   |  |    Bucket #16 -          |
   +--------------------------+  +--------------------------+  +--------------------------+
 
 If by a quirk of fate, Server B happens to be rather busy, and A manages to send half its buckets 
@@ -354,57 +382,120 @@ While migrating the buckets over the three servers, we would eventually end up w
 similar to this incomplete migration (it is incomplete beacuse it is still unbalanced, but would 
 eventually balance out):
 
+So we continue sending backup buckets to Server C from the existing nodes, and we end up with this:
 
   +--------------------------+  +--------------------------+  +--------------------------+
-  |                          |  |                          |  |                          |
+  |  Server A                |  |  Server B                |  |  Server C                |
+  |    Bucket #1  -          |  |    Bucket #1  - primary  |  |    Bucket #1  - backup   |
+  |    Bucket #2  -          |  |    Bucket #2  - primary  |  |    Bucket #2  - backup   |
+  |    Bucket #3  -          |  |    Bucket #3  - primary  |  |    Bucket #3  - backup   |
+  |    Bucket #4  -          |  |    Bucket #4  - primary  |  |    Bucket #4  - backup   |
+  |    Bucket #5  -          |  |    Bucket #5  - primary  |  |    Bucket #5  - backup   |
+  |    Bucket #6  - backup   |  |    Bucket #6  - primary  |  |    Bucket #6  -          |
+  |    Bucket #7  - backup   |  |    Bucket #7  - primary  |  |    Bucket #7  -          |
+  |    Bucket #8  - backup   |  |    Bucket #8  - primary  |  |    Bucket #8  -          |
+  |    Bucket #9  - primary  |  |    Bucket #9  -          |  |    Bucket #9  - backup   |
+  |    Bucket #10 - primary  |  |    Bucket #10 -          |  |    Bucket #10 - backup   |
+  |    Bucket #11 - primary  |  |    Bucket #11 -          |  |    Bucket #11 - backup   |
+  |    Bucket #12 - primary  |  |    Bucket #12 -          |  |    Bucket #12 - backup   |
+  |    Bucket #13 - primary  |  |    Bucket #13 -          |  |    Bucket #13 - backup   |
+  |    Bucket #14 - primary  |  |    Bucket #14 - backup   |  |    Bucket #14 -          |
+  |    Bucket #15 - primary  |  |    Bucket #15 - backup   |  |    Bucket #15 -          |
+  |    Bucket #16 - primary  |  |    Bucket #16 - backup   |  |    Bucket #16 -          |
+  +--------------------------+  +--------------------------+  +--------------------------+
+        8 + 3 = 11                     8 + 3 = 11                     0 + 10 = 10
+
+Thats not completely balanced yet, because A and B have a lot of primaries and C has only backups.  
+Now when LoadBalancing events are fired, instead of sending buckets, we must now promote some.
+
+A gets a Load Level reply from C, and will see that the number of buckets is ok (we dont want to 
+send more buckets if that means the target node will have more.  Only send if the target node will 
+remain with less, or both are even).  So instead it looks at the ratio of backups to primaries.  In 
+this case, C has more backups than it does primary, so it A will go through its list to find the 
+first bucket where it is a primary, and the secondary is on C (in this case Bucket #9).  When it 
+finds that, it will promote that bucket on C to be primary, and the bucket on A will become 
+secondary.  This process should be instant.
+
+And we end up with:
+
+  +--------------------------+  +--------------------------+  +--------------------------+
+  |  Server A                |  |  Server B                |  |  Server C                |
+  |    Bucket #1  -          |  |    Bucket #1  - primary  |  |    Bucket #1  - backup   |
+  |    Bucket #2  -          |  |    Bucket #2  - primary  |  |    Bucket #2  - backup   |
+  |    Bucket #3  -          |  |    Bucket #3  - primary  |  |    Bucket #3  - backup   |
+  |    Bucket #4  -          |  |    Bucket #4  - primary  |  |    Bucket #4  - backup   |
+  |    Bucket #5  -          |  |    Bucket #5  - primary  |  |    Bucket #5  - backup   |
+  |    Bucket #6  - backup   |  |    Bucket #6  - primary  |  |    Bucket #6  -          |
+  |    Bucket #7  - backup   |  |    Bucket #7  - primary  |  |    Bucket #7  -          |
+  |    Bucket #8  - backup   |  |    Bucket #8  - primary  |  |    Bucket #8  -          |
+  |    Bucket #9  - backup   |  |    Bucket #9  -          |  |    Bucket #9  - primary  |
+  |    Bucket #10 - primary  |  |    Bucket #10 -          |  |    Bucket #10 - backup   |
+  |    Bucket #11 - primary  |  |    Bucket #11 -          |  |    Bucket #11 - backup   |
+  |    Bucket #12 - primary  |  |    Bucket #12 -          |  |    Bucket #12 - backup   |
+  |    Bucket #13 - primary  |  |    Bucket #13 -          |  |    Bucket #13 - backup   |
+  |    Bucket #14 - primary  |  |    Bucket #14 - backup   |  |    Bucket #14 -          |
+  |    Bucket #15 - primary  |  |    Bucket #15 - backup   |  |    Bucket #15 -          |
+  |    Bucket #16 - primary  |  |    Bucket #16 - backup   |  |    Bucket #16 -          |
+  +--------------------------+  +--------------------------+  +--------------------------+
+        7 + 4 = 11                     8 + 3 = 11                     1 + 9 = 10
+
+This will keep going until we end up with a balance, and we have:
+
+  +--------------------------+  +--------------------------+  +--------------------------+
   |  Server A                |  |  Server B                |  |  Server C                |
   |    Bucket #1  -          |  |    Bucket #1  - backup   |  |    Bucket #1  - primary  |
-  |    Bucket #2  - primary  |  |    Bucket #2  - backup   |  |    Bucket #2  -          |
+  |    Bucket #2  -          |  |    Bucket #2  - backup   |  |    Bucket #2  - primary  |
   |    Bucket #3  -          |  |    Bucket #3  - primary  |  |    Bucket #3  - backup   |
-  |    Bucket #4  - primary  |  |    Bucket #4  - backup   |  |    Bucket #4  -          |
-  |    Bucket #5  -          |  |    Bucket #5  - backup   |  |    Bucket #5  - primary  |
-  |    Bucket #6  -          |  |    Bucket #6  - primary  |  |    Bucket #6  - backup   |
-  |    Bucket #7  - primary  |  |    Bucket #7  - backup   |  |    Bucket #7  -          |
-  |    Bucket #8  - backup   |  |    Bucket #8  -          |  |    Bucket #8  - primary  |
+  |    Bucket #4  -          |  |    Bucket #4  - primary  |  |    Bucket #4  - backup   |
+  |    Bucket #5  -          |  |    Bucket #5  - primary  |  |    Bucket #5  - backup   |
+  |    Bucket #6  - backup   |  |    Bucket #6  - primary  |  |    Bucket #6  -          |
+  |    Bucket #7  - backup   |  |    Bucket #7  - primary  |  |    Bucket #7  -          |
+  |    Bucket #8  - backup   |  |    Bucket #8  - primary  |  |    Bucket #8  -          |
   |    Bucket #9  - backup   |  |    Bucket #9  -          |  |    Bucket #9  - primary  |
-  |    Bucket #10 - backup   |  |    Bucket #10 - primary  |  |    Bucket #10 -          |
-  |    Bucket #11 - primary  |  |    Bucket #11 - backup   |  |    Bucket #11 -          |
-  |    Bucket #12 - backup   |  |    Bucket #12 - primary  |  |    Bucket #12 -          |
+  |    Bucket #10 - backup   |  |    Bucket #10 -          |  |    Bucket #10 - primary  |
+  |    Bucket #11 - backup   |  |    Bucket #11 -          |  |    Bucket #11 - primary  |
+  |    Bucket #12 - primary  |  |    Bucket #12 -          |  |    Bucket #12 - backup   |
   |    Bucket #13 - primary  |  |    Bucket #13 -          |  |    Bucket #13 - backup   |
-  |    Bucket #14 - backup   |  |    Bucket #14 - primary  |  |    Bucket #14 -          |
+  |    Bucket #14 - primary  |  |    Bucket #14 - backup   |  |    Bucket #14 -          |
   |    Bucket #15 - primary  |  |    Bucket #15 - backup   |  |    Bucket #15 -          |
-  |    Bucket #16 -          |  |    Bucket #16 - primary  |  |    Bucket #16 - backup   |
-  |                          |  |                          |  |                          |
+  |    Bucket #16 - primary  |  |    Bucket #16 - backup   |  |    Bucket #16 -          |
   +--------------------------+  +--------------------------+  +--------------------------+
+        5 + 6 = 11                     6 + 5 = 11                     5 + 5 = 10
+
+Now we have a completely balanced cluster, with an even mix of primary and secondary buckets on all 
+three nodes.  The process will continue when other nodes join the cluster.
+
+Things only get tricky when a server attempts to splits its buckets, while another server is sending 
+a bucket to yet another server.  When that occurs, the transfer is stopped, and restarted, the data 
+already sent discarded.  Then, rebalancing would continue with a new number of buckets.
 
 
 This situation doesn't mean that there can be only a maximum of 16 nodes, because when a server gets 
-to the point where it has only 4 buckets, it will split those 4 buckets into smaller buckets.  
-In the process of splitting and informing the other nodes of the changed hashmasks, that will 
-trigger all the other nodes in the cluster to also split their own buckets.   It may take a few 
+to the point where it has only 4 buckets (total), it will split those 4 buckets into smaller 
+buckets.  In the process of splitting and informing the other nodes of the changed hashmasks, that 
+will trigger all the other nodes in the cluster to also split their own buckets.   It may take a few 
 cycles for the splits to complete across the cluster, but during that time, all the hashes will 
 still resolve to the same nodes, so nothing should be disturbed.   After the split, those 4 buckets 
 on the server would now be 64 smaller buckets.  It can continue to load balance them in the exact 
 same way as we did before with only 16 buckets.  Those original 16 buckets on the cluster, have now 
-become 256 buckets (stored twice).
+become 256 buckets (stored twice, so actually 512).
 
 The same again can happen when there are even more nodes in the cluster.  It will split to have a 
 total of 4096 primary buckets.
 
 
-You may have noticed that up until now, Nodes have only been transferring buckets that they are 
-primarily responsible for.  When determining which buckets to send to the other server, it first 
-looks for any primary buckets that do not have a backup.  If all primary buckets have a backup, then 
-it will count how many primary buckets and how many backup buckets it has, and whichever pile is 
-greater, it will transfer one (and it doesn't matter which one).
+WHAT HAPPENS IF A SPLIT HAPPENS WHILE TRANSFERRING A BUCKET?
 
-The difference is, that if transferring a primary bucket, it can decide whether or not to make it a 
-backup or primary on the other side.  But when transferring a bucket that is already a backup, it 
-can only make it a backup on the other side.  The node that already has the primary bucket is the 
-only one that can demote and promote.
+A split would occur if another node sends a HASHMASK command that has a new mask.  This will require 
+the node to split its own buckets.  When this happens a migration in progress is no longer valid, so 
+it will be cancelled.  The target of the migration will delete the contents that it has already 
+received, and it would likely be receiving messages shortly telling requiring it to split also.
 
+If a receiving node (of a migration) needs to split, then it will send a message to the source node 
+telling it that it is cancelling the transfer.
 
-
+Once the migration is cancelled, normal loadlevel activity will commence and the new buckets will 
+start migrating out to servers with less load.
 
 
 
@@ -418,7 +509,8 @@ because it doesnt really matter if there is 4096 buckets spread over only a few 
 
 When the cluster is generally in sync, there are normally two copies of each bucket.  If a server 
 needs  to shutdown (gracefully), it should be able to quickly release the buckets it has, and the 
-backup copies become primary.   
+backup copies become primary.  That node would then try to find other nodes to create a backup 
+bucket on.
 
 If the nodes are badly out of sync when a shutdown is needed, it would need to wait until the sync 
 is completed.

@@ -60,28 +60,38 @@ All commands require a reply.  A reply takes the same format as a command, and h
 return a single 'reply', although it may trigger further commands to come.  The reply will include 
 a param that indicates the commandID that it is replying to.
 
-The commands are:
-  10    hello         initiate communications.
-  11    capabilities  determine if a command is accepted or not, without issuing the command.
-  15    shuttingdown  tells the other node that this node is shutting down and not to send any 
-                      buckets to it, or other data.
-  20    goodbye       terminate communications cleanly
-  30    ping          check that the node is responding.
-  50    serverhello   when a server is connecting to another server.
-  100   server_info   sends a list of servers in the cluster.
-  120   hashmask      when a set of hashes is being moved to a different server, let the clients and
-                      other servers know. 
-  200   req_loadlevel nodes will ask other nodes how full they are.
-  300   accept_bucket node telling another node to start accepting data for a bucket.   
-  1000  lock          obtain a cluster lock
-  1010  unlock        release a cluster lock
-  2000  set_int       set an integer (32-bit) key/value, overwriting if it exists.
-  2010  set_long      set an long (64-bit) key/value, overwriting it it exists.
-  2020  set_string    set a variable length string key/value.
-  2100  get_int       get a integer (32-bit) key/value pair.
-  2110  get_long      get a long (32-bit) key/value pair.
-  2120  get_string    get a variable length string key/value.
-  2200  get_type      get the type of the data.
+The commands (and replies, indicated by *) are:
+* 1     ack
+* 2     fail
+* 3     failinfo
+* 4     tryelsewhere
+* 9     unknown
+  10    hello
+  11    capabilities
+  15    shuttingdown
+  20    goodbye
+  30    ping
+  50    serverhello
+  100   server_info
+  120   hashmask
+  200   req_loadlevel
+* 210   loadlevels
+  300   accept_bucket
+* 305   cant_accept_bucket
+* 310   accepting_bucket
+  1000  lock
+  1010  unlock
+  2000  set_int
+  2010  set_long
+  2020  set_string
+  2100  get_int
+  2110  get_long
+  2120  get_string
+  2200  get_type
+  3000  sync_int
+  3010  sync_long
+  3020  sync_string
+  
 
 Note: To promote performance on the server, CommandID's less than 1000 do not require access to the
       clustered data.  CommandID's over 1000 internally require pipeline locks and need to be done
@@ -515,7 +525,26 @@ Payload:
   integer - hash (bucket)
 
 
+-----------------------------------------------------------------------
+promote_bucket(400)
 
+Used by the master of a bucket, to promote a backup copy to be the master.  
+
+Payload:
+  integer - mask
+  integer - hash (bucket)
+
+-----------------------------------------------------------------------
+remove_bucket(420)
+
+Used by the master of a bucket, to tell a backup copy that it is no longer needed and can be 
+destroyed.  The backup copy should not have any subscriptions or anything, so it doesn't need any 
+special information about where the master bucket is, although it should already know that from the 
+HASHMASK updates.
+
+Payload:
+  integer - mask
+  integer - hash (bucket)
 
 
 -----------------------------------------------------------------------
@@ -571,12 +600,26 @@ Payload:
 
 -----------------------------------------------------------------------
   2110  get_long     get a long (32-bit) key/value pair.
+-----------------------------------------------------------------------
   2120  get_string   get a variable length string key/value.
+-----------------------------------------------------------------------
   2200  get_type     get the type of the data.
 
 
 -----------------------------------------------------------------------
+sync_int(3000)
+
+Payload:
+  integer - map hash (0 for non-map items)
+  integer - key hash
+  integer - value
+
 -----------------------------------------------------------------------
+  3010  sync_long
+-----------------------------------------------------------------------
+  3020  sync_string
+-----------------------------------------------------------------------
+
 -----------------------------------------------------------------------
 -----------------------------------------------------------------------
 -----------------------------------------------------------------------

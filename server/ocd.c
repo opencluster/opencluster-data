@@ -186,6 +186,8 @@ typedef struct {
 
 	// all the items that need to be transferred to the new transfer_client.  When updates to the bucket occur, this queue needs to be updated also.
 	queue_t *transfer_queue;
+	
+	// the number of items that have been sent to the transfer client, but have not been ack'd yet.
 	int in_transit;
 	int transfer_level;
 	
@@ -316,7 +318,7 @@ struct timeval _stats_timeout = {.tv_sec = 1, .tv_usec = 0};
 struct timeval _loadlevel_timeout = {.tv_sec = 5, .tv_usec = 0};
 struct timeval _connect_timeout = {.tv_sec = 30, .tv_usec = 0};
 struct timeval _node_wait_timeout = {.tv_sec = 5, .tv_usec = 0};
-struct timeval _node_loadlevel_timeout = {.tv_sec = 30, .tv_usec = 0};
+struct timeval _node_loadlevel_timeout = {.tv_sec = 5, .tv_usec = 0};
 
 // This will be 0 when the node has either connected to other nodes in the cluster, or it has 
 // assumed that it is the first node in the cluster.
@@ -742,7 +744,9 @@ static void bucket_destroy(bucket_t *bucket)
 
 	assert(bucket->transfer_client == NULL);
 	assert(bucket->transfer_queue == NULL);
-	assert(queue_count(bucket->changelist) == 0);
+	if (bucket->changelist) {
+		assert(queue_count(bucket->changelist) == 0);
+	}
 	
 	// while going through the tree, cannot modify the tree, so we will continuously go through the 
 	// list, getting an item one at a time, clearing it and removing it from the tree.  Continue the 
@@ -1625,7 +1629,7 @@ static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 		// need to send to the node, the list of hashmasks.
 		push_hashmasks(client);
 		
-		printf("Adding '%s' as a New Node.\n", name);
+		printf("Adding '%s' as a New Node. (activenodes == %d)\n", name, _stats.active_nodes);
 	}
 	else {
 		
@@ -1761,28 +1765,28 @@ static void split_mask(int mask)
  */
 static void cmd_hashmask(client_t *client, header_t *header, char *payload)
 {
-	int length;
 	char *next;
 	hash_t mask;
 	hash_t hash;
 	int level;
+	node_t *node;
 	
 	assert(client);
 	assert(header);
 	assert(payload);
 
+	assert(client->node);
+
+	// get the data out of the payload.
 	next = payload;
-	
-	assert(client->node == NULL);
-	
-	// the only parameter is a string indicating the servers connection data.  
-	// Normally an IP and port.
 	mask = data_int(&next);
-	assert(mask != 0);
-
 	hash = data_int(&next);
-	assert(hash >= 0 && hash <= mask);
+	level = data_int(&next);
 
+	// check integrity of the data provided.
+	assert(mask != 0);
+	assert(hash >= 0 && hash <= mask);
+	assert(level == -1 || level >= 0);
 	
 	// check that the mask is the same as our existing mask... 
 	
@@ -1802,12 +1806,27 @@ static void cmd_hashmask(client_t *client, header_t *header, char *payload)
 	}
 	
 	// now we process the bucket info that was provided.
-	int i;
-	assert(0);
+	if (level < 0) {
+		// the hashmask is being deleted.
+		assert(0);
+	}
 
-	
-	
-	
+	// these entries should only be coming from server nodes;
+	assert(client->node);
+	node = client->node;
+	assert(node->name);
+
+	if (level == 0) {
+		if (_hashmasks[hash]->primary) { free(_hashmasks[hash]->primary); }
+		_hashmasks[hash]->primary = strdup(node->name);
+	}
+	else if (level == 1) {
+		if (_hashmasks[hash]->secondary) { free(_hashmasks[hash]->secondary); }
+		_hashmasks[hash]->secondary = strdup(node->name);
+	}
+	else {
+		assert(0);
+	}
 
 	// send the ACK reply.
 	send_message(client, header, REPLY_ACK, 0, NULL);
@@ -1847,7 +1866,7 @@ static int store_value(int map_hash, int key_hash, char *name, int expires, valu
 		// calculate the bucket that this item belongs in.
 	bucket_index = _mask & key_hash;
 	assert(bucket_index >= 0);
-	assert(bucket_index < _mask);
+	assert(bucket_index <= _mask);
 	bucket = _buckets[bucket_index];
 	assert(bucket->hash == bucket_index);
 
@@ -2327,6 +2346,15 @@ static void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
 		// now we need to check that this bucket isn't already handled by this server.
 		assert(key_hash <= mask);
 		assert(_mask == mask);
+		
+		// if we dont currently have a buckets list, we need to create one.
+		if (_buckets == NULL) {
+			_buckets = calloc(_mask + 1, sizeof(bucket_t *));
+			assert(_buckets);
+			assert(_buckets[0] == NULL);
+		}
+		
+		assert(_buckets);
 		if (_buckets[key_hash]) {
 			if (_verbose > 2) printf("[%u] cant accept bucket, already have that bucket.\n", _seconds);
 			reply = REPLY_CANT_ACCEPT_BUCKET;
@@ -2374,20 +2402,6 @@ static void process_ack(client_t *client, header_t *header)
 
 
 
-gboolean traverse_fn(gpointer p_key, gpointer p_value, gpointer data)
-{
-// 	unsigned int *aa = p_key;
-// 	static int counter=0;
-	
-// 	counter++;
-	
-//  	printf("%u='%s'\n", *aa, value); 
-
-// 	if (counter > 10) 
-// 		return(TRUE);
-// 	else
-		return(FALSE);
-}
 
 
 static void push_accept_bucket(client_t *client, hash_t key)
@@ -2483,6 +2497,71 @@ static void process_loadlevels(client_t *client, header_t *header, void *ptr)
 }
 
 
+gboolean traverse_migrate_maps_fn(gpointer p_key, gpointer p_value, gpointer data)
+{
+	item_t *item;
+	queue_t *queue;
+	
+	assert(p_key && p_value && data);
+
+	item = p_value;
+	assert(&(item->map_key) == p_key);
+
+	assert(item->name);
+	assert(item->value);
+
+	/// **** if the item has expired, we should not bother to send it.
+	if (item->expires > 0) {
+		assert(0);
+	}
+	
+	printf("Adding '%s' to the queue for migration.\n", item->name);
+	
+	queue = data;
+	queue_push(queue, item);
+	
+	return(FALSE);
+}
+
+
+
+gboolean traverse_migrate_hash_fn(gpointer p_key, gpointer p_value, gpointer data)
+{
+	maplist_t *maplist;
+	
+	assert(p_key && p_value && data);
+
+	maplist = p_value;
+	assert(&(maplist->item_key) == p_key);
+
+	assert(maplist->mapstree);
+	
+	g_tree_foreach(maplist->mapstree, traverse_migrate_maps_fn, data);
+	
+	return(FALSE);
+}
+
+
+void send_transfer_item(bucket_t *bucket)
+{
+	int left;
+	int i;
+	
+	assert(bucket);
+	assert(bucket->in_transit < TRANSIT_LIMIT);
+	assert(bucket->transfer_queue);
+	assert(bucket->transfer_client);
+	
+	left = queue_count(bucket->transfer_queue);
+
+	while (bucket->in_transit < TRANSIT_LIMIT && left > 0) {
+		
+	}
+	
+	assert(0);
+}
+
+
 
 /*
  * When we receive a reply of REPLY_ACCEPTING_BUCKET, we can start sending the bucket contents to 
@@ -2505,19 +2584,43 @@ static void process_accept_bucket(client_t *client, header_t *header, void *ptr)
 	mask = data_int(&next);
 	hash = data_int(&next);
 	
-	// build the list of items.
-	assert(0);
+	// get the bucket.
+	assert(_buckets);
+	assert(mask == _mask);
+	bucket = _buckets[hash];
+	assert(bucket);
 	
-	// send queued item.
-	assert(0);
-			
-			// now we have to decide if the receiver should take it as a primary or secondary.  We dont tell them yet, we just send them the details of the bucket.
-//  		push_accept_bucket(client, bucket->hash);
-			
+	// build the list of items.
+	assert(bucket->transfer_queue == NULL);
+
+	
+	bucket->transfer_queue = queue_new();
+	assert(bucket->transfer_queue);
+	
+	assert(bucket->tree);
+	g_tree_foreach(bucket->tree, traverse_migrate_hash_fn, bucket->transfer_queue);
+
+	if (queue_count(bucket->transfer_queue) == 0) {
+		// there wasn't any data in the bucket.  Therefore, we go straight to the finalization.
+		
+		// go through all the items for subscription information, and send MOVE events to each.
+		assert(0);
+		
+		// promote or finalize the remote client.
+		assert(0);
+		
+		// update the local hashmasks so we can inform clients who send data.
+		assert(0);
+		
+		// destroy the bucket.
+		assert(0);
+	}
+	else {
+		// send the first queued item.
+		assert(bucket->in_transit == 0);
+		send_transfer_item(bucket);
+	}
 }
-
-
-
 
 
 static void process_unknown(client_t *client, header_t *header)
@@ -2825,10 +2928,6 @@ static void read_handler(int fd, short int flags, void *arg)
 			if (client->node) {
 				// this client is actually a node connection.  We need to create an event to wait 
 				// and then try connecting again.
-
-				_stats.active_nodes --;
-				assert(_stats.active_nodes >= 0);
-
 				node_retry(client->node);
 			}
 

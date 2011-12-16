@@ -72,10 +72,10 @@ ACCESSING DATA IN THE SERVER
 	required, in a short amount of time.
 
 	One of the functionality requirements we established with the project, is the ability to store 
-	data as a single unit, or as part of a larger map.  This allows you to store an item called 
+	data as either a single unit, or as part of a larger map.  This allows you to store an item called 
 	"DefaultSomething" and be able to retrieve it.  That is a single item.  Additionally we can 
 	store things as maps.  For example we could have a map called "Products", and within that, have 
-	entries with integer ID's or string names.
+	entries with integer ID's or string names as the key.
 
 	When both kinds of data are presented to the server, they both fall into the same buckets even 
 	though they are different things.  

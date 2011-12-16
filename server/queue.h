@@ -3,20 +3,15 @@
 #define __QUEUE_H
 
 typedef struct __queue_item_t {
-
 	void *ptr;
 	struct __queue_item_t *next;
-
 } queue_item_t;
 
-
 typedef struct {
-
 	queue_item_t *head;
 	queue_item_t *tail;
 	queue_item_t *avail;
 	int count;
-
 } queue_t;
 
 
