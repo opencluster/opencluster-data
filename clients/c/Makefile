@@ -27,8 +27,8 @@ libopencluster.so.$(SO_VER): $(OBJS)
 
 
 install_lib: libopencluster.so.$(SO_VER)
-	cp libopencluster.so.$(SO_VER) /usr/lib/
-	test -e /usr/lib/libopencluster.so && rm /usr/lib/libopencluster.so
+	@cp libopencluster.so.$(SO_VER) /usr/lib/
+	@-test -e /usr/lib/libopencluster.so && rm /usr/lib/libopencluster.so
 	ln -s /usr/lib/libopencluster.so.$(SO_VER) /usr/lib/libopencluster.so
 	ldconfig
 

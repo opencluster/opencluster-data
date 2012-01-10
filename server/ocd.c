@@ -118,7 +118,7 @@ typedef struct {
 	short type;
 	union {
 		int i;			// integer
-		long l;			// long
+		long long l;			// long
 		struct {
 			int length;
 			char *data;
@@ -299,7 +299,7 @@ unsigned int _seconds = 0;
 // The stats event fires every second, and it collates the stats it has and logs some statistics 
 // (if there were any).
 struct event *_stats_event = NULL;
-long _stat_counter = 0;
+long long _stat_counter = 0;
 
 // This event is started when the system is shutting down, and monitors the events that are left to 
 // finish up.  When everything is stopped, it stops the final events that have been ticking over 
@@ -3336,7 +3336,7 @@ int main(int argc, char **argv)
 	assert(sizeof(char) == 1);
 	assert(sizeof(short) == 2);
 	assert(sizeof(int) == 4); 
-	assert(sizeof(long) == 8);
+	assert(sizeof(long long) == 8);
 	
 ///============================================================================
 /// Initialization.
@@ -3382,7 +3382,8 @@ int main(int argc, char **argv)
 	_seconds_event = evtimer_new(_evbase, seconds_handler, NULL);
 	assert(_seconds_event);
 	evtimer_add(_seconds_event, &_seconds_timeout);
-	// we need to set a timer to fire in 5 seconds to setup the cluster if no connections were made.
+	
+	// statistics are generated every second, setup a timer that can fire and handle the stats.
 	_stats_event = evtimer_new(_evbase, stats_handler, NULL);
 	assert(_stats_event);
 	evtimer_add(_stats_event, &_stats_timeout);

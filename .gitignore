@@ -10,3 +10,4 @@ misc/hashtest.class
 docs/.*.kate-swp
 misc/btree
 server/queue.o
+migration-test
