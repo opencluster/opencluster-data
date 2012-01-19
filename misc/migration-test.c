@@ -22,6 +22,10 @@
 #define MAX_MIGRATE_DELAY  2
 
 
+#define SEND_NEW           0
+#define SEND_PRIMARY       1
+#define SEND_SECONDARY     2
+
 typedef int hash_t;
 
 typedef struct {
@@ -51,7 +55,6 @@ typedef struct {
 
 	struct event *send_loadlevel_event;
 	
-	balance_t *node_balances;
 	int migrating;
 	int last_bucket;
 } node_t;
@@ -62,6 +65,7 @@ typedef struct {
 	node_t *target;
 	balance_t balance;
 	int bucket;
+	int level;
 
 	struct event *send_event;
 	struct event *reply_event;
@@ -122,6 +126,7 @@ static void printout(void)
 	
 	for (b=0; b<=_mask; b++) {
 		for (n=0; n<_node_count; n++) { 
+			assert(_nodes[n]->entry == n);
 			if (_nodes[n]->buckets[b].level == 0) { btype = 'P'; }
 			else if (_nodes[n]->buckets[b].level == 1) { btype = 'S'; }
 			else if (_nodes[n]->buckets[b].receiving == 1) { btype = '-'; }
@@ -142,6 +147,22 @@ static void printout(void)
 	printf("\n");
 	for (n=0; n<_node_count; n++) { printf("+--------+ "); }
 	printf("\n\n\n");
+	
+	
+	// do some integrity checks.
+// 	for (b=0; b<=_mask; b++) {
+// 		for (n=0; n<_node_count; n++) { 
+// 			if (_nodes[n]->buckets[b].level == 0) { 
+				// this is a primary node for the bucket, 
+// 				if (_nodes[n]->buckets[b].backup_node >= 0) {
+					// it has a backup node, so we need to make sure they match.
+// 					assert(_nodes[_nodes[n]->buckets[b].backup_node]->buckets[b].source_node == n);
+// 					assert(_nodes[_nodes[n]->buckets[b].backup_node]->buckets[b].source_node == n);
+// 				}
+// 			}
+// 		}
+// 	}
+	
 }
 
 static int balance_total(balance_t balance) 
@@ -160,6 +181,7 @@ static msg_t * new_msg(node_t *source, node_t *target)
 	msg->balance.primary = 0;
 	msg->balance.secondary = 0;
 	msg->bucket = -1;
+	msg->level = -1;
 
 	msg->entry = -1;
 	for (i=0; i<_msgs_count && msg->entry < 0; i++) {
@@ -189,62 +211,181 @@ static void migrated_handler(int fd, short int flags, void *arg)
 	msg_t *msg = arg;
 	bucket_t *source_bucket;
 	bucket_t *target_bucket;
-	node_t *backup_node;
-	bucket_t *backup_bucket;
+	
+	node_t *backup_node = NULL;
+	node_t *primary_node = NULL;
+	bucket_t *primary_bucket = NULL;
+	bucket_t *backup_bucket = NULL;
 	
 	assert(fd == -1 && flags & EV_TIMEOUT && arg);
 
+	assert(msg);
 	assert(msg->source);
 	assert(msg->target);
 	assert(msg->source != msg->target);
 	assert(msg->bucket >= 0);
 	assert(msg->bucket <= _mask);
+	assert(msg->level == SEND_NEW || msg->level == SEND_PRIMARY || msg->level == SEND_SECONDARY);
 	
-	printf(" * Node-%c: Bucket #%X has finished migrating.\n", msg->source->name, msg->bucket);
 	
 	source_bucket = &msg->source->buckets[msg->bucket];
 	target_bucket = &msg->target->buckets[msg->bucket];
-	
-	// update the source node and target node entries. 
-	if (source_bucket->backup_node >= 0) {
-		// the bucket has a backup node, we need to remove that copy.
-		backup_node = _nodes[source_bucket->backup_node];
-		backup_bucket = &backup_node->buckets[msg->bucket];
 
-		backup_node->balance.secondary --;
-		backup_bucket->level = -1;
-		backup_bucket->source_node = -1;
-		assert(backup_bucket->backup_node == -1);
+	assert(source_bucket && target_bucket);
+	assert(source_bucket != target_bucket);
+	assert(source_bucket->hash == target_bucket->hash);
+	assert(source_bucket->hash == msg->bucket);
+	
+	if (msg->level == SEND_NEW) {
+		// this was a bucket that didn't have a backup.  The source stays teh same, target now has a new bucket.
+
+		printf(" * Node-%c: Bucket #%X has finished migrating (new).\n", msg->source->name, msg->bucket);
+		
+		assert(msg->source->entry >= 0);
+		assert(target_bucket->source_node < 0);
+		assert(target_bucket->backup_node < 0);
+		printf(" * Node-%c: Setting Source node for bucket %X to %c\n", msg->target->name, msg->bucket, msg->source->name);
+		target_bucket->source_node = msg->source->entry;
+		
+		assert(msg->target->entry >= 0);
+		assert(source_bucket->source_node < 0);
+		assert(source_bucket->backup_node < 0);
+		printf(" * Node-%c: Setting Backup node for bucket %X to %c\n", msg->source->name, msg->bucket, msg->target->name);
+		source_bucket->backup_node = msg->target->entry;
+
+		// update the balances for target.
+		assert(msg->source->balance.primary > 0);
+		msg->target->balance.secondary ++;
+		assert(msg->target->balance.secondary > 0);
+
+		// update the target bucket, to indicate that it is now a backup
+		assert(source_bucket->level == 0);
+		assert(target_bucket->level < 0);
+		target_bucket->level = 1;
+
+		// update the target bucket, it indicate it is not receiving now.
+		assert(target_bucket->receiving > 0);
+		target_bucket->receiving = 0;
 	}
-	
-	assert(source_bucket->source_node < 0);
-	source_bucket->source_node = msg->target->entry;
-	source_bucket->backup_node = -1;
-	target_bucket->backup_node = msg->source->entry;
-	target_bucket->source_node = -1;
-	
+	else if (msg->level == SEND_PRIMARY) {
+
+		printf(" * Node-%c: Bucket #%X has finished migrating (primary).\n", msg->source->name, msg->bucket);
+		
+		// set the source to point backup to new node.
+		assert(source_bucket->backup_node >= 0);
+		backup_node = _nodes[source_bucket->backup_node];
+		assert(backup_node);
+		assert(msg->bucket >= 0);
+		backup_bucket = &backup_node->buckets[msg->bucket];
+		assert(backup_bucket);
+		
+		assert(backup_bucket != source_bucket);
+		assert(backup_bucket != target_bucket);
+		
+		assert(backup_node->balance.secondary > 0);
+		assert(backup_bucket->backup_node < 0);
+		assert(backup_bucket->level == 1);
+ 		printf("--- backup source=%d, backup backup=%d,  msg source=%d\n", backup_bucket->source_node, backup_bucket->backup_node, msg->source->entry);
+		assert(backup_bucket->source_node == msg->source->entry);
+		
+		printf(" * Node-%c: Setting Source node for bucket %X to %c\n", backup_node->name, msg->bucket, msg->target->name);
+
+		backup_bucket->source_node == msg->target->entry;
+		
+		assert(target_bucket->backup_node < 0);
+		assert(target_bucket->source_node < 0);
+		
+		///  ********* HERE IS THE PROBLEM.
+		
+		printf(" * Node-%c: Setting Backup node for bucket %X to %c\n", msg->target->name, msg->bucket, backup_node->name);
+		target_bucket->backup_node = backup_node->entry;
+		printf(" * Node-%c: Setting Source node for bucket %X to %c\n", msg->target->name, msg->bucket, '#');
+		target_bucket->source_node = -1;
+
+		assert(source_bucket->source_node < 0);
+		assert(source_bucket->backup_node >= 0);
+		printf(" * Node-%c: Setting Backup node for bucket %X to %c\n", msg->source->name, msg->bucket, '#');
+		source_bucket->backup_node = -1;
+
+		// update the balances for target.
+		msg->target->balance.primary ++;
+		assert(msg->target->balance.primary > 0);
+
+		// update the balances for the source.backup_bucket
+		msg->source->balance.primary --;
+		assert(msg->source->balance.primary >= 0);
+		
+		// update the target bucket, to indicate that it is now a primary
+		assert(source_bucket->level == 0);
+		assert(target_bucket->level < 0);
+		assert(backup_bucket->level == 1);
+		source_bucket->level = -1;
+		target_bucket->level = 0;
+
+		// update the target bucket, to indicate it is not receiving now.
+		assert(target_bucket->receiving > 0);
+		target_bucket->receiving = 0;
+	}
+	else {
+		assert(msg->level == SEND_SECONDARY);
+		
+		printf(" * Node-%c: Bucket #%X has finished migrating (secondary).\n", msg->source->name, msg->bucket);
+
+		// get the primary node for the bucket.
+		assert(source_bucket->source_node >= 0);
+		primary_node = _nodes[source_bucket->source_node];
+		assert(primary_node);
+		assert(msg->bucket >= 0);
+		primary_bucket = &primary_node->buckets[msg->bucket];
+		assert(primary_bucket);
+
+		assert(primary_bucket != source_bucket);
+		assert(primary_bucket != target_bucket);
+		
+		// set the source to point backup to new node.
+		assert(primary_node->balance.primary > 0);
+		assert(primary_bucket->source_node == -1);
+		printf("--- primary source=%d, primary backup=%d, msg source=%d\n", primary_bucket->source_node, primary_bucket->backup_node, msg->source->entry);
+		assert(primary_bucket->backup_node == msg->source->entry);
+		assert(primary_bucket->level == 0);
+				
+		printf(" * Node-%c: Setting Backup node for bucket %X to %c\n", primary_node->name, msg->bucket, msg->target->name);
+		primary_bucket->backup_node == msg->target->entry;
+		
+		assert(target_bucket->backup_node < 0);
+		assert(target_bucket->source_node < 0);
+		printf(" * Node-%c: Setting Source node for bucket %X to %c\n", msg->target->name, msg->bucket, primary_node->name);
+		target_bucket->source_node = primary_node->entry;
+
+		assert(source_bucket->backup_node < 0);
+		assert(source_bucket->source_node >= 0);
+		assert(source_bucket->level > 0);
+		printf(" * Node-%c: Setting Source node for bucket %X to %c\n", msg->source->name, msg->bucket, '#');
+		source_bucket->source_node = -1;
+
+		// update the balances for target.
+		msg->target->balance.secondary ++;
+		assert(msg->target->balance.secondary > 0);
+
+		// update the balances for the source.
+		msg->source->balance.secondary --;
+		assert(msg->source->balance.secondary >= 0);
+		
+		// update the target bucket, to indicate that it is now a backup
+		assert(source_bucket->level == 1);
+		assert(target_bucket->level < 0);
+		source_bucket->level = -1;
+		target_bucket->level = 1;
+
+		// update the target bucket, to indicate it is not receiving now.
+		assert(target_bucket->receiving > 0);
+		target_bucket->receiving = 0;
+	}
+
 	// indicate that source and target are no longer migrating.
 	msg->source->migrating = 0;
 	msg->target->migrating = 0;
-	
-	// update the balances for target.
-	msg->target->balance.primary ++;
-	msg->source->balance.primary --;
-	msg->source->balance.secondary ++;
-	
-// 	msg->source->cycle_count = 0;
-// 	msg->target->cycle_count = 0;
-	
-	// update the target bucket, to indicate that it is now a backup
-	target_bucket->level = 0;
-	source_bucket->level = 1;
-	
-	// update the target bucket, it indicate it is not receiving now.
-	target_bucket->receiving = 0;
-	
-	// update the node_balances entry for target, since we know it has changed now.
-	msg->source->node_balances[msg->target->entry].primary++;
-	
+
 	// remove the transfer event
 	assert(msg->transfer_event);
 	event_free(msg->transfer_event);
@@ -265,8 +406,7 @@ static void migrated_handler(int fd, short int flags, void *arg)
 	free(msg);
 
 	// output
-	printout();
-	
+	printout();	
 }
 
 
@@ -278,61 +418,91 @@ int attempt_switch(msg_t *msg)
 	
 	// target node has more secondaries than it has primaries... we need to switch a bucket if we can.
 	if (msg->balance.primary >= msg->balance.secondary) {
-		printf(" * Node-%c: Target Node-%c has more primary than secondary.  No need to switch.\n", msg->source->name, msg->target->name);
+		printf(" * Node-%c: Target Node-%c has more primary than secondary.  No need to switch.\n", 
+				msg->source->name, msg->target->name);
 		assert(transferred == 0);
 	}
 	else {
 
-		
-		if (balance_total(msg->balance) != balance_total(msg->source->balance)) {
+		// **** what is this next check for?
+		if (balance_total(msg->balance) <= balance_total(msg->source->balance)) {
+	
+			if (msg->source->balance.primary <= msg->source->balance.secondary) {
+				printf(" * Node-%c: Cannot switch bucket for Target Node-%c, dont have enough primaries to switch.\n", 
+						msg->source->name, msg->target->name);
+				assert(transferred == 0);
+			}
+			else {
 			
-			// need to make sure, that by switching, we dont unbalance the target.
-// 			if (msg->balance.primary
-			
-			// go through the list of buckets, looking for one we can switch.
-			for (b=0; b<=_mask && transferred <= 0; b++) {
-				if (msg->source->buckets[b].level == 0) {
-					// we have a primary bucket.
-					if (msg->source->buckets[b].backup_node == msg->target->entry) {
-						
-						if (msg->source->last_bucket != b) {
-						
-							if ((msg->source->balance.primary-1) >= (msg->source->balance.secondary)) {
+				// go through the list of buckets, looking for one we can switch.
+				for (b=0; b<=_mask && transferred <= 0; b++) {
+					if (msg->source->buckets[b].level == 0) {
+						// we have a primary bucket.
+						assert(msg->source->buckets[b].backup_node >= 0);
+						assert(msg->source->buckets[b].source_node < 0);
+						if (msg->source->buckets[b].backup_node == msg->target->entry) {
 							
-								printf(" * Node-%c: Promoting bucket #%X on Node-%c\n", msg->source->name, b, msg->target->name);
-								msg->source->buckets[b].backup_node = -1;
-								msg->source->buckets[b].source_node = msg->target->entry;
-								msg->source->buckets[b].level = 1;
-								msg->source->balance.primary --;
-								msg->source->balance.secondary ++;
-								
-								msg->target->buckets[b].backup_node = msg->source->entry;
-								msg->target->buckets[b].source_node = -1;
-								msg->target->buckets[b].level = 0;
-								msg->target->balance.primary ++;
-								msg->target->balance.secondary --;
+							if (msg->source->last_bucket != b) {
 							
-								msg->source->last_bucket = -1;
-								msg->target->last_bucket = b;
+								if ((msg->source->balance.primary-1) >= (msg->source->balance.secondary)) {
 								
-			// 					msg->target->cycle_count = 0;
-			// 					msg->source->cycle_count = 0;
+									printf(" * Node-%c: Promoting bucket #%X on Node-%c\n", msg->source->name, b, msg->target->name);
+									
+									assert(msg->target->entry >= 0);
+									assert(msg->source->buckets[b].backup_node == msg->target->entry);
+									assert(msg->source->buckets[b].source_node < 0);
+									assert(msg->source->buckets[b].level == 0);
+									assert(msg->source->balance.primary > 0);
+									assert(msg->source->balance.secondary >= 0);
+									
+									printf(" * Node-%c: Setting Backup node for bucket %X to %c\n", msg->source->name, b, '#');
+									printf(" * Node-%c: Setting Source node for bucket %X to %c\n", msg->source->name, b, msg->target->name);
+
+									msg->source->buckets[b].backup_node = -1;
+									msg->source->buckets[b].source_node = msg->target->entry;
+									msg->source->buckets[b].level = 1;
+									msg->source->balance.primary --;
+									msg->source->balance.secondary ++;
+									
+									assert(msg->source->entry >= 0);
+									assert(msg->target->buckets[b].backup_node < 0);
+// 									printf("--- msg->target->buckets[b].source_node(%d) == msg->source->entry(%d)\n", msg->target->buckets[b].source_node, msg->source->entry);
+									assert(msg->target->buckets[b].source_node == msg->source->entry);
+									assert(msg->target->buckets[b].level == 1);
+									assert(msg->target->balance.primary >= 0);
+									assert(msg->target->balance.secondary > 0);
+									
+									printf(" * Node-%c: Setting Backup node for bucket %X to %c\n", msg->target->name, b, msg->source->name);
+									printf(" * Node-%c: Setting Source node for bucket %X to %c\n", msg->target->name, b, '#');
+
+									msg->target->buckets[b].backup_node = msg->source->entry;
+									msg->target->buckets[b].source_node = -1;
+									msg->target->buckets[b].level = 0;
+									msg->target->balance.primary ++;
+									msg->target->balance.secondary --;
 								
-								// this bucket doesnt have a backup node, so we will send this.
-								transferred ++;
+									msg->source->last_bucket = -1;
+									msg->target->last_bucket = b;
+									
+				// 					msg->target->cycle_count = 0;
+				// 					msg->source->cycle_count = 0;
+									
+									// this bucket doesnt have a backup node, so we will send this.
+									transferred ++;
 
-								// add the loadlevel timer back in.  We do it here, because it wont be done further in the code if we are migrating the bucket
-								evtimer_add(msg->source->send_loadlevel_event, &_timeout_comms);
+									// add the loadlevel timer back in.  We do it here, because it wont be done further in the code if we are migrating the bucket
+									evtimer_add(msg->source->send_loadlevel_event, &_timeout_comms);
 
-								printout();
+									printout();
+								}
 							}
 						}
 					}
 				}
-			}
-			
-			if (transferred == 0) {
-				printf(" * Node-%c: Cannot promote bucket on Node-%c because there are no shared buckets.\n", msg->source->name, msg->target->name);
+				
+				if (transferred == 0) {
+					printf(" * Node-%c: Cannot promote bucket on Node-%c because there are no shared buckets.\n", msg->source->name, msg->target->name);
+				}
 			}
 		}
 	}
@@ -341,12 +511,14 @@ int attempt_switch(msg_t *msg)
 }
 
 
-static void send_bucket(node_t *source, node_t *target, int bucket) 
+// level: 0=new secondary, 1=primary, 2=secondary.
+static void send_bucket(node_t *source, node_t *target, int bucket, int level) 
 {
 	msg_t *txmsg;
 	
 	assert(source && target);
 	assert(bucket >= 0 && bucket <= _mask);
+	assert(level == SEND_NEW || level == SEND_PRIMARY || level == SEND_SECONDARY);
 	
 	printf(" * Node-%c: Sending bucket #%X to Node-%c\n", source->name, bucket, target->name);
 	
@@ -357,6 +529,7 @@ static void send_bucket(node_t *source, node_t *target, int bucket)
 	
 	txmsg = new_msg(source, target);
 	txmsg->bucket = bucket;
+	txmsg->level = level;		
 	
 	// create the migrate event.
 	txmsg->transfer_event = evtimer_new(_evbase, migrated_handler, txmsg);
@@ -383,6 +556,7 @@ static int attempt_nobackup(msg_t *msg)
 	int transferred = 0;
 	int b;
 
+	// check that the target isn't full.
 	if (balance_total(msg->balance) <= _mask) {
 		// go through the list of buckets, looking for one we can transfer.
 		for (b=0; b<=_mask && transferred == 0; b++) {
@@ -391,7 +565,7 @@ static int attempt_nobackup(msg_t *msg)
 					
 				if (msg->source->buckets[b].backup_node < 0) {
 					assert(msg->source->last_bucket != b);
-					send_bucket(msg->source, msg->target, b);
+					send_bucket(msg->source, msg->target, b, SEND_NEW);
 					transferred ++;
 				}
 			}
@@ -409,13 +583,17 @@ static int attempt_transfer(msg_t *msg)
 {
 	int transferred = 0;
 	int b;
-	int transfer_bucket = -1;
+// 	int transfer_bucket = -1;
 	int backup_total;
 	int ideal;
+	int choice = -1;
 	
 	
 	if (balance_total(msg->source->balance) <= balance_total(msg->balance)) {
-		printf(" * Node-%c: Not transferring, Source has more buckets than Target Node-%c (Source: %d, Target: %d).\n", msg->source->name, msg->target->name, balance_total(msg->source->balance), balance_total(msg->balance));
+		printf(" * Node-%c: Not transferring, Target has more buckets than Source Node-%c (Source: %d, Target: %d).\n", 
+					msg->source->name, msg->target->name, 
+					balance_total(msg->source->balance), 
+					balance_total(msg->balance));
 		assert(transferred == 0);
 	}
 	else {
@@ -427,35 +605,37 @@ static int attempt_transfer(msg_t *msg)
 		}
 		else {
 		
-			if (msg->source->balance.primary-1 <= msg->balance.primary) {
-				printf(" * Node-%c: Not transferring, will unbalance source node.\n", msg->source->name);
-				assert(transferred == 0);
+			// look at the source balance to see if it has more primary or secondaries.  
+			if (msg->source->balance.primary > msg->source->balance.secondary) {
+				// we have more primaries, so we will send a primary if we can.
+				choice = 0;
+				printf(" * Node-%c: Electing to send PRIMARY bucket (%d/%d)\n", 
+					   msg->source->name, 
+					   msg->source->balance.primary,
+					   msg->source->balance.secondary);
+		   
 			}
 			else {
-		
-				// go through the list of buckets, looking for one we can transfer.
-				for (b=0; b<=_mask && transferred == 0; b++) {
-					if (msg->source->buckets[b].level == 0) {
-						// we have a primary bucket.
-						
-						if (msg->source->last_bucket != b) {
-						
-							// need to check that we are not removing a backup bucket from a node that is already balanced.
-							assert(msg->source->buckets[b].backup_node >= 0);
-							backup_total = balance_total(msg->source->node_balances[msg->source->buckets[b].backup_node]);
-							
-							
-							// *** need to do a better check for the backup node going out of sync.
-							
-							if (backup_total > balance_total(msg->balance)) {
-								transfer_bucket = b;
-							}
-							
-							// if we found a bucket to transfer, then we need to send it.
-							if (transfer_bucket >= 0) {
-								send_bucket(msg->source, msg->target, b);
-								transferred ++;
-							}
+				// we have an equal amount of pri and sec, or we have more secondaries, so we will send one of them.
+				choice = 1;
+
+				printf(" * Node-%c: Electing to send SECONDARY bucket (%d/%d)\n", 
+					   msg->source->name, 
+					   msg->source->balance.primary,
+					   msg->source->balance.secondary);
+			}
+			
+			/// ----------------
+			
+			// go through the list of buckets, looking for one we can transfer.
+			assert(choice >= 0);
+			for (b=0; b<=_mask && transferred == 0; b++) {
+				if (msg->source->buckets[b].level == choice) {
+					if (msg->source->last_bucket != b) {
+						if (msg->source->buckets[b].source_node != msg->target->entry && msg->source->buckets[b].backup_node != msg->target->entry) {
+							send_bucket(msg->source, msg->target, b, 
+										choice == 0 ? SEND_PRIMARY : SEND_SECONDARY);
+							transferred ++;
 						}
 					}
 				}
@@ -496,7 +676,10 @@ static void reply_loadlevel_handler(int fd, short int flags, void *arg)
 	assert(msg->source);
 	assert(msg->target);
 	
-	printf(" * Node-%c: Received loadlevel reply from Node-%c (%d+%d=%d)\n", msg->source->name, msg->target->name, msg->balance.primary, msg->balance.secondary, msg->balance.primary + msg->balance.secondary);
+	printf(" * Node-%c: Received loadlevel reply from Node-%c (%d+%d=%d)\n", 
+				msg->source->name, msg->target->name, 
+				msg->balance.primary, msg->balance.secondary, 
+				msg->balance.primary + msg->balance.secondary);
 
 	// get copy of balances out of the message and add them to the node_balances
 	assert(msg->target->entry >= 0);
@@ -504,17 +687,6 @@ static void reply_loadlevel_handler(int fd, short int flags, void *arg)
 
 	target_total = msg->balance.primary + msg->balance.secondary;
 
-	if (balance_compare(msg->source->node_balances[msg->target->entry], msg->balance) != 0) {
-		printf(" * Node-%c: Previous balance for Node-%c was (%d+%d=%d), changing to (%d+%d=%d)\n", 
-				msg->source->name, msg->target->name,
-				msg->source->node_balances[msg->target->entry].primary,
-				msg->source->node_balances[msg->target->entry].secondary,
-				msg->source->node_balances[msg->target->entry].primary + msg->source->node_balances[msg->target->entry].secondary,
-				msg->balance.primary, msg->balance.secondary, target_total
-		);
-		msg->source->node_balances[msg->target->entry] = msg->balance;
-	}
-	
 	if (msg->target->migrating != 0 ) {
 		printf(" * Node-%c: Node-%c is currently migrating... ignoring.\n", msg->source->name, msg->target->name);
 	}
@@ -574,7 +746,10 @@ static void recv_loadlevel_handler(int fd, short int flags, void *arg)
 	assert(msg->source);
 	assert(msg->target);
 	
-	printf(" * Node-%c: Received loadlevel request from Node-%c (%d+%d=%d)\n", msg->target->name, msg->source->name, msg->target->balance.primary, msg->target->balance.secondary, msg->target->balance.primary+msg->target->balance.secondary);
+// 	printf(" * Node-%c: Received loadlevel request from Node-%c (%d+%d=%d)\n", 
+// 			msg->target->name, msg->source->name, 
+// 			msg->target->balance.primary, msg->target->balance.secondary, 
+// 			msg->target->balance.primary+msg->target->balance.secondary);
 
 	assert(msg->balance.primary == 0);
 	assert(msg->balance.secondary == 0);
@@ -646,6 +821,8 @@ static void add_node(void)
 	for (i=0; i<=_mask; i++) {
 		node->buckets[i].hash = i;
 		node->buckets[i].level = -1;	
+		printf(" * Node-%c: Setting Source node for bucket %i to %c\n", node->name, i, '#');
+		printf(" * Node-%c: Setting Backup node for bucket %i to %c\n", node->name, i, '#');
 		node->buckets[i].source_node = -1;
 		node->buckets[i].backup_node = -1;
 		node->buckets[i].receiving = 0;
@@ -656,33 +833,11 @@ static void add_node(void)
 	assert(node->send_loadlevel_event);
 	evtimer_add(node->send_loadlevel_event, &_timeout_loadlevel);
 
-
-	
-	// each existing node keeps track of the balances of each other node, so we need to simulate 
-	// this... technically this shouldn't happen immediately, but that would be more complex to 
-	// simulate, without adding any real benefit that I can think of.	
-	for (n=0; n<_node_count; n++) {
-		_nodes[n]->node_balances = realloc(_nodes[n]->node_balances, sizeof(balance_t) * (_node_count+1));
-		_nodes[n]->node_balances[_node_count].primary = 0;
-		_nodes[n]->node_balances[_node_count].secondary = 0;
-	}
-	
-	// need to setup the balances for this node.  They are currently zero, because this node hasn't 
-	// received loadlevels yet.
-	node->node_balances = malloc(sizeof(balance_t) * (_node_count+1+1));
-	for (n=0; n<_node_count+1; n++) {
-		node->node_balances[n].primary = 0;
-		node->node_balances[n].secondary = 0;
-	}
-
-	
-	
 	node->balance.primary = 0;
 	node->balance.secondary = 0;
 
 	_nodes[_node_count] = node;
 	_node_count ++;
-	
 }
 
 /*
@@ -728,18 +883,15 @@ int main(void)
 			" Target Node: The node that is a potential recipient of a bucket.\n"
 			" Backup Node: Node that contains the backup copy of a bucket.\n"
 			"\n"
-			"Migration Rules:\n"
-			"  1. Promote a backup bucket if target has more secondary than primary buckets.\n"
-			"  2. Node can only transfer or receive one bucket at a time.\n"
-			"  3. If target node is not full, send it any bucket that does not have a backup node.\n"
-			"  4. Transferring a bucket to a node, automatically makes the new node the primary.\n"
-			"  5. Transferring a bucket to a node, automatically makes the old node the backup.\n"
-			"  6. Transfer a bucket if target has less total buckets than source\n"
-			"  7. Only transfer a bucket if source has at least one more primary bucket than target.\n"
-			"  8. Only transfer a bucket if Backup has more total buckets than target.\n"
-			"  9. Source node can only transfer a primary bucket.\n"
-			" 10. Do not transfer a bucket, if node does not have an adequate number of buckets already\n"
-			" 11. Do not transfer the last bucket in a node that was transferred.\n"
+			"Migration Rules (in priority order):\n"
+			"  1. Do not promote a bucket on target node, if that results in source node having more secondary than primary buckets.\n"
+			"  2. Promote a backup bucket if target has more secondary than primary buckets.\n"
+			"  3. A Node can only transfer or receive one bucket at a time.\n"
+			"  4. If target node is not full, send it any bucket that does not have a backup node.\n"
+			"  5. Node can transfer either a primary or secondary bucket to any other node, whatever the source has most of.\n"
+			"  6. Transfer a bucket only if target has less than the ideal number of buckets (based on how many nodes are in the cluster)\n"
+			"  7. Only transfer a primary bucket if source has at least one more primary bucket than target.\n"
+			"  8. Do not transfer a bucket, if source node does not have an ideal number of buckets already\n"
 			"\n"
 		);
 	
