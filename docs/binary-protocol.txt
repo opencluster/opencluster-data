@@ -541,6 +541,7 @@ Used by the master of a bucket, to tell a backup copy that it is no longer neede
 destroyed.  The backup copy should not have any subscriptions or anything, so it doesn't need any 
 special information about where the master bucket is, although it should already know that from the 
 HASHMASK updates.
+erin@token.com.au
 
 Payload:
   integer - mask
@@ -624,6 +625,7 @@ Payload:
 -----------------------------------------------------------------------
 -----------------------------------------------------------------------
 -----------------------------------------------------------------------
+
 
 
 
