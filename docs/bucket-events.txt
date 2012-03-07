@@ -1,0 +1,18 @@
+Bucket events
+
+Clients have the option to register for events on particular keys.   For example, it can request "To get an event whenever the 'transactionID' entry gets modified".   This is quite straight forward in theory, but gets a little tricky when we consider that buckets can get moved around from server to server.
+
+When a bucket moves, we need to make sure that these 'events' or 'subscriptions' also move.  Additionally, since we have backup copies of buckets, we need to ensure that the events can survive a primary bucket failure that is recovered with a backup copy.
+
+We want to keep things as minimal as possible.  
+
+When a client connects to a server, it can request an ID.  This ID is meant to be unique to the cluster, and even though the client may communicate with multiple nodes, it should make this request only once, and use it from that point forward.  This is ONLY necessary if the client intends to receive events though.
+
+So the client can say "Give me a unique ID", or it can say "This is my unique ID".  This unique ID is then used to identify clients with the events.
+
+When the events move from node to node as part of a bucket migration, it will use this event code.  If the client is not actually connected to that other node, it will hold on to the events until the client does (although there would need to be some sort of timeout)
+
+If a client is disconnecting from the cluster, it can issue a "release my unique ID" command and the server will remove any events that are associated with that ID.  
+
+If a client is unsure if its events are still active or not, it can re-subscribe to the events without any issues.  It will not subscribe twice.
+
