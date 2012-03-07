@@ -12,5 +12,4 @@ misc/btree
 server/queue.o
 migration-test
 server/ocd.debug
-server/queue.debug.o
-server/event-compat.debug.o
+server/*.o

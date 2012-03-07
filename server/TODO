@@ -26,3 +26,10 @@ https://github.com/hyper/opencluster/issues
 * When shutting down, if it is not able to offload buckets to another server, it will write them out 
   to disk, and reload them when started again.  This way, the last node in a cluster can save and 
   restore the data... potentially offloading it to other nodes when the cluster is fully started up.
+
+
+
+Performance
+
+Each bucket has a backup copy on another node.  We need to be able to send updates to that other node for that bucket. The original design was that when items get updated, their details get added to a queue that then gets processed, and sent to the backup node.  However, that might mean that a lot of tree lookups are occuring.  So instead we need to send the data to the other server while we have it on hand.  Therefore, we should send that message immediately.  Additionally, when when we are migrating a bucket to a new node, we dont want to send the entire bucket at once, because that can flood the connection.  We need to be able to send it in chunks.   We were going to use a queue for that too, but then we still have to do a LOT of tree lookups to find the data.  What we need to do instead, is every entry in the tree has a sync-bit.   Whenever a full bucket transfer is needed, a master sync-bit is set, and all the objects in the tree that dont have that bit set, need to be transferred.  Every time we get enough responses back from the remote node and we need to send more out, we will iterate through the maps and trees and send out another bunch.  The map tree items will need to have a sync-bit as well, so that we can know which ones we can skip or not.
+

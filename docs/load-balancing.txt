@@ -170,17 +170,13 @@ things happen:
  1.  NODE-A tells NODE-B "Synchronisation is complete, you are now a backup 
      for Bucket #0"
 
- 2.  If NODE-A previously had a different backup node for that bucket, then it 
-     will send a message to that node telling it to destroy its copy of the 
-     bucket.  In this case, there was no backup version though.
-
- 3.  NODE-A marks NODE-B as a backup of that bucket, and will continue sending 
+ 2.  NODE-A marks NODE-B as a backup of that bucket, and will continue sending 
      sync info to that node when contents of the bucket is changed.
 
- 4.  NODE-B sends a message to all its connected clients (and nodes) saying 
+ 3.  NODE-B sends a message to all its connected clients (and nodes) saying 
      that it is now a backup provider of Bucket #0.
 
- 5.  NODE-A and B will start doing LoadBalancing events again.
+ 4.  NODE-A and B will start doing LoadBalancing events again.
 
 
 Now we have:
@@ -747,7 +743,7 @@ We process the loadbalancing and we get.
  +--------+ +--------+ +--------+ +--------+ +--------+ +--------+
    3+2=5      3+2=5      3+2=5      3+3=6      3+3=6      1+4=5
 
-We are now fairly balanced, however, the new NODE-F is a bit unbalanced as far as primary and secondaries go, and it cannot really do any better because anything we do will just reduce the other nodes from being ideal as well.   The cutoff from splitting the buckets was 4 buckets.  This was chosen fairly arbitrarily because it hoepfully represented a minimum of two primary and two secondary.  However, after looking at this result, it might be better if we have a minimum of 6 buckets.  By having more buckets to deal with, we have more things we can move around the cluster to keep things in balance.
+We are now fairly balanced, however, the new NODE-F is a bit unbalanced as far as primary and secondaries go, and it cannot really do any better because anything we do will just reduce the other nodes from being ideal as well.   The cutoff from splitting the buckets was 4 buckets.  This was chosen fairly arbitrarily because it hopefully represented a minimum of two primary and two secondary.  However, after looking at this result, it might be better if we have a minimum of 6 buckets.  By having more buckets to deal with, we have more things we can move around the cluster to keep things in balance.
 
 In reality, the code is developed using 16 primary buckets to start with to make it easier to view the state of the cluster and fix bugs, but ideally we probably want to start the system with 256 primary buckets (512 in total) to reduce migration hassles when starting up with more than 6 nodes.  The kind of projects that would benefit from OpenCluster are probably intending to use 8 or more nodes, but unlikely to use more than 32, so 256 is probably a more realistic number of buckets to split the cluster into.
 

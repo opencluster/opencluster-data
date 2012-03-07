@@ -79,6 +79,8 @@ The commands (and replies, indicated by *) are:
   300   accept_bucket
 * 305   cant_accept_bucket
 * 310   accepting_bucket
+  320   control_bucket
+  330   control_bucket_complete
   1000  lock
   1010  unlock
   2000  set_int
@@ -523,6 +525,62 @@ Conditions of use:
 Payload:
   integer - mask
   integer - hash (bucket)
+
+
+-----------------------------------------------------------------------
+control_bucket(320)
+
+Used by a node that has migrated a bucket to another server.  When all the data has been migrated, this command will tell the other node that all data is migrated, and it is now either a primary or a backup, and the alternate node is X.
+
+Type of message:
+  Command
+
+Payload:
+  integer - mask
+  integer - hash (bucket)
+  integer - level
+  string  - alternate data node (source or backup depending on level)
+
+
+-----------------------------------------------------------------------
+control_bucket_complete (330)
+
+Indicates that the process of transferring control of a bucket (either primary or secondary) has completed.
+
+Type of message:
+  Reply
+
+Payload:
+  integer - mask
+  integer - hash (bucket)
+
+-----------------------------------------------------------------------
+control_bucket_failed (335)
+
+The process for completing the control of a bucket failed.  This could be due to invalid data, or a bucket split within the cluster.  THe originating server should clear out the data involved in the migration and allow loadlevels to initiate the process again.
+
+Type of message:
+  Reply
+
+Payload:
+  integer - mask
+  integer - hash (bucket)
+  
+
+  
+
+-----------------------------------------------------------------------
+release_bucket (350)
+
+Server node telling another node to release control of a bucket.  This is only valid if the node that sent it is the 
+
+Type of message:
+  Command
+
+Payload:
+  integer - mask
+  integer - hash (bucket)
+
 
 
 -----------------------------------------------------------------------
