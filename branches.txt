@@ -1,9 +1,5 @@
 THis file provides some information about active branches in the repository.
 
-loadlevels
-	Node repeatedly requests the load levels from connected nodes.   If the loadlevels are not balanced, it triggers a 
-	migration.
-
 bucket-migration
 	Migrate a bucket from one node to another... updating clients of the change.
 
