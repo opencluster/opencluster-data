@@ -550,17 +550,36 @@ static void reply_ack(cluster_t *cluster, server_t *server, short repcmd, int us
 }
 
 
-static void * data_int(void *data, int *server_count)
+static void * data_int(void *data, int *value)
 {
 	void *next;
 	int *raw;
 	
 	assert(data);
-	assert(server_count);
+	assert(value);
 	
 	raw = data;
-	server_count[0] = ntohl(raw[0]);
+	value[0] = ntohl(raw[0]);
 	next = data + 4;
+	
+	return(next);
+}
+
+
+
+static void * data_string(void *data, int *length, char **ptr)
+{
+	void *next;
+	int *raw_length;
+	
+	assert(data);
+	assert(length);
+	assert(ptr);
+	
+	raw_length = data;
+	length[0] = ntohl(raw_length[0]);
+	*ptr = data + 4;
+	next = *ptr + length[0];
 	
 	return(next);
 }
@@ -570,16 +589,29 @@ static void * data_int(void *data, int *server_count)
 static void process_serverinfo(cluster_t *cluster, server_t *server, int userid, int length, void *data)
 {
 	char *next;
+	int slen;
+	char *sinfo;
+	char *str_info;
 	
 	assert(cluster);
 	assert(server);
 	assert(length >= 4);
 
 	next = data;
+	next = data_string(next, &slen, &sinfo);
+	assert(slen > 0);
+	assert(sinfo);
 	
-// 	next = data_int(next, &server_count);
-		// if we receive actual servers, we need to process them somehow.
-		assert(0);
+	str_info = malloc(slen+1);
+	memcpy(str_info, sinfo, slen);
+	
+// 	printf("received server info: '%s'\n", str_info);
+
+	// if we receive actual servers, we need to process them somehow.
+	cluster_addserver(cluster, str_info);
+	
+	free(str_info);
+	str_info = NULL;
 	
 	reply_ack(cluster, server, CMD_SERVER_INFO, userid);
 }
