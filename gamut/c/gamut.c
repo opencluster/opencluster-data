@@ -59,27 +59,27 @@ int main(int argc, char **argv)
 		str = NULL;
 		
 		// pull some data out of the cluster.
-		data = 0;
-		printf("Getting data from the cluster.\n");
-		g_timer_start(timer);
-		for (i=0; i<GET_LIMIT; i++) {
-			result = cluster_getint(cluster, "testdata", &data);
-			assert(result == 0);
-		}
-		g_timer_stop(timer);
-		printf ("Result of 'testdata' in cache.  data=%d\n", data);
-		sec = g_timer_elapsed(timer, &msec);
-		printf("Timing of %d gets. %f\n", GET_LIMIT, sec);
+// 		data = 0;
+// 		printf("Getting data from the cluster.\n");
+// 		g_timer_start(timer);
+// 		for (i=0; i<GET_LIMIT; i++) {
+// 			result = cluster_getint(cluster, "testdata", &data);
+// 			assert(result == 0);
+// 		}
+// 		g_timer_stop(timer);
+// 		printf ("Result of 'testdata' in cache.  data=%d\n", data);
+// 		sec = g_timer_elapsed(timer, &msec);
+// 		printf("Timing of %d gets. %f\n", GET_LIMIT, sec);
 		
-		printf("Setting 5000 items of data\n");
+		printf("Setting 6000 items of data\n");
 		g_timer_start(timer);
-		for (i=0; i<5000; i++) {
+		for (i=0; i<6000; i++) {
 			sprintf(key_buffer, "client:%d", i);
 			cluster_setstr(cluster, key_buffer, "Bill Grady", 0);
 		}
 		g_timer_stop(timer);
 		sec = g_timer_elapsed(timer, &msec);
-		printf("Timing of 5000 sets. %f\n", sec);
+		printf("Timing of 6000 sets. %lf\n", sec);
 		
 // 		sleep(30);
 		
