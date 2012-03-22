@@ -14,6 +14,7 @@
 #include "bucket.h"
 #include "constants.h"
 #include "item.h"
+#include "payload.h"
 #include "seconds.h"
 #include "server.h"
 #include "settle.h"
@@ -602,7 +603,6 @@ int main(int argc, char **argv)
 		daemonize(_username, _pid_file, _verbose);
 	}
 
-	seconds_init();
 
 	
 	// create our event base which will be the pivot point for pretty much everything.
@@ -621,6 +621,9 @@ int main(int argc, char **argv)
 	assert(_sighup_event);
 	event_add(_sigint_event, NULL);
 	event_add(_sighup_event, NULL);
+
+	
+	seconds_init();
 	
 	payload_init();
 	

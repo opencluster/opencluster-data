@@ -17,6 +17,8 @@ void push_loadlevels(client_t *client);
 void push_accept_bucket(client_t *client, hash_t key);
 void push_promote(client_t *client, hash_t hash);
 void push_control_bucket(client_t *client, bucket_t *bucket, int level);
+void push_sync_item(client_t *client, item_t *item);
+void push_sync_name(client_t *client, hash_t key, char *name, int int_key);
 
 
 #endif

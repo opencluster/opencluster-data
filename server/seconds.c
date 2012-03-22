@@ -42,7 +42,7 @@ static void seconds_handler(int fd, short int flags, void *arg)
 		// the time has rolled back.  How do we handle that?   It means we have many items with a short expiry that will probably expire.
 		assert(0);
 	}
-	
+
 	
 	evtimer_add(_seconds_event, &_timeout_seconds);
 }

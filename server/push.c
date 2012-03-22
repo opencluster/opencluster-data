@@ -53,13 +53,15 @@ void push_hashmask_update(bucket_t *bucket)
 	payload_int(bucket->hash);			// hash
 	payload_int(bucket->level);			// instance
 	
-	for (i=0; i<_client_count; i++) {
-		if (_clients[i]) {
-			if (_clients[i]->handle >= 0) {
-				// we have a client, that seems to be connected.
+	if (_clients) {
+		for (i=0; i<_client_count; i++) {
+			if (_clients[i]) {
+				if (_clients[i]->handle >= 0) {
+					// we have a client, that seems to be connected.
 
-				printf("[%d] sending HASHMASK: (%08X/%08X)\n", _seconds, _mask, bucket->hash);
-				client_send_message(_clients[i], NULL, CMD_HASHMASK, payload_length(), payload_ptr());
+					printf("[%d] sending HASHMASK: (%08X/%08X)\n", _seconds, _mask, bucket->hash);
+					client_send_message(_clients[i], NULL, CMD_HASHMASK, payload_length(), payload_ptr());
+				}
 			}
 		}
 	}
@@ -221,28 +223,114 @@ void push_control_bucket(client_t *client, bucket_t *bucket, int level)
 	// if we are sending a primary bucket, then there must be a backup node somewhere. If we are 
 	// sending a backup node, then there could be a source node elsewhere (moving a bucket), or we 
 	// are the source (bucket had no backup).
-	
+
+	assert(bucket);
+	assert(bucket->hash >= 0);
 	
 	if (level == 0) {
+		assert(_hashmasks);
+		assert(_hashmasks[bucket->hash]);
 		assert(_hashmasks[bucket->hash]->primary);
 		payload_string(_hashmasks[bucket->hash]->primary);
 	}
 	else if (level == 1) {
 		if (bucket->target_node) {
+			assert(_hashmasks);
+			assert(_hashmasks[bucket->hash]);
 			assert(_hashmasks[bucket->hash]->secondary);
 			payload_string(_hashmasks[bucket->hash]->secondary);
 		}
 		else {
-			payload_string(NULL);
+			assert(_interface);
+			payload_string(_interface);
 		}
 	}
-	else payload_string(_interface);
+	else {
+		assert(_interface);
+		payload_string(_interface);
+	}
 
 	if (_verbose > 2)
 		printf("[%u] CONTROL_BUCKET(bucket:%X): Interface:'%s', length=%d, payload=%d\n", 
 		   _seconds, bucket->hash, _interface, (int)strlen(_interface), payload_length());
 	
+	assert(payload_length() > 0);
 	client_send_message(client, NULL, CMD_CONTROL_BUCKET, payload_length(), payload_ptr());
 	payload_clear();
 }
+
+
+
+
+void push_sync_item(client_t *client, item_t *item)
+{
+	int cmd = 0;
+	
+	assert(client);
+	assert(client->handle > 0);
+	
+	assert(item);
+	assert(item->value);
+	
+	assert(payload_length() == 0);
+	payload_int(item->map_key);
+	payload_int(item->item_key);
+	
+	if (item->expires == 0) {
+		payload_int(0);
+	}
+	else {
+		payload_int(item->expires - _seconds);
+	}
+	
+	if (item->value->type == VALUE_INT) {
+		cmd = CMD_SYNC_INT;
+		payload_int(item->value->data.i);
+		printf("[%d] sending MIGRATE_INT: (%08X/%08X)\n", _seconds, item->map_key, item->item_key);
+	}
+	else if (item->value->type == VALUE_STRING) {
+		cmd = CMD_SYNC_STRING;
+		payload_data(item->value->data.s.length, item->value->data.s.data);
+		printf("[%d] sending MIGRATE_STRING: (%08X/%08X:'%s')\n", _seconds, item->map_key, item->item_key, item->value->data.s.data);
+	}
+	else {
+		assert(0);
+	}
+	
+	assert(cmd > 0);
+	client_send_message(client, NULL, cmd, payload_length(), payload_ptr());
+	payload_clear();
+}
+
+
+
+
+void push_sync_name(client_t *client, hash_t key, char *name, int int_key)
+{
+	int cmd = 0;
+	
+	assert(client);
+	assert(client->handle > 0);
+	assert((name && int_key == 0) || (name == NULL));
+	
+	assert(payload_length() == 0);
+	payload_int(key);
+	
+	if (name) {
+		payload_string(name);
+		cmd = CMD_SYNC_NAME;
+		printf("[%d] sending SYNC_NAME: (%08X:'%s')\n", _seconds, key, name);
+	}
+	else {
+		payload_int(int_key);
+		cmd = CMD_SYNC_NAME_INT;
+		printf("[%d] sending SYNC_NAME_INT: (%08X:%d)\n", _seconds, key, int_key);
+	}
+	
+	assert(cmd > 0);
+	client_send_message(client, NULL, cmd, payload_length(), payload_ptr());
+	payload_clear();
+
+}
+
 

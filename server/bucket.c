@@ -52,8 +52,6 @@ hashmask_t ** _hashmasks = NULL;
 // process.
 int _migrate_sync = 0;
 
-int _sync_counter = 0;
-
 
 
 // get a value from whichever bucket is resposible.
@@ -95,11 +93,10 @@ value_t * buckets_get_value(int map_hash, int key_hash)
 // store the value in whatever bucket is resposible for the key_hash.
 // NOTE: value is controlled by the tree after this function call.
 // NOTE: name is controlled by the tree after this function call.
-int buckets_store_value(int map_hash, int key_hash, char *name, int expires, value_t *value) 
+int buckets_store_value(int map_hash, int key_hash, char *name, int name_int, int expires, value_t *value) 
 {
 	int bucket_index;
 	bucket_t *bucket;
-	int result = -1;
 
 		// calculate the bucket that this item belongs in.
 	bucket_index = _mask & key_hash;
@@ -107,23 +104,15 @@ int buckets_store_value(int map_hash, int key_hash, char *name, int expires, val
 	assert(bucket_index <= _mask);
 	bucket = _buckets[bucket_index];
 
-	// if we have a record for this bucket, then we are either a primary or a backup for it.
+	// if we have a record for this bucket, then we are (potentially) either a primary or a backup for it.
 	if (bucket) {
 		assert(bucket->hash == bucket_index);
-		
-		// make sure that this server is 'primary' or 'secondary' for this bucket.
-		if (bucket->level >= 0) {
-			assert(result < 0);
-			result = data_set_value(map_hash, key_hash, bucket->data, name, value, expires);
-		}
-		else {
-			// we need to reply with an indication of which server is actually responsible for this bucket.
-			assert(result < 0);
-			assert(0);
-		}
+		data_set_value(map_hash, key_hash, bucket->data, name, name_int, value, expires);
+		return(0);
 	}
-	
-	return(result);
+	else {
+		return(-1);
+	}
 }
 
 
@@ -144,10 +133,11 @@ bucket_t * bucket_new(hash_t hash)
 	assert(bucket->transfer_event == NULL);
 	assert(bucket->shutdown_event == NULL);
 	assert(bucket->transfer_client == NULL);
-	assert(bucket->in_transit == 0);
+	assert(data_in_transit() == 0);
 	assert(bucket->oldbucket_event == NULL);
+	assert(bucket->transfer_mode_special == 0);
 			
-	bucket->data = data_new();
+	bucket->data = data_new(hash);
 	
 	return(bucket);
 }
@@ -250,7 +240,7 @@ void buckets_split_mask(int mask)
 		else { newlist[i]->primary = NULL; }
 		
 		// create the new bucket ONLY if we already have a bucket object for that index.
-		if (oldbuckets[index] == NULL) {
+		if (oldbuckets == NULL || oldbuckets[index] == NULL) {
 			newbuckets[i] = NULL;
 		}
 		else {
@@ -273,8 +263,7 @@ void buckets_split_mask(int mask)
 			newbuckets[i]->backup_node = oldbuckets[index]->backup_node;
 			newbuckets[i]->logging_node = oldbuckets[index]->logging_node;
 			
-			assert(newbuckets[i]->in_transit == 0);
-
+			assert(data_in_transit() == 0);
 		}
 	}
 
@@ -298,19 +287,20 @@ void buckets_split_mask(int mask)
 	
 	
 	// clean up the old buckets list.
-	for (i=0; i<=_mask; i++) {
-		if (oldbuckets[i]) {
-			assert(oldbuckets[i]->data);
-			assert(oldbuckets[i]->data->ref > 1);
-			oldbuckets[i]->data->ref --;
-			assert(oldbuckets[i]->data->ref > 0);
-			
-			oldbuckets[i]->data = NULL;
-			
-			bucket_close(oldbuckets[i]);
+	if (oldbuckets) {
+		for (i=0; i<=_mask; i++) {
+			if (oldbuckets[i]) {
+				assert(oldbuckets[i]->data);
+				assert(oldbuckets[i]->data->ref > 1);
+				oldbuckets[i]->data->ref --;
+				assert(oldbuckets[i]->data->ref > 0);
+				
+				oldbuckets[i]->data = NULL;
+				
+				bucket_close(oldbuckets[i]);
+			}
 		}
-	}
-	
+	}	
 	
 	_hashmasks = (void *) newlist;
 	_buckets = newbuckets;
@@ -431,6 +421,10 @@ void buckets_init(void)
 
 	assert(_primary_buckets == 0);
 	assert(_secondary_buckets == 0);
+	
+	assert(_hashmasks == NULL);
+	_hashmasks = calloc(_mask+1, sizeof(hashmask_t *));
+	assert(_hashmasks);
 
 	// for starters we will need to create a bucket for each hash.
 	for (i=0; i<=_mask; i++) {
@@ -441,8 +435,50 @@ void buckets_init(void)
 
 		// send out a message to all connected clients, to let them know that the buckets have changed.
 		push_hashmask_update(_buckets[i]); // all_hashmask(i, 0);
+		
+		_hashmasks[i] = calloc(1, sizeof(hashmask_t));
+		assert(_hashmasks[i]);
+		
+		_hashmasks[i]->local = -1;
+		_hashmasks[i]->primary = NULL;
+		_hashmasks[i]->secondary = NULL;
 	}
 
 	// indicate that we have buckets that do not have backup copies on other nodes.
 	_nobackup_buckets = _mask + 1;
+	
+	// we should have hashmasks setup as well by this point.
+	assert(_hashmasks);
+}
+
+
+
+// we've been given a 'name' for a hash-key item, and so we lookup the bucket that is responsible 
+// for that item.  the 'data' module will then find the data store within that handles that item.
+int buckets_store_name(hash_t key_hash, char *name, int int_key)
+{
+	int bucket_index;
+	bucket_t *bucket;
+
+	assert((name == NULL) || (name && int_key == 0));
+
+	// calculate the bucket that this item belongs in.
+	bucket_index = _mask & key_hash;
+	assert(bucket_index >= 0);
+	assert(bucket_index <= _mask);
+	bucket = _buckets[bucket_index];
+
+	// if we have a record for this bucket, then we are either a primary or a backup for it.
+	if (bucket) {
+		assert(bucket->hash == bucket_index);
+		
+		// make sure that this server is 'primary' or 'secondary' for this bucket.
+		assert(bucket->data);
+		data_set_name(key_hash, bucket->data, name, int_key);
+		return(0);
+	}
+	else {
+		// we dont have the bucket, we need to let the other node know that something has gone wrong.
+		return(-1);
+	}
 }

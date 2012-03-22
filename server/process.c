@@ -1,6 +1,7 @@
 // process replies received from commands sent.
 
 #include "bucket.h"
+#include "bucket_data.h"
 #include "constants.h"
 #include "globals.h"
 #include "item.h"
@@ -11,6 +12,7 @@
 #include "push.h"
 
 #include <assert.h>
+#include <stdlib.h>
 
 
 void process_ack(client_t *client, header_t *header)
@@ -246,6 +248,9 @@ void process_loadlevels(client_t *client, header_t *header, void *ptr)
 			printf("[%u] Migrating bucket #%X to '%s'\n",
 					   _seconds, bucket->hash, ((node_t*)client->node)->name); 
 	
+			assert(_bucket_transfer == 0);
+			_bucket_transfer = 1;
+			
 			// We know what level this bucket is, but we dont need to tell the target node yet 
 			// because they dont need to know.  When we finalise the bucket migration we will 
 			// tell them what it is and what the other (backup or source)nodes are.
@@ -254,135 +259,6 @@ void process_loadlevels(client_t *client, header_t *header, void *ptr)
 		}
 	}
 }
-
-
-
-static void send_transfer_items(bucket_t *bucket)
-{
-	item_t **items;		// items we are going to send out. (NULL terminated array of item_t pointers)
-	int avail;
-	
-	assert(bucket);
-	assert(bucket->in_transit >= 0);
-	assert(bucket->in_transit <= TRANSIT_MIN);
-	assert(bucket->transfer_client);
-
-	assert(bucket->data);
-
-	avail = TRANSIT_MAX - bucket->in_transit;
-	
-	if (_verbose > 3) printf("Requesting %d items to migrate.\n", avail);
-	
-	// ask the data system for a certain number of migrate items.
-	items = data_get_migrate_items(bucket->data, bucket->hash, avail);
-	if (items == NULL) {
-		// there are no more items to migrate.
-		assert(0);
-	}
-	else {
-		// we have some items to send.
-		assert(0);
-	}
-}
-
-
-
-/*
- * When we receive a reply of REPLY_ACCEPTING_BUCKET, we can start sending the bucket contents to 
- * this client.  This means that we first need to make a list of all the items that need to be sent.  
- * Then we need to send the first X messages (we send them in blocks).
- */
-void process_accept_bucket(client_t *client, header_t *header, void *ptr)
-{
-	char *next;
-	hash_t mask;
-	hash_t hash;
-	bucket_t *bucket;
-	
-	assert(client && header && ptr);
-	assert(client->node);
-	
-	next = ptr;
-
-	// need to get the data out of the payload.
-	mask = data_int(&next);
-	hash = data_int(&next);
-	
-	// get the bucket.
-	assert(_buckets);
-	assert(mask == _mask);
-	bucket = _buckets[hash];
-	assert(bucket);
-
-	// increment the migrate_sync counter which will help indicate which items have already been 
-	// sent or not.
-	assert(_migrate_sync >= 0);
-	_migrate_sync ++;
-	assert(_migrate_sync > 0);
-	
-	// send the first queued item.
-	send_transfer_items(bucket);
-}
-
-
-
-
-/* 
- * The other node now has control of the bucket, so we can clean it up and remove it completely..
- */
-void process_control_bucket_complete(client_t *client, header_t *header, void *ptr)
-{
-	char *next;
-	hash_t mask;
-	hash_t hash;
-	bucket_t *bucket;
-	
-	assert(client && header && ptr);
-	assert(client->node);
-	
-	next = ptr;
-
-	// need to get the data out of the payload.
-	mask = data_int(&next);
-	hash = data_int(&next);
-	
-	// get the bucket.
-	assert(_buckets);
-	assert(mask == _mask);
-	assert(hash >= 0 && hash <= mask);
-	bucket = _buckets[hash];
-	assert(bucket);
-
-	assert(bucket->transfer_client == client);
-	bucket->transfer_client = NULL;
-	
-	if (_verbose > 2) 
-		printf("Bucket migration complete: %X\n", hash);
-	
-	bucket_destroy(bucket);
-	bucket = NULL;
-
-	// now that this migration is complete, we need to ask for loadlevels again.
-	push_loadlevels(client);
-}
-
-
-
-void process_unknown(client_t *client, header_t *header)
-{
-	assert(client);
-	assert(header);
-
-	// we sent a command, and the client didn't know what to do with it.  If we had certain modes 
-	// we could enable for compatible capabilities (for this client), we would do it here.
-	
-	// during initial development, leave this here to catch protocol errors. but once initial 
-	// development is complete, should not do an assert here.
-	assert(0);
-}
-
-
-
 
 
 // the migration of the actual data for the bucket is complete, but now we need to complete the meta 
@@ -434,3 +310,238 @@ static void finalize_migration(client_t *client, bucket_t *bucket)
 	// update the local hashmasks so we can inform clients who send data.
 	// Dont destroy the bucket until the new node has indicatedestroy the bucket.
 }
+
+
+
+
+static void send_transfer_items(bucket_t *bucket)
+{
+	int avail;
+	int items;
+	
+	assert(bucket);
+	assert(data_in_transit() >= 0);
+	assert(data_in_transit() <= TRANSIT_MIN);
+	assert(bucket->transfer_client);
+	assert(TRANSIT_MAX >= TRANSIT_MIN);
+	assert(TRANSIT_MIN >= 0);
+
+	avail = TRANSIT_MAX - data_in_transit();
+	
+	if (_verbose > 3) printf("Requesting %d items to migrate.\n", avail);
+	
+	// ask the data system for a certain number of migrate items.
+	assert(bucket->data);
+	assert(avail > 0);
+	items = data_migrate_items(bucket->transfer_client, bucket->data, bucket->hash, avail);
+	if (items <= 0) {
+		// there are no more items to migrate.
+		assert(bucket);
+		assert(bucket->transfer_client);
+		assert(data_in_transit() == 0);
+		finalize_migration(bucket->transfer_client, bucket);
+	}
+}
+
+
+
+/*
+ * When we receive a reply of REPLY_ACCEPTING_BUCKET, we can start sending the bucket contents to 
+ * this client.  This means that we first need to make a list of all the items that need to be sent.  
+ * Then we need to send the first X messages (we send them in blocks).
+ */
+void process_accept_bucket(client_t *client, header_t *header, void *ptr)
+{
+	char *next;
+	hash_t mask;
+	hash_t hash;
+	bucket_t *bucket;
+	
+	assert(client && header && ptr);
+	assert(client->node);
+	
+	next = ptr;
+
+	// need to get the data out of the payload.
+	mask = data_int(&next);
+	hash = data_int(&next);
+	
+	// get the bucket.
+	assert(_buckets);
+	assert(mask == _mask);
+	bucket = _buckets[hash];
+	assert(bucket);
+
+	// increment the migrate_sync counter which will help indicate which items have already been 
+	// sent or not.
+	assert(_migrate_sync >= 0);
+	_migrate_sync ++;
+	assert(_migrate_sync > 0);
+	
+	if (_verbose > 4) 
+		printf("Setting Migration SYNC counter to: %d\n", _migrate_sync);
+
+	assert(data_in_transit() == 0);
+	
+	// send the first queued item.
+	send_transfer_items(bucket);
+}
+
+
+
+
+/* 
+ * The other node now has control of the bucket, so we can clean it up and remove it completely..
+ */
+void process_control_bucket_complete(client_t *client, header_t *header, void *ptr)
+{
+	char *next;
+	hash_t mask;
+	hash_t hash;
+	bucket_t *bucket;
+	
+	assert(client && header && ptr);
+	assert(client->node);
+	
+	next = ptr;
+
+	// need to get the data out of the payload.
+	mask = data_int(&next);
+	hash = data_int(&next);
+	
+	// get the bucket.
+	assert(_buckets);
+	assert(mask == _mask);
+	assert(hash >= 0 && hash <= mask);
+	bucket = _buckets[hash];
+	assert(bucket);
+
+	assert(bucket->transfer_client == client);
+	bucket->transfer_client = NULL;
+	
+	if (_verbose > 2) 
+		printf("Bucket migration complete: %X\n", hash);
+
+printf("AA\n");
+
+	// do we need to let other nodes that the transfer is complete?
+
+
+	// if we transferred a backup node, or we transferred a primary that already has a backup node, 
+	// then we dont need this copy of the bucket anymore, so we can delete it.
+	if (bucket->level == 0 && bucket->backup_node == NULL) {
+		assert(client->node);
+		bucket->backup_node = client->node;
+	}
+	else {
+		bucket_destroy(bucket);
+		bucket = NULL;
+	}
+
+printf("BB\n");
+
+	assert(_bucket_transfer == 1);
+	_bucket_transfer = 0;
+
+
+	// now that this migration is complete, we need to ask for loadlevels again.
+	push_loadlevels(client);
+	
+printf("CC\n");
+}
+
+
+
+void process_unknown(client_t *client, header_t *header)
+{
+	assert(client);
+	assert(header);
+
+	// we sent a command, and the client didn't know what to do with it.  If we had certain modes 
+	// we could enable for compatible capabilities (for this client), we would do it here.
+	
+	// during initial development, leave this here to catch protocol errors. but once initial 
+	// development is complete, should not do an assert here.
+	assert(0);
+}
+
+
+
+
+
+
+
+
+void process_sync_name_ack(client_t *client, header_t *header, void *ptr)
+{
+	char *next;
+	hash_t hash;
+	bucket_t *bucket;
+	int index;
+
+	assert(client && header && ptr);
+	assert(client->node);
+	
+	next = ptr;
+
+	// need to get the data out of the payload.
+	hash = data_int(&next);
+	
+	index = hash & _mask;
+		
+	// get the bucket.
+	assert(_buckets);
+	assert(index >= 0 && index <= _mask);
+	bucket = _buckets[index];
+	assert(bucket);
+
+	assert(bucket->transfer_client == client);
+	
+	if (_verbose > 2) 
+		printf("Migration of item name complete: %X\n", hash);
+}
+
+
+
+void process_sync_ack(client_t *client, header_t *header, void *ptr)
+{
+	char *next;
+	hash_t map;
+	hash_t hash;
+	bucket_t *bucket;
+	int index;
+
+	assert(client && header && ptr);
+	assert(client->node);
+	
+	next = ptr;
+
+	// need to get the data out of the payload.
+	map = data_int(&next);
+	hash = data_int(&next);
+	
+	index = hash & _mask;
+		
+	// get the bucket.
+	assert(_buckets);
+	assert(index >= 0 && index <= _mask);
+	bucket = _buckets[index];
+	assert(bucket);
+
+	assert(bucket->transfer_client == client);
+	
+	data_migrated(bucket->data, map, hash);
+	
+	data_in_transit_dec();
+
+	// send another if there is one more available.
+	send_transfer_items(bucket);
+	
+	// NOTE: How do we detect that we've sent everything that needs to be sent.
+	
+	
+	if (_verbose > 2) 
+		printf("Migration of item name complete: %X\n", hash);
+}
+
+

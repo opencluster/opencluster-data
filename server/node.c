@@ -261,11 +261,13 @@ node_t * node_add(client_t *client, char *name)
 	assert(client);
 	assert(name);
 	
-	assert(_nodes);
+	assert((_nodes == NULL && _node_count == 0) || (_nodes && _node_count >= 0));
 	_nodes = realloc(_nodes, sizeof(node_t *) * (_node_count + 1));
 	assert(_nodes);
 	_nodes[_node_count] = node_new(name);
 	_nodes[_node_count]->client = client;
+	
+	node = _nodes[_node_count];
 	
 	assert(client->node == NULL);
 	client->node = _nodes[_node_count];
@@ -274,7 +276,7 @@ node_t * node_add(client_t *client, char *name)
 	_active_nodes ++;
 	assert(_active_nodes > 0);
 
-	
+	assert(node);
 	return(node);
 }
 

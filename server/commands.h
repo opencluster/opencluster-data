@@ -17,6 +17,9 @@ void cmd_serverhello(client_t *client, header_t *header, char *payload);
 void cmd_hashmask(client_t *client, header_t *header, char *payload);
 void cmd_control_bucket(client_t *client, header_t *header, char *payload);
 void cmd_hello(client_t *client, header_t *header);
+void cmd_sync_string(client_t *client, header_t *header, char *payload);
+void cmd_sync_int(client_t *client, header_t *header, char *payload);
+void cmd_sync_name(client_t *client, header_t *header, char *payload);
 
 
 

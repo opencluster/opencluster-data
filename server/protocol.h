@@ -22,9 +22,17 @@
 #define CMD_SET_INT						 2000
 #define CMD_SET_STR						 2020
 #define CMD_GET_INT						 2100
-#define REPLY_DATA_INT					 2105
-#define CMD_GET_STR						 2120
-#define REPLY_DATA_STR					 2125
+#define REPLY_DATA_INT                   2105
+#define CMD_GET_STR                      2120
+#define REPLY_DATA_STR                   2125
+#define CMD_SYNC_INT                     3000
+#define REPLY_SYNC_ACK                   3005
+#define REPLY_SYNC_FAIL                  3006
+#define CMD_SYNC_STRING                  3020
+#define CMD_SYNC_NAME                    3100
+#define CMD_SYNC_NAME_INT                3101
+#define REPLY_SYNC_NAME_ACK              3105
+#define REPLY_SYNC_NAME_FAIL             3106
 
 
 

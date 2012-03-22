@@ -35,9 +35,8 @@ typedef struct {
 
 	// client we are transferring this bucket to.  if this is not null, then a transfer is in progress.
 	client_t *transfer_client;
+	int transfer_mode_special;
 
-	// the number of items that have been sent to the transfer client, but have not been ack'd yet.
-	int in_transit;
 	
 	struct event *shutdown_event;
 	struct event *transfer_event;
@@ -65,9 +64,10 @@ typedef struct {
 
 
 value_t * buckets_get_value(int map_hash, int key_hash);
-int buckets_store_value(int map_hash, int key_hash, char *name, int expires, value_t *value);
+int buckets_store_value(int map_hash, int key_hash, char *name, int name_int, int expires, value_t *value);
 void buckets_split_mask(int mask);
 void buckets_init(void);
+int buckets_store_name(hash_t key_hash, char *name, int int_key);
 
 bucket_t * bucket_new(hash_t hash);
 void bucket_shutdown(bucket_t *bucket);

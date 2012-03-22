@@ -290,6 +290,8 @@ static int process_data(client_t *client)
 					// we have enough data, so we need to pass it on to the functions that handle it.
 					switch (header.command) {
 						case REPLY_ACK:     			process_ack(client, &header); 					break;
+						case REPLY_SYNC_NAME_ACK:       process_sync_name_ack(client, &header, ptr);    break;
+						case REPLY_SYNC_ACK:            process_sync_ack(client, &header, ptr);         break;
 						case REPLY_LOADLEVELS:			process_loadlevels(client, &header, ptr);		break;
 						case REPLY_ACCEPTING_BUCKET:	process_accept_bucket(client, &header, ptr);	break;
 						case REPLY_CONTROL_BUCKET_COMPLETE: process_control_bucket_complete(client, &header, ptr);	break;
@@ -298,7 +300,11 @@ static int process_data(client_t *client)
 							if (_verbose > 1) {
 								printf("[%u] Unknown reply: Reply=%d, Command=%d, userid=%d, length=%d\n", 
 									_seconds, header.repcmd, header.command, header.userid, header.length);
+								
 							}
+#ifndef NDEBUG
+assert(0);
+#endif							
 							break;
 					}
 				}
@@ -310,6 +316,9 @@ static int process_data(client_t *client)
 						case CMD_GET_STR: 		 cmd_get_str(client, &header, ptr); 			break;
 						case CMD_SET_INT: 		 cmd_set_int(client, &header, ptr); 			break;
 						case CMD_SET_STR: 		 cmd_set_str(client, &header, ptr); 			break;
+						case CMD_SYNC_INT: 		 cmd_sync_int(client, &header, ptr); 			break;
+						case CMD_SYNC_NAME:      cmd_sync_name(client, &header, ptr); 			break;
+						case CMD_SYNC_STRING: 	 cmd_sync_string(client, &header, ptr);			break;
 						case CMD_PING: 	         cmd_ping(client, &header); 					break;
 						case CMD_LOADLEVELS: 	 cmd_loadlevels(client, &header);				break;
 						case CMD_ACCEPT_BUCKET:  cmd_accept_bucket(client, &header, ptr);		break;
@@ -323,6 +332,9 @@ static int process_data(client_t *client)
 							// without having to build a normal reply.
 							if (_verbose > 1) { printf("[%u] Unknown command received: Command=%d, userid=%d, length=%d\n", _seconds, header.command, header.userid, header.length); }
 							client_send_message(client, &header, REPLY_UNKNOWN, 0, NULL);
+#ifndef NDEBUG
+assert(0);
+#endif							
 							break;
 					}
 				}
@@ -590,11 +602,10 @@ char * data_string_copy(char **data)
 {
 	char *s;
 	char *sal;
-	int length;
+	int length = 0;
 	
 	assert(data);
 	assert(*data);
-	assert(length);
 	
 	s = data_string(data, &length);
 	assert(s);

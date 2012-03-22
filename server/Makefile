@@ -39,12 +39,12 @@ H_SERVER=server.h
 H_HEADER=header.h
 H_CLIENT=client.h event-compat.h $(H_HEADER)
 H_NODE=node.h $(H_CLIENT)
-H_BUCKET_DATA=bucket_data.h $(H_VALUE) $(H_HASH) $(H_ITEM)
+H_BUCKET_DATA=bucket_data.h $(H_VALUE) $(H_HASH) $(H_ITEM) $(H_CLIENT) $(H_CONSTANTS)
 H_BUCKET=bucket.h $(H_HASH) $(H_NODE) $(H_BUCKET_DATA) $(H_VALUE)
+H_PUSH=push.h $(H_CLIENT) $(H_BUCKET)
 H_GLOBALS=globals.h event-compat.h
 H_STATS=stats.h
 H_SECONDS=seconds.h
-H_PUSH=push.h $(H_CLIENT) $(H_BUCKET)
 H_PROCESS=process.h $(H_CLIENT) $(H_HEADER)
 H_COMMANDS=commands.h $(H_CLIENT) $(H_HEADER)
 H_PAYLOAD=payload.h
@@ -57,7 +57,8 @@ INC_BUCKET_DATA=\
 	$(H_BUCKET) \
 	$(H_HASH) \
 	$(H_ITEM) \
-	$(H_GLOBALS)
+	$(H_GLOBALS) \
+	$(H_PUSH)
 
 INC_BUCKET= \
 	$(H_BUCKET) \
@@ -105,7 +106,8 @@ INC_OCD= \
 	$(H_SERVER) \
 	$(H_SECONDS) \
 	$(H_STATS) \
-	$(H_SETTLE)
+	$(H_SETTLE) \
+	$(H_PAYLOAD)
 
 INC_PAYLOAD=$(H_PAYLOAD)
 
@@ -118,7 +120,8 @@ INC_PROCESS= \
 	$(H_PAYLOAD) \
 	$(H_CONSTANTS) \
 	$(H_PUSH) \
-	$(H_ITEM)
+	$(H_ITEM) \
+	$(H_BUCKET_DATA)
 
 INC_PUSH= \
 	$(H_PUSH) \

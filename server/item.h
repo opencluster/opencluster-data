@@ -8,8 +8,9 @@ typedef struct {
 	hash_t item_key;
 	hash_t map_key;
 	int expires;
-	char *name;
 	value_t *value;
+	int migrate;
+	void *maplist;
 } item_t;
 
 

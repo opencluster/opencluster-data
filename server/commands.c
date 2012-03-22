@@ -168,7 +168,7 @@ void cmd_set_str(client_t *client, header_t *header, char *payload)
 	// will replace it, so control of this value is given to the tree structure.
 	// NOTE: value is controlled by the tree after this function call.
 	// NOTE: name is controlled by the tree after this function call.
-	result = buckets_store_value(map_hash, key_hash, name, expires, value);
+	result = buckets_store_value(map_hash, key_hash, name, 0, expires, value);
 	value = NULL;
 	name = NULL;
 	
@@ -186,8 +186,6 @@ void cmd_set_str(client_t *client, header_t *header, char *payload)
 
 
 
-// the hello command does not require a payload, and simply does a reply.   
-// However, it triggers a servermap, and a hashmasks command to follow it.
 void cmd_loadlevels(client_t *client, header_t *header)
 {
 	assert(client);
@@ -205,7 +203,9 @@ void cmd_loadlevels(client_t *client, header_t *header)
 	// send the reply.
 	client_send_message(client, header, REPLY_LOADLEVELS, payload_length(), payload_ptr());
 
-	assert(payload_length() == 0);
+	payload_clear();
+	
+	assert(_hashmasks);
 }
 
 
@@ -253,6 +253,8 @@ void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
 		assert(key_hash <= mask);
 		assert(_mask == mask);
 		
+		assert(_hashmasks);
+		
 		// if we dont currently have a buckets list, we need to create one.
 		if (_buckets == NULL) {
 			_buckets = calloc(_mask + 1, sizeof(bucket_t *));
@@ -277,7 +279,7 @@ void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
 			// need to create the bucket, and mark it as in-transit.
 			bucket = bucket_new(key_hash);
 			_buckets[key_hash] = bucket;
-			assert(bucket->in_transit == 0);
+			assert(data_in_transit() == 0);
 			bucket->transfer_client = client;
 			assert(bucket->level < 0);
 		}
@@ -341,7 +343,7 @@ void cmd_set_int(client_t *client, header_t *header, char *payload)
 	// will replace it, so control of this value is given to the tree structure.
 	// NOTE: value is controlled by the tree after this function call.
 	// NOTE: name is controlled by the tree after this function call.
-	result = buckets_store_value(map_hash, key_hash, name, expires, value);
+	result = buckets_store_value(map_hash, key_hash, name, 0, expires, value);
 	value = NULL;
 	name = NULL;
 	
@@ -374,11 +376,9 @@ void cmd_ping(client_t *client, header_t *header)
 
 void cmd_serverhello(client_t *client, header_t *header, char *payload)
 {
-	int length;
 	char *next;
-	char *raw_name;
-	char *name;
-	node_t *node;
+	char *name = NULL;
+	node_t *node = NULL;
 	
 	assert(client);
 	assert(header);
@@ -390,16 +390,9 @@ void cmd_serverhello(client_t *client, header_t *header, char *payload)
 	
 	// the only parameter is a string indicating the servers connection data.  
 	// Normally an IP and port.
-	raw_name = data_string(&next, &length);
-	assert(length > 0);
-	assert(raw_name);
-	
-	// we need to mark this client as a node connection, we do this by settings its node name.
-	assert(length > 0);
-	name = malloc(length +1);
-	strncpy(name, raw_name, length);
-	name[length] = 0;
-	
+	name = data_string_copy(&next);
+	assert(name);
+
 	
 	// we have a server name.  We need to check it against out node list.  If it is there, then we 
 	// dont do anything.  If it is not there, then we need to add it.
@@ -409,6 +402,7 @@ void cmd_serverhello(client_t *client, header_t *header, char *payload)
 		// to the node.
 
 		node = node_add(client, name);
+		assert(node);
 
 		// need to send to the node, the list of hashmasks.
 		push_hashmasks(client);
@@ -454,6 +448,7 @@ void cmd_serverhello(client_t *client, header_t *header, char *payload)
 	}	}	}	}
 
 	// since this connection is a client, we need to set a 'loadlevel' timer.
+	assert(node);
 	assert(node->loadlevel_event == NULL);
 	assert(_evbase);
 	node->loadlevel_event = evtimer_new(_evbase, node_loadlevel_handler, (void *) node);
@@ -462,6 +457,9 @@ void cmd_serverhello(client_t *client, header_t *header, char *payload)
 
 	// send the ACK reply.
 	client_send_message(client, header, REPLY_ACK, 0, NULL);
+	
+	free(name);
+	name=NULL;
 }
 
 
@@ -574,13 +572,13 @@ void cmd_control_bucket(client_t *client, header_t *header, char *payload)
 	key_hash = data_int(&next);
 	level = data_int(&next);
 	remote_host = data_string_copy(&next);
-	assert(remote_host);
 	
-	if (_verbose > 2) printf("[%u] CMD: bucket control (%08X/%08X), level:%d, remote:'%s'\n\n", _seconds, mask, key_hash, level, remote_host);
-
-	assert(payload_length() == 0);
+	if (_verbose > 2) 
+		printf("[%u] CMD: bucket control (%08X/%08X), level:%d, remote:'%s'\n\n", 
+			   _seconds, mask, key_hash, level, remote_host);
 
 	// regardless of the reply, the payload will be the same.
+	assert(payload_length() == 0);
 	payload_int(mask);
 	payload_int(key_hash);
 
@@ -589,10 +587,11 @@ void cmd_control_bucket(client_t *client, header_t *header, char *payload)
 		reply = REPLY_CONTROL_BUCKET_FAILED;
 		
 		// since we are not going to be using the remote_host, then we should free it now.
-		assert(remote_host);
-		free(remote_host);
-		remote_host = NULL;
-		
+		if (remote_host) {
+			free(remote_host);
+			remote_host = NULL;
+		}
+	
 		assert(bucket == NULL);
 	}
 	else {
@@ -600,6 +599,7 @@ void cmd_control_bucket(client_t *client, header_t *header, char *payload)
 		
 		assert(_buckets);
 		assert(key_hash <= _mask);
+		assert(key_hash >= 0);
 
 		// ** some of these values should be checked at runtime
 		bucket = _buckets[key_hash];
@@ -610,27 +610,37 @@ void cmd_control_bucket(client_t *client, header_t *header, char *payload)
 		assert(bucket->transfer_client == client);
 		assert(bucket->target_node == NULL);
 		assert(bucket->backup_node == NULL);
-		assert(bucket->in_transit == 0);
+		assert(data_in_transit() == 0);
 		assert(bucket->transfer_event == NULL);
 		
 		// mark the bucket as ready for action.
 		bucket->level = level;
 		if (level == 0) {
 			// we are receiving a primary bucket.  
-			bucket->target_node = node_find(remote_host);
-			assert(bucket->backup_node == NULL);
+			if (remote_host) {
+				bucket->backup_node = node_find(remote_host);
+				assert(bucket->target_node == NULL);
+			}
+			else {
+				assert(bucket->backup_node == NULL);
+			}
 			
 			// we should be connected to this other node.
-			assert(bucket->target_node->client);
-			
+			assert(bucket->target_node == NULL);
+			assert(bucket->backup_node);
+			assert(bucket->backup_node->client);
 		}
 		else {
 			// we are receiving a backup bucket.  
-			bucket->backup_node = node_find(remote_host);
-			assert(bucket->target_node == NULL);
+			if (remote_host) {
+				bucket->target_node = node_find(remote_host);
+				assert(bucket->backup_node == NULL);
+			}
 			
 			// we should be connected to this other node.
-			assert(bucket->backup_node->client);
+			assert(bucket->backup_node == NULL);
+			assert(bucket->target_node);
+			assert(bucket->target_node->client);
 		}
 
 		bucket->transfer_client = NULL;
@@ -641,6 +651,9 @@ void cmd_control_bucket(client_t *client, header_t *header, char *payload)
 	client_send_message(client, header, reply, payload_length(), payload_ptr());
 	payload_clear();
 
+	assert(_bucket_transfer == 1);
+	_bucket_transfer = 0;
+	
 	if (bucket) {
 		// send message to all other connected clients and nodes alerting them to the change in buckets.
 		assert(bucket->level >= 0);
@@ -668,3 +681,170 @@ void cmd_hello(client_t *client, header_t *header)
 	// send a hashmasks command to the client.
 	push_hashmasks(client);
 }
+
+
+
+
+// Set a value into the hash storage for a new bucket we are receiving.  Almost the same as 
+// cmd_set_str, except the data received is slightly different.
+void cmd_sync_string(client_t *client, header_t *header, char *payload)
+{
+	char *next;
+	int map_hash;
+	int key_hash;
+	int expires;
+	value_t *value;
+	char *str;
+	int result;
+	int str_len;
+	
+	assert(client);
+	assert(header);
+	assert(payload);
+
+	// create a new value.
+	value = calloc(1, sizeof(value_t));
+	assert(value);
+	
+	next = payload;
+	
+	map_hash = data_int(&next);
+	key_hash = data_int(&next);
+	expires = data_int(&next);
+	
+	assert(_hashmasks);
+
+	
+	// we cant treat the string as a typical C string, because it is actually a binary blob that may 
+	// contain NULL chars.
+	str = data_string(&next, &str_len);
+	value->data.s.data = malloc(str_len + 1);
+	memcpy(value->data.s.data, str, str_len);
+	value->data.s.data[str_len] = 0;
+	value->data.s.length = str_len;
+
+	value->type = VALUE_STRING;
+	
+	
+	// store the value into the trees.  If a value already exists, it will get released and this one 
+	// will replace it, so control of this value is given to the tree structure.
+	// NOTE: value is controlled by the tree after this function call.
+	// NOTE: name is controlled by the tree after this function call.
+	result = buckets_store_value(map_hash, key_hash, NULL, 0, expires, value);
+	value = NULL;
+	
+	// send the ACK reply.
+	if (result == 0) {
+		assert(payload_length() == 0);
+		payload_int(map_hash);
+		payload_int(key_hash);
+		client_send_message(client, header, REPLY_SYNC_ACK, payload_length(), payload_ptr());
+		payload_clear();
+	}
+	else {
+		assert(0);
+	}
+	
+	assert(payload_length() == 0);
+}
+
+
+
+
+// Set a value into the hash storage for a new bucket we are receiving.  Almost the same as 
+// cmd_set_str, except the data received is slightly different.
+void cmd_sync_int(client_t *client, header_t *header, char *payload)
+{
+	char *next;
+	int map_hash;
+	int key_hash;
+	int expires;
+	value_t *value;
+	int result;
+	
+	assert(client);
+	assert(header);
+	assert(payload);
+
+	// create a new value.
+	value = calloc(1, sizeof(value_t));
+	assert(value);
+	
+	next = payload;
+	
+	map_hash = data_int(&next);
+	key_hash = data_int(&next);
+	expires = data_int(&next);
+	
+	value->data.i = data_int(&next);
+	value->type = VALUE_INT;
+	
+	// store the value into the trees.  If a value already exists, it will get released and this one 
+	// will replace it, so control of this value is given to the tree structure.
+	// NOTE: value is controlled by the tree after this function call.
+	// NOTE: name is controlled by the tree after this function call.
+	result = buckets_store_value(map_hash, key_hash, NULL, 0, expires, value);
+	value = NULL;
+	
+	// send the ACK reply.
+	if (result == 0) {
+		assert(payload_length() == 0);
+		payload_int(map_hash);
+		payload_int(key_hash);
+		client_send_message(client, header, REPLY_SYNC_ACK, payload_length(), payload_ptr());
+		payload_clear();
+	}
+	else {
+		assert(0);
+	}
+	
+	assert(payload_length() == 0);
+}
+
+
+
+
+
+// Set a value into the hash storage for a new bucket we are receiving.  Almost the same as 
+// cmd_set_str, except the data received is slightly different.
+void cmd_sync_name(client_t *client, header_t *header, char *payload)
+{
+	char *next;
+	hash_t key_hash;
+	int result;
+	char *name;
+	
+	assert(client);
+	assert(header);
+	assert(payload);
+	
+	next = payload;
+	
+	key_hash = data_int(&next);
+	name = data_string_copy(&next);
+	assert(name);
+	
+	if (_verbose > 4)
+		printf("Received: CMD_SYNC_NAME: %08X='%s'\n", key_hash, name);
+	
+	// NOTE: name is controlled by the tree after this function call.
+	result = buckets_store_name(key_hash, name, 0);
+	name = NULL;
+	
+	// send the ACK reply.
+	if (result == 0) {
+		assert(payload_length() == 0);
+		payload_int(key_hash);
+		client_send_message(client, header, REPLY_SYNC_NAME_ACK, payload_length(), payload_ptr());
+		payload_clear();
+	}
+	else {
+		assert(0);
+	}
+	
+	assert(payload_length() == 0);
+}
+
+
+
+

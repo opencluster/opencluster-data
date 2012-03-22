@@ -87,8 +87,10 @@ void payload_data(int length, void *data)
 	// add the length of the string first.
 	ptr = ((void*) _payload + _payload_length);
 	ptr[0] = htonl(length);
-	
-	memcpy(_payload + _payload_length + sizeof(int), data, length);
+
+	if (length > 0) {
+		memcpy(_payload + _payload_length + sizeof(int), data, length);
+	}
 	
 	_payload_length += sizeof(int) + length;
 	
@@ -100,7 +102,12 @@ void payload_data(int length, void *data)
 
 void payload_string(const char *str)
 {
-	payload_data(strlen(str), (void*)str);
+	if (str == NULL) {
+		payload_data(0, NULL);
+	}
+	else {
+		payload_data(strlen(str), (void*)str);
+	}
 }
 
 
