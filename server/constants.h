@@ -24,7 +24,7 @@
 
 // number of items to send to another node during sync or migrate.
 #define TRANSIT_MIN 0
-#define TRANSIT_MAX 1	
+#define TRANSIT_MAX 1
 
 
 // minimum number of buckets that a node should have before it splits the buckets.  This means that 
