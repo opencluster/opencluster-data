@@ -93,6 +93,8 @@ The commands (and replies, indicated by *) are:
   3000  sync_int
   3010  sync_long
   3020  sync_string
+  3100  sync_name
+  3101  sync_name_int
   
 
 Note: To promote performance on the server, CommandID's less than 1000 do not require access to the
@@ -396,9 +398,9 @@ Replies:
 -----------------------------------------------------------------------
 server_info(100)
 
-Sends a server that is in the cluster.  Normally is sent when a client or node connects, and needs a 
-list of all the server nodes in the cluster.  The client should attempt to connect to each server 
-that it knows about.
+Sends information about a server that is in the cluster to another node or client.  Normally is sent 
+when a client or node connects, and needs a list of all the server nodes in the cluster.  The client 
+should attempt to connect to each server that it knows about.
 
 Type of message:
   Command
@@ -440,6 +442,10 @@ Replies:
   tryelsewhere(4), if the server is shutting down, or not accepting client connections.
 
 
+
+
+
+
 -----------------------------------------------------------------------
 req_loadlevels(200)
 
@@ -459,6 +465,10 @@ Replies:
   tryelsewhere(4), if the server is shutting down, or not accepting client connections.
 
 
+
+
+
+
 -----------------------------------------------------------------------
 loadlevels(210)
 
@@ -475,6 +485,13 @@ Payload:
   integer - primary buckets
   integer - backup buckets
   integer - transfer states (0 = not currently transferring a bucket, 1 = currently transferring a bucket).
+
+
+
+
+
+
+
 
 -----------------------------------------------------------------------
 accept_bucket(300)
@@ -495,6 +512,16 @@ Replies:
   cant_accept_bucket(305)
   accepting_bucket(310)
 
+
+
+
+
+
+
+
+
+
+
 -----------------------------------------------------------------------
 cant_accept_bucket(305)
 
@@ -511,6 +538,16 @@ Payload:
   integer - hash (bucket)
 
 
+
+
+
+
+
+
+
+
+
+
 -----------------------------------------------------------------------
 accepting_bucket(310)
 
@@ -525,6 +562,18 @@ Conditions of use:
 Payload:
   integer - mask
   integer - hash (bucket)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 -----------------------------------------------------------------------
@@ -666,19 +715,115 @@ Payload:
 
 
 -----------------------------------------------------------------------
-sync_int(3000)
+sync_int(3000) [COMMAND]
+
+Migrate an integer (32-bit) key/value, overwriting if it exists.
 
 Payload:
   integer - map hash (0 for non-map items)
   integer - key hash
-  integer - value
+  integer - expires (in seconds from now, 0 means it never expires)
+  integer - value (to be stored).
+
+Replies:
+  sync_ack(3005)
+  sync_fail(3006)
+  tryelsewhere(4), if the server is shutting down, or not accepting client connections.
+
+-----------------------------------------------------------------------
+sync_ack(3005) [REPLY]
+
+Acknowledge a sync operation, providing the information to indicate which sync operation was successful.
+
+Payload:
+  integer - map hash (0 for non-map items)
+  integer - key hash
+
+-----------------------------------------------------------------------
+sync_fail(3006) [REPLY]
+
+A sync operation failed.  This could be for any number of reasons.  Such as the server going 
+offline, or the buckets have been split and this bucket no longer is valid.
+
+Payload:
+  integer - map hash (0 for non-map items)
+  integer - key hash
+
 
 -----------------------------------------------------------------------
   3010  sync_long
+
 -----------------------------------------------------------------------
   3020  sync_string
------------------------------------------------------------------------
 
+Migrate an string key/value, overwriting if it exists.
+
+Payload:
+  integer - map hash (0 for non-map items)
+  integer - key hash
+  integer - expires (in seconds from now, 0 means it never expires)
+  string - value (to be stored).
+
+Replies:
+  sync_ack(3005)
+  sync_fail(3006)
+  tryelsewhere(4), if the server is shutting down, or not accepting client connections.
+
+-----------------------------------------------------------------------
+sync_name(3100)
+
+Each hash has a readable name associated with it, provided by the client.  We dont need to include 
+it with every single update, but for new items we will need to provide it.
+
+Payload:
+  integer - key hash
+  string  - name
+
+Replies:
+  ack(1)
+  tryelsewhere(4), if the server is shutting down, or not accepting client connections.
+
+
+-----------------------------------------------------------------------
+sync_name_int(3101)
+
+Each hash has either a readable name or an integer associated with it, provided by the client.  We 
+dont need to include it with every single update, but for new items we will need to provide it.
+
+Payload:
+  integer - key hash
+  integer - user index
+
+Replies:
+  ack(1)
+  tryelsewhere(4), if the server is shutting down, or not accepting client connections.
+
+
+-----------------------------------------------------------------------
+sync_name_ack(3105) [REPLY]
+
+Acknowledge a sync name operation, providing the information to indicate which sync operation was successful.
+
+Payload:
+  integer - key hash
+
+-----------------------------------------------------------------------
+sync_name_fail(3106) [REPLY]
+
+A sync operation failed.  This could be for any number of reasons.  Such as the server going 
+offline, or the buckets have been split and this bucket no longer is valid.
+
+Payload:
+  integer - key hash
+
+
+
+-----------------------------------------------------------------------
+-----------------------------------------------------------------------
+-----------------------------------------------------------------------
+-----------------------------------------------------------------------
+-----------------------------------------------------------------------
+-----------------------------------------------------------------------
 -----------------------------------------------------------------------
 -----------------------------------------------------------------------
 -----------------------------------------------------------------------
