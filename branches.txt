@@ -1,8 +1,5 @@
 THis file provides some information about active branches in the repository.
 
-bucket-migration
-	Migrate a bucket from one node to another... updating clients of the change.
-
 server-sync
 	This branch is to ensure that when nodes are connected to the cluster, they send communications to the backup nodes 
 	of any changes to buckets.
