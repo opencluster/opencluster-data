@@ -12,8 +12,3 @@ data-logging
 	A special node can connect to the cluster that logs all the updates that occur.  It logs the output to a series of 
 	files.  It can also be used to re-inject that logged data into a cluster.
 
-split_code
-	split the server code into seperate source files because the code is currently getting a little bit large and messy.   
-	I prefer to keep it in one file, but admit that it might be better overall to split it up.  Will need to use 'extern' 
-	for the global variables.  Will need to ensure dependencies in makefile, which might get tricky for debug/nondebug 
-	versions.
