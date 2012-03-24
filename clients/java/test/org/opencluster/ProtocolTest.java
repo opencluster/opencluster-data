@@ -55,6 +55,8 @@ public class ProtocolTest {
 
         ProtocolHeader header = new ProtocolHeader(ProtocolCommand.HELLO);
 
+        System.out.println(header.toString());
+
         writeHeaderToConnection(sChannel, header);
 
         header = new ProtocolHeader(ProtocolCommand.GOODBYE);
@@ -80,7 +82,15 @@ public class ProtocolTest {
             int numBytesWritten = sChannel.write(buf);
 
             Assert.assertTrue("No data was written to socket channel.", numBytesWritten > 0);
-            System.out.println("Bytes Written: " + numBytesWritten);
+            System.out.println("Bytes Written To Buffer: " + numBytesWritten);
+            System.out.println("buf:" + buf.toString());
+            buf.rewind();
+            byte[] data = new byte[12];
+            buf.get(data);
+            for(int i = 0; i < data.length; i ++){
+                System.out.print("[" + data[i] + "]");
+            }
+            System.out.println();
 
         } catch (IOException e) {
             e.printStackTrace();

@@ -43,10 +43,21 @@ public class ProtocolHeader {
     }
 
     public void writeToByteBuffer(ByteBuffer buf) {
-        buf.putShort(command.getCode());
-        buf.putShort(replyToCommand.getCode());
-        buf.putInt(userSpecifiedID);
         buf.putInt(dataLength);
+        buf.putInt(userSpecifiedID);
+        buf.putShort(replyToCommand.getCode());
+        buf.putShort(command.getCode());
     }
+
+    @Override
+    public String toString() {
+        return "ProtocolHeader{" +
+                "command=" + command +
+                ", replyToCommand=" + replyToCommand +
+                ", userSpecifiedID=" + userSpecifiedID +
+                ", dataLength=" + dataLength +
+                '}';
+    }
+
 }
 
