@@ -345,3 +345,81 @@ void node_connect_all(void)
 		}
 	}
 }
+
+
+
+static void node_free(node_t *node)
+{
+	assert(node);
+	assert(node->name);
+	
+	assert(node->client == NULL);
+	assert(node->connect_event == NULL);
+	assert(node->loadlevel_event == NULL);
+	assert(node->wait_event == NULL);
+	assert(node->shutdown_event == NULL);
+	
+	free(node->name);
+	node->name = NULL;
+	
+	free(node);
+}
+
+
+
+
+
+
+static void node_shutdown_handler(evutil_socket_t fd, short what, void *arg) 
+{
+	node_t *node = arg;
+	int i;
+	
+	assert(fd == -1 && arg);
+	assert(node);
+	
+	// if the node is connecting, we have to wait for it to time-out.
+	if (node->connect_event) {
+		assert(node->shutdown_event);
+		evtimer_add(node->shutdown_event, &_timeout_shutdown);
+	}
+	else {
+	
+		// if the node is waiting... cancel it.
+		if (node->wait_event) {
+			assert(0);
+		}
+		
+		// if we can, remove the node from the nodes list.
+		if (node->client) {
+			// the client is still connected.  We need to wait for it to disconnect.
+		}
+		else {
+			
+			for (i=0; i<_node_count; i++) {
+				if (_nodes[i] == node) {
+					_nodes[i] = NULL;
+					break;
+				}
+			}
+			
+			node_free(node);
+		}
+	}
+}
+
+
+
+void node_shutdown(node_t *node)
+{
+	assert(node);
+	
+	if (node->shutdown_event == NULL) {
+		
+		assert(_evbase);
+		node->shutdown_event = evtimer_new(_evbase, node_shutdown_handler, node);
+		assert(node->shutdown_event);
+		evtimer_add(node->shutdown_event, &_timeout_now);
+	}
+}
+

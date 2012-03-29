@@ -286,12 +286,12 @@ void push_sync_item(client_t *client, item_t *item)
 	if (item->value->type == VALUE_INT) {
 		cmd = CMD_SYNC_INT;
 		payload_int(item->value->data.i);
-		printf("[%d] sending MIGRATE_INT: (%08X/%08X)\n", _seconds, item->map_key, item->item_key);
+		printf("[%d] sending MIGRATE_INT: (%08X:%08X, %d)\n", _seconds, item->map_key, item->item_key, item->value->data.i);
 	}
 	else if (item->value->type == VALUE_STRING) {
 		cmd = CMD_SYNC_STRING;
 		payload_data(item->value->data.s.length, item->value->data.s.data);
-		printf("[%d] sending MIGRATE_STRING: (%08X/%08X:'%s')\n", _seconds, item->map_key, item->item_key, item->value->data.s.data);
+		printf("[%d] sending MIGRATE_STRING: (%08X:%08X, '%s')\n", _seconds, item->map_key, item->item_key, item->value->data.s.data);
 	}
 	else {
 		assert(0);

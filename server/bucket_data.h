@@ -45,7 +45,7 @@ void data_free(bucket_data_t *data);
 void data_destroy(bucket_data_t *data, hash_t hash);
 
 value_t * data_get_value(int map_hash, int key_hash, bucket_data_t *ddata);
-void data_set_value(int map_hash, int key_hash, bucket_data_t *ddata, char *name, int name_int, value_t *value, int expires);
+void data_set_value(int map_hash, int key_hash, bucket_data_t *ddata, char *name, int name_int, value_t *value, int expires, client_t *backup_client);
 void data_set_name(hash_t key_hash, bucket_data_t *data, char *name, int name_int);
 int data_migrate_items(client_t *client, bucket_data_t *data, hash_t hash, int limit);
 int data_in_transit(void);

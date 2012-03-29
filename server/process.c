@@ -422,8 +422,6 @@ void process_control_bucket_complete(client_t *client, header_t *header, void *p
 	if (_verbose > 2) 
 		printf("Bucket migration complete: %X\n", hash);
 
-printf("AA\n");
-
 	// do we need to let other nodes that the transfer is complete?
 
 
@@ -438,16 +436,12 @@ printf("AA\n");
 		bucket = NULL;
 	}
 
-printf("BB\n");
-
 	assert(_bucket_transfer == 1);
 	_bucket_transfer = 0;
 
 
 	// now that this migration is complete, we need to ask for loadlevels again.
 	push_loadlevels(client);
-	
-printf("CC\n");
 }
 
 
@@ -495,7 +489,7 @@ void process_sync_name_ack(client_t *client, header_t *header, void *ptr)
 	bucket = _buckets[index];
 	assert(bucket);
 
-	assert(bucket->transfer_client == client);
+	assert(bucket->transfer_client == client || (bucket->backup_node && bucket->backup_node->client == client) );
 	
 	if (_verbose > 2) 
 		printf("Migration of item name complete: %X\n", hash);
@@ -528,7 +522,7 @@ void process_sync_ack(client_t *client, header_t *header, void *ptr)
 	bucket = _buckets[index];
 	assert(bucket);
 
-	assert(bucket->transfer_client == client);
+	assert(bucket->transfer_client == client || (bucket->backup_node && bucket->backup_node->client == client) );
 	
 	data_migrated(bucket->data, map, hash);
 	
