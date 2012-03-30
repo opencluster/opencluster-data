@@ -40,6 +40,8 @@ struct {
 struct event *_stats_event = NULL;
 long long _stat_counter = 0;
 
+// when a SIGHUP is provided, we need to dump some additional information out to the log.
+struct event *_sighup_event = NULL;
 
 
 
@@ -88,11 +90,15 @@ void stats_init(void)
 	memset(&_stats, 0, sizeof(_stats));
 	
 	// need to set hte stats timeout.
+	assert(_stats_event == NULL);
 	_stats_event = evtimer_new(_evbase, stats_handler, NULL);
 	assert(_stats_event);
 	evtimer_add(_stats_event, &_timeout_stats);
 
-	
+	assert(_sighup_event == NULL);
+	_sighup_event = evsignal_new(_evbase, SIGHUP, sighup_handler, NULL);
+	assert(_sighup_event);
+	event_add(_sighup_event, NULL);
 }
 
 
@@ -101,5 +107,11 @@ void stats_shutdown(void)
 	assert(_stats_event);
 	event_free(_stats_event);
 	_stats_event = NULL;
+	
+	if (_sighup_event) {
+		event_free(_sighup_event);
+		_sighup_event = NULL;
+	}
+
 }
 

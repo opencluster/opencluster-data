@@ -69,7 +69,6 @@ unsigned int _mask = 0;
 // signal catchers that are used to clean up, and store final data before 
 // shutting down.
 struct event *_sigint_event = NULL;
-struct event *_sighup_event = NULL;
 
 
 
@@ -208,11 +207,6 @@ static void sigint_handler(evutil_socket_t fd, short what, void *arg)
 	event_free(_sigint_event);
 	_sigint_event = NULL;
 
-	if (_sighup_event) {
-		event_free(_sighup_event);
-		_sighup_event = NULL;
-	}
-	
 	// start the shutdown event.  This timeout event will just keep ticking over until the _shutdown 
 	// value is back down to 0, then it will stop resetting the event, and the loop can exit.... 
 	// therefore shutting down the service completely.
@@ -500,11 +494,8 @@ int main(int argc, char **argv)
 	// initialise signal handlers.
 	assert(_evbase);
 	_sigint_event = evsignal_new(_evbase, SIGINT, sigint_handler, NULL);
-	_sighup_event = evsignal_new(_evbase, SIGHUP, sighup_handler, NULL);
 	assert(_sigint_event);
-	assert(_sighup_event);
 	event_add(_sigint_event, NULL);
-	event_add(_sighup_event, NULL);
 
 	
 	seconds_init();
@@ -553,7 +544,6 @@ int main(int argc, char **argv)
 
 	// make sure signal handlers have been cleared.
 	assert(_sigint_event == NULL);
-	assert(_sighup_event == NULL);
 
 	
 	payload_free();
@@ -568,7 +558,6 @@ int main(int argc, char **argv)
 	
 // 	assert(_conncount == 0);
 	assert(_sigint_event == NULL);
-	assert(_sighup_event == NULL);
 	assert(_evbase == NULL);
 	
 	return 0;
