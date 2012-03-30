@@ -654,7 +654,7 @@ void data_migrated(bucket_data_t *data, hash_t map_hash, hash_t key_hash)
 		if (item) {
 			// item is found, return with the data.
 			assert(item->value);
-			assert(item->migrate == _migrate_sync);
+			assert(item->migrate == _migrate_sync || item->migrate == 0);
 		}
 	}
 #endif

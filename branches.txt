@@ -1,12 +1,27 @@
-THis file provides some information about active branches in the repository.
+This file provides some information about active branches in the repository.
 
 server-sync
 	This branch is to ensure that when nodes are connected to the cluster, they send communications 
 	to the backup nodes of any changes to buckets.
 
+stats-dump
+	SIGHUP should trigger a dump of as much info as possible, including the hashmasks for buckets in 
+	the server, the list of other server nodes, and some stats on the amount of data stored.
+
+verify-cluster
+	make sure that the migration is moving the buckets evenly, and that clients are getting the 
+	right information.   When a migration is completed, make sure the client is asking the server 
+	for the right information.
+
+empty-migrate
+	Make sure that the cluster can migrate empty buckets.  There was an issue with this when doing 
+	tests, so it should be looked at.  It makes sense that a number of cluster nodes would likely 
+	be started before any data is put in them.
+
 system-logging
 	Rather than printing to the output stream, we need to log certain info to a logfile that gets 
-	renamed when it gets too big.  The log data can be output using an event.
+	renamed when it gets too big.  The log data can be output using an event.  SIGUSR1 and SIGUSR2 
+	should be used to increase or decrease the logging level during runtime.
 
 shutdown
 	Better handling of the system shutdown.  When a Ctrl-C signal is received it should fire up 
@@ -17,7 +32,27 @@ shutdown
 	down and manage themselves doing it.  Need to be careful about dropping node connections that we 
 	need to send buckets away.
 
+shutdown-migrate
+	When a node is being shutdown, it needs to send the buckets to another node.
+
 data-logging
 	A special node can connect to the cluster that logs all the updates that occur.  It logs the 
 	output to a series of files.  It can also be used to re-inject that logged data into a cluster.
+
+savefile
+	when a node is shutting down, it will normally attempt to send the buckets it has to another
+	node in the cluster.  If there are no other nodes, the data should instead be saved to a file, 
+	that can then be used to inject the data back in when the cluster is restarted.   The file-save 
+	option would be present from start, but it will only write to the file if it is the last one in 
+	the cluster.   The daemon can inject the data into the cluster on startup.
+
+client-shutdown
+	The C client is not shutting down properly when more than one node connection has been 
+	established.  This is seen when one node is started, gamut is run, another node is started, wait 
+	for migration to complete, another gamut is run.
+
+client-maps
+	The C client does not handle maps properly (or at all), so it needs to be able to use maps.
+
+
 
