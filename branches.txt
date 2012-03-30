@@ -1,9 +1,5 @@
 This file provides some information about active branches in the repository.
 
-server-sync
-	This branch is to ensure that when nodes are connected to the cluster, they send communications 
-	to the backup nodes of any changes to buckets.
-
 stats-dump
 	SIGHUP should trigger a dump of as much info as possible, including the hashmasks for buckets in 
 	the server, the list of other server nodes, and some stats on the amount of data stored.
