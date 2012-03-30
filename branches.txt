@@ -1,5 +1,10 @@
 This file provides some information about active branches in the repository.
 
+system-logging
+	Rather than printing to the output stream, we need to log certain info to a logfile that gets 
+	renamed when it gets too big.  The log data can be output using an event.  SIGUSR1 and SIGUSR2 
+	should be used to increase or decrease the logging level during runtime.
+
 stats-dump
 	SIGHUP should trigger a dump of as much info as possible, including the hashmasks for buckets in 
 	the server, the list of other server nodes, and some stats on the amount of data stored.
@@ -13,11 +18,6 @@ empty-migrate
 	Make sure that the cluster can migrate empty buckets.  There was an issue with this when doing 
 	tests, so it should be looked at.  It makes sense that a number of cluster nodes would likely 
 	be started before any data is put in them.
-
-system-logging
-	Rather than printing to the output stream, we need to log certain info to a logfile that gets 
-	renamed when it gets too big.  The log data can be output using an event.  SIGUSR1 and SIGUSR2 
-	should be used to increase or decrease the logging level during runtime.
 
 shutdown
 	Better handling of the system shutdown.  When a Ctrl-C signal is received it should fire up 
