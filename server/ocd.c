@@ -94,119 +94,10 @@ struct event *_shutdown_event = NULL;
 
 
 
-//--------------------------------------------------------------------------------------------------
-// NOTE: there is no real reason why we need a transfer event.  Instead we will send one item at a 
-//       time to the other server, and we will use the 'ack' as a trigger to send the next item.
-static void bucket_transfer_handler(evutil_socket_t fd, short what, void *arg)
-{
-	int waiting = 0;
-	bucket_t *bucket = arg;
-	
-	assert(fd == -1);
-	assert(what & EV_TIMEOUT);
-	assert(bucket);
-
-	if (_verbose) printf("Bucket transfer handler\n");
-
-	// check the state of the bucket.  If it is a backup bucket, then we can delete it.
-	if (bucket->level > 0) {
-		assert(bucket->transfer_client == NULL);
-		bucket_destroy(bucket);
-	}
-	
-	// if it is a primary bucket, and does not have any backup buckets, and there are no nodes, then 
-	// delete the bucket.
-	assert(0);
-	
-	if (waiting > 0) {
-		if (_verbose) printf("WAITING FOR BUCKET (%d).\n", bucket->hash);
-		evtimer_add(_shutdown_event, &_timeout_seconds);
-	}
-	else {
-		// the bucket is done.
-		assert(bucket->transfer_event);
-		event_free(bucket->transfer_event);
-		bucket->transfer_event = NULL;
-	}
-}
 
 
 
 
-// I assume that this is supposed to push out the details of an adjusted hash to all the clients 
-// (and therefore nodes).
-static void all_push_hashmask(hash_t hash)
-{
-	int i;
-	
-	assert(_mask > 0);
-
-	for (i=0; i<_client_count; i++) {
-		if (_clients[i]) {
-			assert(0);
-		}
-	}
-}
-
-
-
-
-static void node_free(node_t *node)
-{
-	assert(node);
-	assert(node->name);
-	
-	assert(node->client == NULL);
-	assert(node->connect_event == NULL);
-	assert(node->loadlevel_event == NULL);
-	assert(node->wait_event == NULL);
-	assert(node->shutdown_event == NULL);
-	
-	free(node->name);
-	node->name = NULL;
-	
-	free(node);
-}
-
-
-
-static void node_shutdown_handler(evutil_socket_t fd, short what, void *arg) 
-{
-	node_t *node = arg;
-	int i;
-	
-	assert(fd == -1 && arg);
-	assert(node);
-	
-	// if the node is connecting, we have to wait for it to time-out.
-	if (node->connect_event) {
-		assert(node->shutdown_event);
-		evtimer_add(node->shutdown_event, &_timeout_shutdown);
-	}
-	else {
-	
-		// if the node is waiting... cancel it.
-		if (node->wait_event) {
-			assert(0);
-		}
-		
-		// if we can, remove the node from the nodes list.
-		if (node->client) {
-			// the client is still connected.  We need to wait for it to disconnect.
-		}
-		else {
-			
-			for (i=0; i<_node_count; i++) {
-				if (_nodes[i] == node) {
-					_nodes[i] = NULL;
-					break;
-				}
-			}
-			
-			node_free(node);
-		}
-	}
-}
 
 
 
@@ -226,13 +117,9 @@ static void shutdown_handler(evutil_socket_t fd, short what, void *arg)
 	for (i=0; i<_node_count; i++) {
 		if (_nodes[i]) {
 			waiting++;
-			if (_nodes[i]->shutdown_event == NULL) {
-				
-				assert(_evbase);
-				_nodes[i]->shutdown_event = evtimer_new(_evbase, node_shutdown_handler, _nodes[i]);
-				assert(_nodes[i]->shutdown_event);
-				evtimer_add(_nodes[i]->shutdown_event, &_timeout_now);
-	}	}	}
+			node_shutdown(_nodes[i]);
+		}	
+	}
 	
 	assert(_node_count >= 0);
 	if (_node_count > 0) {
@@ -299,9 +186,6 @@ static void shutdown_handler(evutil_socket_t fd, short what, void *arg)
 		stats_shutdown();
 	}
 }
-
-
-
 
 
 

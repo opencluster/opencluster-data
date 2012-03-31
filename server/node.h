@@ -25,12 +25,14 @@ void node_detach_client(node_t *node);
 void node_retry(node_t *node);
 node_t * node_find(char *name);
 node_t * node_add(client_t *client, char *name);
+void node_shutdown(node_t *node);
 
 void node_loadlevel_handler(int fd, short int flags, void *arg);
 
 int node_active_inc(void);
 int node_active_dec(void);
 int node_active_count(void);
+
 
 
 

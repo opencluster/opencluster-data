@@ -324,7 +324,7 @@ static maplist_t * list_new(hash_t key_hash)
 // the control of 'value' is given to this function.
 // NOTE: value is controlled by the tree after this function call.
 // NOTE: name is controlled by the tree after this function call.
-void data_set_value(int map_hash, int key_hash, bucket_data_t *ddata, char *name, int name_int, value_t *value, int expires) 
+void data_set_value(int map_hash, int key_hash, bucket_data_t *ddata, char *name, int name_int, value_t *value, int expires, client_t *backup_client) 
 {
 	maplist_t *list;
 	item_t *item = NULL;
@@ -345,7 +345,12 @@ void data_set_value(int map_hash, int key_hash, bucket_data_t *ddata, char *name
 		
 		list = list_new(key_hash);
 		g_tree_insert(ddata->tree, &list->item_key, list);
-		
+
+				// this item didn't exist, so if we are doing a sync, we also need to let the backup_node know about the name of this item.
+		if (backup_client) {
+			push_sync_name(backup_client, key_hash, name, name_int);
+		}
+
 		assert(list->name == NULL);
 		list->name = name;
 		list->int_key = name_int;
@@ -394,6 +399,10 @@ void data_set_value(int map_hash, int key_hash, bucket_data_t *ddata, char *name
 		item->migrate = 0;
 		
 		g_tree_insert(list->mapstree, &item->map_key, item);
+		
+		if (backup_client) {
+			push_sync_item(backup_client, item);
+		}
 	}
 
 	assert(name == NULL);
@@ -645,7 +654,7 @@ void data_migrated(bucket_data_t *data, hash_t map_hash, hash_t key_hash)
 		if (item) {
 			// item is found, return with the data.
 			assert(item->value);
-			assert(item->migrate == _migrate_sync);
+			assert(item->migrate == _migrate_sync || item->migrate == 0);
 		}
 	}
 #endif

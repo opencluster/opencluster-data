@@ -97,6 +97,7 @@ int buckets_store_value(int map_hash, int key_hash, char *name, int name_int, in
 {
 	int bucket_index;
 	bucket_t *bucket;
+	client_t *backup_client;
 
 		// calculate the bucket that this item belongs in.
 	bucket_index = _mask & key_hash;
@@ -107,7 +108,15 @@ int buckets_store_value(int map_hash, int key_hash, char *name, int name_int, in
 	// if we have a record for this bucket, then we are (potentially) either a primary or a backup for it.
 	if (bucket) {
 		assert(bucket->hash == bucket_index);
-		data_set_value(map_hash, key_hash, bucket->data, name, name_int, value, expires);
+		if (bucket->backup_node) {
+			backup_client = bucket->backup_node->client;
+			assert(backup_client);
+		}
+		else {
+			backup_client = NULL;
+		}
+		
+		data_set_value(map_hash, key_hash, bucket->data, name, name_int, value, expires, backup_client);
 		return(0);
 	}
 	else {
