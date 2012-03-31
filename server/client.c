@@ -432,8 +432,8 @@ static void read_handler(int fd, short int flags, void *arg)
 			if (_verbose > 2) {
 				pp =  client->in.buffer + client->in.offset;
 				printf("Data received.  length=%d\n", res);
-				for (processed=0; processed < res; processed++) {
-					printf("  %04d: %02X\n", processed, pp[processed]);
+				for (processed=0; processed < res; processed++, pp++) {
+					printf("  %04d: %02X (%d)\n", processed, *pp, *pp);
 				}
 				
 			}
