@@ -140,7 +140,7 @@ void client_free(client_t *client)
 	assert(client);
 	assert(client->transfer_bucket == NULL);
 	
-	if (_verbose >= 2) printf("[%u] client_free: handle=%d\n", _seconds, client->handle);
+	if (_verbose >= 2) printf("[%u] client_free: handle=%d, in_len=%d(%d), out_len=%d(%d)\n", _seconds, client->handle, client->in.length, client->in.offset, client->out.length, client->out.offset);
 
 	if (client->node) {
 		node_detach_client(client->node);
@@ -372,6 +372,7 @@ static void read_handler(int fd, short int flags, void *arg)
 	int avail;
 	int res;
 	int processed;
+	unsigned char *pp;
 	
 	assert(fd >= 0);
 	assert(flags != 0);
@@ -427,6 +428,15 @@ static void read_handler(int fd, short int flags, void *arg)
 		if (res > 0) {
 			
 			client->timeout = 0;
+			
+			if (_verbose > 2) {
+				pp =  client->in.buffer + client->in.offset;
+				printf("Data received.  length=%d\n", res);
+				for (processed=0; processed < res; processed++) {
+					printf("  %04d: %02X\n", processed, pp[processed]);
+				}
+				
+			}
 			
 			// got some data.
 			assert(res <= avail);
