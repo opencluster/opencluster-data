@@ -154,6 +154,15 @@ void client_free(client_t *client)
 		client->out.max = 0;
 	}
 
+        if (client->in.length >= 0 && _verbose > 2) {
+                pp =  client->in.buffer + client->in.offset;
+                printf("Data received.  length=%d\n", res);
+                for (processed=0; processed < res; processed++, pp++) {
+                        printf("  %04d: %02X (%d)\n", processed, *pp, *pp);
+                }
+        }
+
+
 	assert(client->in.length == 0);
 	assert(client->in.offset == 0);
 	if (client->in.buffer) {
@@ -254,6 +263,7 @@ static int process_data(client_t *client)
 		// least that.
 		if (client->in.length < HEADER_SIZE) {
 			// we didn't have enough, even for the header, so we are stopping.
+                        printf("[process_data] There wasn't enough data to build anything so not processing the buffer. in.length=%d",client->in.length);
 			stopped = 1;
 		}
 		else {
