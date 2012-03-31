@@ -5,9 +5,18 @@ system-logging
 	renamed when it gets too big.  The log data can be output using an event.  SIGUSR1 and SIGUSR2 
 	should be used to increase or decrease the logging level during runtime.
 
+rawdata-logging
+	Brian has requested that the raw socket data gets logged to the logfile.  I will create an extra layer of 
+	logging called DEBUG_EXTRA which shows more lowlevel data than regular DEBUG level.
+
 stats-dump
 	SIGHUP should trigger a dump of as much info as possible, including the hashmasks for buckets in 
 	the server, the list of other server nodes, and some stats on the amount of data stored.
+
+command-callback
+	The current method of parsing the commands and replies is a switch statement.  However, an array 
+	of similar callback functions might be better.  They would get setup when the daemon is starting 
+	up.  An array lookup should be a touch faster than a bunch of IF statements.
 
 verify-cluster
 	make sure that the migration is moving the buckets evenly, and that clients are getting the 
