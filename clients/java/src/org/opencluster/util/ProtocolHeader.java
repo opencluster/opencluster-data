@@ -43,10 +43,10 @@ public class ProtocolHeader {
     }
 
     public void writeToByteBuffer(ByteBuffer buf) {
-        buf.putInt(dataLength);
-        buf.putInt(userSpecifiedID);
-        buf.putShort(replyToCommand.getCode());
         buf.putShort(command.getCode());
+        buf.putShort(replyToCommand.getCode());
+        buf.putInt(userSpecifiedID);
+        buf.putInt(dataLength);
     }
 
     @Override

@@ -15,8 +15,9 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="a7b8e9f7-edc6-48ae-b84c-8334b5fd8346" name="Default" comment="">
+      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/clients/java/src/org/opencluster/util/ProtocolCommand.java" afterPath="$PROJECT_DIR$/clients/java/src/org/opencluster/util/ProtocolCommand.java" />
+      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/clients/java/src/org/opencluster/util/ProtocolHeader.java" afterPath="$PROJECT_DIR$/clients/java/src/org/opencluster/util/ProtocolHeader.java" />
       <change type="MODIFICATION" beforePath="$PROJECT_DIR$/clients/java/test/org/opencluster/ProtocolTest.java" afterPath="$PROJECT_DIR$/clients/java/test/org/opencluster/ProtocolTest.java" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/opencluster.ipr" afterPath="$PROJECT_DIR$/opencluster.ipr" />
       <change type="MODIFICATION" beforePath="$PROJECT_DIR$/opencluster.iws" afterPath="$PROJECT_DIR$/opencluster.iws" />
     </list>
     <list id="7499b0e0-1616-4fba-8726-257ade6d39eb" name="ignorethese" comment="" />
@@ -43,19 +44,6 @@
   <component name="DebuggerManager">
     <line_breakpoints>
       <breakpoint url="file://$PROJECT_DIR$/clients/java/test/org/opencluster/ProtocolTest.java" line="42" class="org.opencluster.ProtocolTest" package="org.opencluster">
-        <option name="ENABLED" value="true" />
-        <option name="LOG_ENABLED" value="false" />
-        <option name="LOG_EXPRESSION_ENABLED" value="false" />
-        <option name="SUSPEND_POLICY" value="SuspendAll" />
-        <option name="COUNT_FILTER_ENABLED" value="false" />
-        <option name="COUNT_FILTER" value="0" />
-        <option name="CONDITION_ENABLED" value="false" />
-        <option name="CLASS_FILTERS_ENABLED" value="false" />
-        <option name="INSTANCE_FILTERS_ENABLED" value="false" />
-        <option name="CONDITION" value="" />
-        <option name="LOG_MESSAGE" value="" />
-      </breakpoint>
-      <breakpoint url="file://$PROJECT_DIR$/clients/java/test/org/opencluster/ProtocolTest.java" line="154" class="org.opencluster.ProtocolTest" package="org.opencluster">
         <option name="ENABLED" value="true" />
         <option name="LOG_ENABLED" value="false" />
         <option name="LOG_EXPRESSION_ENABLED" value="false" />
@@ -112,7 +100,7 @@
       <file leaf-file-name="binary-protocol.txt" pinned="false" current="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/docs/binary-protocol.txt">
           <provider selected="true" editor-type-id="text-editor">
-            <state line="98" column="54" selection-start="3969" selection-end="3969" vertical-scroll-proportion="0.0">
+            <state line="123" column="49" selection-start="5350" selection-end="5350" vertical-scroll-proportion="0.0">
               <folding />
             </state>
           </provider>
@@ -121,16 +109,16 @@
       <file leaf-file-name="ProtocolHeader.java" pinned="false" current="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/clients/java/src/org/opencluster/util/ProtocolHeader.java">
           <provider selected="true" editor-type-id="text-editor">
-            <state line="28" column="100" selection-start="986" selection-end="986" vertical-scroll-proportion="0.0">
+            <state line="39" column="26" selection-start="1376" selection-end="1376" vertical-scroll-proportion="0.0">
               <folding />
             </state>
           </provider>
         </entry>
       </file>
-      <file leaf-file-name="ProtocolCommand.java" pinned="false" current="false" current-in-tab="false">
+      <file leaf-file-name="ProtocolCommand.java" pinned="false" current="true" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/clients/java/src/org/opencluster/util/ProtocolCommand.java">
           <provider selected="true" editor-type-id="text-editor">
-            <state line="33" column="11" selection-start="1558" selection-end="1558" vertical-scroll-proportion="0.0">
+            <state line="34" column="36" selection-start="1583" selection-end="1583" vertical-scroll-proportion="0.29411766">
               <folding />
             </state>
           </provider>
@@ -145,10 +133,10 @@
           </provider>
         </entry>
       </file>
-      <file leaf-file-name="ProtocolTest.java" pinned="false" current="true" current-in-tab="true">
+      <file leaf-file-name="ProtocolTest.java" pinned="false" current="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/clients/java/test/org/opencluster/ProtocolTest.java">
           <provider selected="true" editor-type-id="text-editor">
-            <state line="35" column="22" selection-start="1014" selection-end="1014" vertical-scroll-proportion="0.19473082">
+            <state line="73" column="42" selection-start="2214" selection-end="2214" vertical-scroll-proportion="0.0">
               <folding />
             </state>
           </provider>
@@ -208,10 +196,10 @@
         <option value="$PROJECT_DIR$/misc/hashtest.java" />
         <option value="$PROJECT_DIR$/clients/java/src/org/opencluster/util/ClusteredBoolean.java" />
         <option value="$PROJECT_DIR$/clients/java/test/org/opencluster/util/ClusteredBooleanTest.java" />
-        <option value="$PROJECT_DIR$/clients/java/src/org/opencluster/util/ProtocolCommand.java" />
         <option value="$PROJECT_DIR$/clients/java/test/org/opencluster/ConnectToServerTest.java" />
         <option value="$PROJECT_DIR$/clients/java/src/org/opencluster/util/ProtocolHeader.java" />
         <option value="$PROJECT_DIR$/clients/java/test/org/opencluster/ProtocolTest.java" />
+        <option value="$PROJECT_DIR$/clients/java/src/org/opencluster/util/ProtocolCommand.java" />
       </list>
     </option>
   </component>
@@ -752,14 +740,14 @@
       </extension>
       <module name="clients-java" />
       <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="false" />
-      <option name="ALTERNATIVE_JRE_PATH" />
+      <option name="ALTERNATIVE_JRE_PATH" value="" />
       <option name="PACKAGE_NAME" value="org.opencluster" />
       <option name="MAIN_CLASS_NAME" value="org.opencluster.ProtocolTest" />
       <option name="METHOD_NAME" value="ConnectAndSendHello" />
       <option name="TEST_OBJECT" value="method" />
-      <option name="VM_PARAMETERS" />
-      <option name="PARAMETERS" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="VM_PARAMETERS" value="" />
+      <option name="PARAMETERS" value="" />
+      <option name="WORKING_DIRECTORY" value="file://$PROJECT_DIR$" />
       <option name="ENV_VARIABLES" />
       <option name="PASS_PARENT_ENVS" value="true" />
       <option name="TEST_SEARCH_SCOPE">
@@ -813,7 +801,11 @@
       <created>1320477088414</created>
       <updated>1320495057784</updated>
     </task>
-    <option name="localTasksCounter" value="2" />
+    <task id="LOCAL-00002" summary="committing mid hack around">
+      <created>1333184954894</created>
+      <updated>1333184954894</updated>
+    </task>
+    <option name="localTasksCounter" value="3" />
     <servers />
   </component>
   <component name="TodoView">
@@ -857,7 +849,7 @@
       <window_info id="Maven Projects" active="false" anchor="right" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.33" sideWeight="0.5" order="6" side_tool="false" content_ui="tabs" />
       <window_info id="Commander" active="false" anchor="right" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.3997862" sideWeight="0.5" order="9" side_tool="false" content_ui="tabs" />
       <window_info id="Project" active="false" anchor="left" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" weight="0.3276414" sideWeight="0.6714922" order="0" side_tool="false" content_ui="combo" />
-      <window_info id="Run" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.32850778" sideWeight="0.5" order="2" side_tool="false" content_ui="tabs" />
+      <window_info id="Run" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" weight="0.32850778" sideWeight="0.5" order="2" side_tool="false" content_ui="tabs" />
       <window_info id="Springbok" active="false" anchor="right" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.33" sideWeight="0.5" order="7" side_tool="false" content_ui="tabs" />
       <window_info id="Phing Build" active="false" anchor="right" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.33" sideWeight="0.5" order="8" side_tool="false" content_ui="tabs" />
       <window_info id="Hierarchy" active="false" anchor="right" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.25" sideWeight="0.5" order="1" side_tool="false" content_ui="combo" />
@@ -907,7 +899,7 @@
     <option name="SHOW_VCS_ERROR_NOTIFICATIONS" value="true" />
     <option name="FORCE_NON_EMPTY_COMMENT" value="false" />
     <option name="CLEAR_INITIAL_COMMIT_MESSAGE" value="false" />
-    <option name="LAST_COMMIT_MESSAGE" value="committing where I am at before I start hacking around" />
+    <option name="LAST_COMMIT_MESSAGE" value="committing mid hack around" />
     <option name="MAKE_NEW_CHANGELIST_ACTIVE" value="true" />
     <option name="OPTIMIZE_IMPORTS_BEFORE_PROJECT_COMMIT" value="false" />
     <option name="CHECK_FILES_UP_TO_DATE_BEFORE_COMMIT" value="false" />
@@ -931,6 +923,7 @@
     <MESSAGE value="with and without the +i" />
     <MESSAGE value="Start of building test cases around the protocol piece" />
     <MESSAGE value="committing where I am at before I start hacking around" />
+    <MESSAGE value="committing mid hack around" />
   </component>
   <component name="VssConfiguration">
     <option name="CLIENT_PATH" value="" />
@@ -999,26 +992,6 @@
         <state line="16" column="64" selection-start="483" selection-end="483" vertical-scroll-proportion="0.0" />
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/docs/binary-protocol.txt">
-      <provider selected="true" editor-type-id="text-editor">
-        <state line="98" column="54" selection-start="3969" selection-end="3969" vertical-scroll-proportion="0.0" />
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/clients/java/src/org/opencluster/util/ProtocolHeader.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state line="28" column="100" selection-start="986" selection-end="986" vertical-scroll-proportion="0.0" />
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/clients/java/src/org/opencluster/util/ProtocolCommand.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state line="33" column="11" selection-start="1558" selection-end="1558" vertical-scroll-proportion="0.0" />
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/clients/java/test/org/opencluster/ConnectToServerTest.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state line="38" column="30" selection-start="1161" selection-end="1161" vertical-scroll-proportion="0.0" />
-      </provider>
-    </entry>
     <entry file="jar://$PROJECT_DIR$/clients/java/lib/junit/junit-4.10-src.jar!/org/junit/runners/model/FrameworkMethod.java">
       <provider selected="true" editor-type-id="text-editor">
         <state line="54" column="29" selection-start="1482" selection-end="1482" vertical-scroll-proportion="0.0">
@@ -1065,9 +1038,35 @@
         </state>
       </provider>
     </entry>
+    <entry file="file://$PROJECT_DIR$/docs/binary-protocol.txt">
+      <provider selected="true" editor-type-id="text-editor">
+        <state line="123" column="49" selection-start="5350" selection-end="5350" vertical-scroll-proportion="0.0">
+          <folding />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/clients/java/src/org/opencluster/util/ProtocolHeader.java">
+      <provider selected="true" editor-type-id="text-editor">
+        <state line="39" column="26" selection-start="1376" selection-end="1376" vertical-scroll-proportion="0.0">
+          <folding />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/clients/java/test/org/opencluster/ConnectToServerTest.java">
+      <provider selected="true" editor-type-id="text-editor">
+        <state line="38" column="30" selection-start="1161" selection-end="1161" vertical-scroll-proportion="0.0" />
+      </provider>
+    </entry>
     <entry file="file://$PROJECT_DIR$/clients/java/test/org/opencluster/ProtocolTest.java">
       <provider selected="true" editor-type-id="text-editor">
-        <state line="35" column="22" selection-start="1014" selection-end="1014" vertical-scroll-proportion="0.19473082">
+        <state line="73" column="42" selection-start="2214" selection-end="2214" vertical-scroll-proportion="0.0">
+          <folding />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/clients/java/src/org/opencluster/util/ProtocolCommand.java">
+      <provider selected="true" editor-type-id="text-editor">
+        <state line="34" column="36" selection-start="1583" selection-end="1583" vertical-scroll-proportion="0.29411766">
           <folding />
         </state>
       </provider>

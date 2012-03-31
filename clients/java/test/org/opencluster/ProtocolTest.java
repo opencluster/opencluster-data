@@ -71,25 +71,26 @@ public class ProtocolTest {
 
         readFromSocketChannel(sChannel);
 
-        header = new ProtocolHeader(ProtocolCommand.GOODBYE);
-
-        writeHeaderToConnection(sChannel, header);
-
-        try {
-            System.out.println("Pausing for 5 seconds");
-            Thread.sleep(5000L);
-        } catch (InterruptedException e) {
-            //
-        }
-
-        readFromSocketChannel(sChannel);
-
-        try {
-            System.out.println("Pausing for 5 seconds");
-            Thread.sleep(5000L);
-        } catch (InterruptedException e) {
-            //
-        }
+        // Good bye is no longer supported
+//        header = new ProtocolHeader(ProtocolCommand.GOODBYE);
+//
+//        writeHeaderToConnection(sChannel, header);
+//
+//        try {
+//            System.out.println("Pausing for 5 seconds");
+//            Thread.sleep(5000L);
+//        } catch (InterruptedException e) {
+//            //
+//        }
+//
+//        readFromSocketChannel(sChannel);
+//
+//        try {
+//            System.out.println("Pausing for 5 seconds");
+//            Thread.sleep(5000L);
+//        } catch (InterruptedException e) {
+//            //
+//        }
 
         System.out.println("Closing the connection.");
         closeConnection(sChannel);
