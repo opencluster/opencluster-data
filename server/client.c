@@ -9,6 +9,7 @@
 #include "constants.h"
 #include "globals.h"
 #include "header.h"
+#include "logging.h"
 #include "node.h"
 #include "process.h"
 #include "protocol.h"
@@ -117,7 +118,7 @@ void client_accept(client_t *client, evutil_socket_t handle, struct sockaddr *ad
 	assert(client->handle < 0);
 	client->handle = handle;
 	
-	if (_verbose) printf("[%u] New client - handle=%d\n", _seconds, handle);
+	logger(LOG_INFO, "New client - handle=%d", handle);
 
 	assert(_evbase);
 	assert(client->handle > 0);
@@ -140,7 +141,7 @@ void client_free(client_t *client)
 	assert(client);
 	assert(client->transfer_bucket == NULL);
 	
-	if (_verbose >= 2) printf("[%u] client_free: handle=%d\n", _seconds, client->handle);
+	logger(LOG_INFO, "client_free: handle=%d", client->handle);
 
 	if (client->node) {
 		node_detach_client(client->node);
@@ -196,8 +197,7 @@ void client_free(client_t *client)
 				resize ++;
 	}	}	}
 	
-	if (_verbose > 0) 
-		printf("[%u] found:%d, client_count:%d\n", _seconds, found, _client_count);
+	logger(LOG_INFO, "found:%d, client_count:%d", found, _client_count);
 	
 	assert(found == 1);
 	
@@ -269,11 +269,10 @@ static int process_data(client_t *client)
 			header.userid = ntohl(raw->userid);
 			header.length = ntohl(raw->length);
 			
-			if (_verbose > 4) {
-				printf("[%u] New telegram: Command=%d, repcmd=%d, userid=%d, length=%d, buffer_length=%d\n", 
-					_seconds, header.command, header.repcmd, 
+			
+			logger(LOG_DEBUG, "New telegram: Command=%d, repcmd=%d, userid=%d, length=%d, buffer_length=%d", 
+					header.command, header.repcmd, 
 					header.userid, header.length, client->in.length);
-			}
 			
 			if ((client->in.length-HEADER_SIZE) < header.length) {
 				// we dont have enough data yet.
@@ -297,11 +296,9 @@ static int process_data(client_t *client)
 						case REPLY_CONTROL_BUCKET_COMPLETE: process_control_bucket_complete(client, &header, ptr);	break;
 						case REPLY_UNKNOWN:				process_unknown(client, &header); 				break;
 						default:
-							if (_verbose > 1) {
-								printf("[%u] Unknown reply: Reply=%d, Command=%d, userid=%d, length=%d\n", 
-									_seconds, header.repcmd, header.command, header.userid, header.length);
+							logger(LOG_ERROR, "Unknown reply: Reply=%d, Command=%d, userid=%d, length=%d", 
+									header.repcmd, header.command, header.userid, header.length);
 								
-							}
 #ifndef NDEBUG
 assert(0);
 #endif							
@@ -330,7 +327,7 @@ assert(0);
 							// got an invalid command, so we need to reply with an 'unknown' reply.
 							// since we have the raw command still in our buffer, we can use that 
 							// without having to build a normal reply.
-							if (_verbose > 1) { printf("[%u] Unknown command received: Command=%d, userid=%d, length=%d\n", _seconds, header.command, header.userid, header.length); }
+							logger(LOG_ERROR, "Unknown command received: Command=%d, userid=%d, length=%d", header.command, header.userid, header.length);
 							client_send_message(client, &header, REPLY_UNKNOWN, 0, NULL);
 #ifndef NDEBUG
 assert(0);
@@ -386,9 +383,8 @@ static void read_handler(int fd, short int flags, void *arg)
 		if (client->timeout >= client->timeout_limit) {
 		
 			// we timed out, so we should kill the client.
-			if (_verbose > 2) {
-				printf("[%u] client timed out. handle=%d\n", _seconds, fd);
-			}
+			logger(LOG_ERROR, "client timed out. handle=%d", fd);
+
 			
 			// because the client has timed out, we need to clear out any data that we currently 
 			// have for it.
@@ -440,7 +436,7 @@ static void read_handler(int fd, short int flags, void *arg)
 		}
 		else {
 			// the connection was closed, or there was an error.
-			if (_verbose > 2)  printf("socket %d closed. res=%d, errno=%d,'%s'\n", fd, res, errno, strerror(errno));
+			logger(LOG_ERROR, "socket %d closed. res=%d, errno=%d,'%s'", fd, res, errno, strerror(errno));
 			
 			// free the client resources.
 			if (client->node) {

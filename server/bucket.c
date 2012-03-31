@@ -6,6 +6,7 @@
 
 #include "globals.h"
 #include "item.h"
+#include "logging.h"
 #include "push.h"
 #include "timeout.h"
 
@@ -203,7 +204,7 @@ void buckets_split_mask(int mask)
 	
 	assert(mask > _mask);
 	
-	if (_verbose > 1) printf("Splitting bucket list: oldmask=%08X, newmask=%08X\n", _mask, mask);
+	logger(LOG_INFO, "Splitting bucket list: oldmask=%08X, newmask=%08X", _mask, mask);
 	
 	// first grab a copy of the existing hashmasks as the 'oldlist'
 	oldlist = _hashmasks;
