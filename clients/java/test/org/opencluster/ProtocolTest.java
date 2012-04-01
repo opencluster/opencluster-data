@@ -7,6 +7,7 @@ import org.opencluster.util.ProtocolHeader;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.SocketOption;
 import java.net.StandardSocketOptions;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
@@ -39,6 +40,8 @@ public class ProtocolTest {
 
         writeHeaderToConnection(sChannel, header);
 
+        readFromSocketChannel(sChannel);
+
         closeConnection(sChannel);
 
     }
@@ -55,14 +58,90 @@ public class ProtocolTest {
 
         ProtocolHeader header = new ProtocolHeader(ProtocolCommand.HELLO);
 
-        writeHeaderToConnection(sChannel, header);
-
-        header = new ProtocolHeader(ProtocolCommand.GOODBYE);
+        System.out.println(header.toString());
 
         writeHeaderToConnection(sChannel, header);
 
+        try {
+            System.out.println("Pausing for 5 seconds");
+            Thread.sleep(5000L);
+        } catch (InterruptedException e) {
+            //
+        }
+
+        readFromSocketChannel(sChannel);
+
+        // Good bye is no longer supported
+//        header = new ProtocolHeader(ProtocolCommand.GOODBYE);
+//
+//        writeHeaderToConnection(sChannel, header);
+//
+//        try {
+//            System.out.println("Pausing for 5 seconds");
+//            Thread.sleep(5000L);
+//        } catch (InterruptedException e) {
+//            //
+//        }
+//
+//        readFromSocketChannel(sChannel);
+//
+//        try {
+//            System.out.println("Pausing for 5 seconds");
+//            Thread.sleep(5000L);
+//        } catch (InterruptedException e) {
+//            //
+//        }
+
+        System.out.println("Closing the connection.");
         closeConnection(sChannel);
 
+    }
+
+    private void readFromSocketChannel(SocketChannel sChannel) {
+        // Create a direct buffer to get bytes from socket.
+        // Direct buffers should be long-lived and be reused as much as possible.
+        int numBytesRead = 0;
+        do {
+            ByteBuffer buf = ByteBuffer.allocateDirect(1024);
+
+            try {
+                // Clear the buffer and read bytes from socket
+                buf.clear();
+                numBytesRead = sChannel.read(buf);
+
+                // Get the ByteBuffer's capacity
+                int capacity = buf.capacity(); // 10
+
+
+                if (numBytesRead == -1) {
+                    // No more bytes can be read from the channel
+                    // do nothing
+                    System.out.println("No more data to read from channel.");
+                } else {
+
+                    // To read the bytes, flip the buffer
+                    buf.flip();
+
+                    // Read the bytes from the buffer ...;
+                    // see Getting Bytes from a ByteBuffer
+                    buf.rewind();
+
+                    if (buf.limit() > 0) {
+                        System.out.println();
+                        System.out.println("Read data from Socket Channel");
+
+                        System.out.println("buf:" + buf.toString());
+                        for (int i = 0; i < buf.limit(); i++) {
+                            System.out.print("[" + buf.get(i) + "]");
+                        }
+                        System.out.println();
+                    }
+                }
+            } catch (IOException e) {
+                System.out.println("IO Exception occurred.");
+                e.printStackTrace();
+            }
+        } while (numBytesRead > 0);
     }
 
     private void writeHeaderToConnection(SocketChannel sChannel, ProtocolHeader header) {
@@ -76,15 +155,25 @@ public class ProtocolTest {
             // Prepare the buffer for reading by the socket
             buf.flip();
 
+            System.out.println("Bytes in buffer: " + buf.limit());
+
             // Write bytes
             int numBytesWritten = sChannel.write(buf);
 
             Assert.assertTrue("No data was written to socket channel.", numBytesWritten > 0);
-            System.out.println("Bytes Written: " + numBytesWritten);
+            System.out.println("Bytes Written To Socket: " + numBytesWritten);
+            System.out.println("buf:" + buf.toString());
+            buf.rewind();
+            byte[] data = new byte[12];
+            buf.get(data);
+            for (int i = 0; i < data.length; i++) {
+                System.out.print("[" + data[i] + "]");
+            }
+            System.out.println();
 
         } catch (IOException e) {
             e.printStackTrace();
-            Assert.assertTrue("Exception occurred writing to socket: " + e.getMessage(),false);
+            Assert.assertTrue("Exception occurred writing to socket: " + e.getMessage(), false);
         }
     }
 

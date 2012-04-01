@@ -254,6 +254,7 @@ static int process_data(client_t *client)
 		// least that.
 		if (client->in.length < HEADER_SIZE) {
 			// we didn't have enough, even for the header, so we are stopping.
+                        printf("[process_data] There wasn't enough data to build anything so not processing the buffer. in.length=%d",client->in.length);
 			stopped = 1;
 		}
 		else {
