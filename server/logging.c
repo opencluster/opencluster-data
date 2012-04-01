@@ -5,12 +5,14 @@
 
 #include <assert.h>
 #include <event.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
 #include <time.h>
+#include <unistd.h>
 
 // this default is the number of seconds to wait before writing the log buffer out to the log file.  
 // It is currently set to zero, which means that it will process the event as quickly as it can 
@@ -25,6 +27,8 @@
 #define DEFAULT_MAX_FILESIZE 50
 
 struct event *_log_event = NULL;
+struct event *_sigusr1_event = NULL;
+struct event *_sigusr2_event = NULL;
 char *_filename = NULL;
 short int _loglevel = 0;
 int _maxfilesize = 0;
@@ -32,9 +36,8 @@ int _written = 0;
 FILE *_fp = NULL;
 
 char * _outbuf = NULL;
-int _outbuf_len = 0;
-int _outbuf_max = 0;
-char * _outbuf_ptr = NULL;
+int    _outbuf_len = 0;
+int    _outbuf_max = 0;
 
 char *_level_strings[] = {"MINIMAL", "FATAL", "ERROR", "WARN", "STATS", "INFO", "DEBUG"};
 
@@ -43,13 +46,12 @@ struct timeval _timeout = {.tv_sec = DEFAULT_LOG_TIMER, .tv_usec = 0};
 
 // we keep these variables as globals because we want the logger to have the least amount of impact 
 // as possible if logging levels are low.
-char _buffer[30];
-char _timebuf[48];
 struct timeval _tv;
 time_t _curtime;
 va_list _ap;
 int _redo;
 int _result;
+int _avail;
 
 
 
@@ -67,7 +69,6 @@ inline static char * levelstr(short int level)
 static void log_nextfile(void)
 {
 	char buffer[4096];
-	char *ptr;
 
 	// if the file is already open, then we should close it.
 	if (_fp) {
@@ -76,14 +77,11 @@ static void log_nextfile(void)
 	}
 	
 	assert(_filename);
+	strncpy(buffer, _filename, sizeof(buffer));
+	strftime(buffer + strlen(_filename), sizeof(buffer) - strlen(_filename), "%Y%m%d%H%M%S", localtime(&_curtime));
 	
-	
-	strncpy(buffer, sizeof(buffer), _filename);
-	ptr = buffer + strlen(_filename);
-
-	strftime(ptr, sizeof(buffer) - strlen(_filename), "%Y%m%d%H%M%S", localtime(&curtime));
-	
-	
+	_fp = fopen(buffer, "w");
+	assert(_fp);
 }
 
 
@@ -115,16 +113,33 @@ static void log_handler(int fd, short int flags, void *arg)
 	if (_fp) {
 		fwrite(_outbuf, _outbuf_len, 1, _fp);
 		_outbuf_len = 0;
+		
+		fflush(_fp);
 	}
 }
 
 
 
+static void logdec_handler(evutil_socket_t fd, short what, void *arg)
+{
+	assert(arg == NULL);
+	log_declevel();
+}
+
+
+static void loginc_handler(evutil_socket_t fd, short what, void *arg)
+{
+	assert(arg == NULL);
+	log_inclevel();
+}
+
+
+
 // Initialise the logging system with all the info that we need,
-void log_init(char *logfile, short int loglevel, int maxfilesize)
+void log_init(const char *logfile, short int loglevel, int maxfilesize)
 {
 	assert(loglevel >= 0);
-	assert(maxfilesize >= 0)
+	assert(maxfilesize >= 0);
 
 	assert(_evbase);
 	assert(_log_event == NULL);
@@ -144,19 +159,37 @@ void log_init(char *logfile, short int loglevel, int maxfilesize)
 			_maxfilesize = maxfilesize * 1024 * 1024;
 		}
 		assert(_maxfilesize > 0);
-		
-		_filename_buf = malloc(strlen(_filename) + 32);
-		assert(_filename_buf);
 		assert(_fp == NULL);
+
+		gettimeofday(&_tv, NULL);
+		_curtime=_tv.tv_sec;
 		
 		// open up the logfile.
 		log_nextfile();
 
 		// create the USR1 and USR2 signal listeners.
-		assert(0);
+		assert(_evbase);
+		_sigusr1_event = evsignal_new(_evbase, SIGUSR1, logdec_handler, NULL);
+		_sigusr2_event = evsignal_new(_evbase, SIGUSR2, loginc_handler, NULL);
+		assert(_sigusr1_event);
+		assert(_sigusr2_event);
+		event_add(_sigusr1_event, NULL);
+		event_add(_sigusr2_event, NULL);
 		
-		logger(0, "Logging Started: Level %s, Max File Size=%d", levelstr(loglevel));
+		logger(LOG_MINIMAL, "Logging Started: Level %s, Max File Size=%d", levelstr(loglevel), _maxfilesize);
 	}
+}
+
+
+void log_prepareshutdown(void)
+{
+	assert(_sigusr1_event);
+	event_free(_sigusr1_event);
+	_sigusr1_event = NULL;
+	
+	assert(_sigusr2_event);
+	event_free(_sigusr2_event);
+	_sigusr2_event = NULL;
 }
 
 
@@ -167,9 +200,9 @@ void log_shutdown(void)
 	// events pending.
 	assert(_log_event == NULL);
 	
-	assert(_logfile);
-	free(_logfile);
-	_logfile = NULL;
+	assert(_filename);
+	free(_filename);
+	_filename = NULL;
 	
 	assert(_outbuf);
 	assert(_outbuf_len == 0);
@@ -192,80 +225,76 @@ void logger(short int level, const char *format, ...)
 
 		// calculate the time.
 		gettimeofday(&_tv, NULL);
-		_curtime=tv.tv_sec;
+		_curtime=_tv.tv_sec;
 		
 		assert(_outbuf_len <= _outbuf_max);
 		
 		// check that we will likely have enough data for this entry.
-		if ((_outbuf_max - ))
+		assert(DEFAULT_BUFFER_SIZE > (64+32) + 1024);
+		if ((_outbuf_max - _outbuf_len) < DEFAULT_BUFFER_SIZE) {
+			_outbuf = realloc(_outbuf, _outbuf_max + DEFAULT_BUFFER_SIZE);
+			assert(_outbuf);
+			
+			_outbuf_max += DEFAULT_BUFFER_SIZE;
+		}
 		
-		
-		strftime(buffer, 30, "%Y-%m-%d %T.", localtime(&curtime));
-		snprintf(timebuf, 48, "%s%06ld ", buffer, tv.tv_usec);
+		_result = strftime(&_outbuf[_outbuf_len], 32, "%Y-%m-%d %T.", localtime(&_curtime));
+		assert(_result > 0 && _result < 32);
+		_outbuf_len += _result;
 
-		assert(log->buildbuf);
-		assert(log->buildbuf->length == 0);
-		assert(log->buildbuf->max > 0);
+		_result = snprintf(&_outbuf[_outbuf_len], 64, "%06ld %s ", _tv.tv_usec, levelstr(level));
+		assert(_result > 0 && _result < 64);
+		_outbuf_len += _result;
 
 		// process the string. Apply directly to the buildbuf.  If buildbuf is not
 		// big enough, increase the size and do it again.
-		redo = 1;
-		while (redo) {
-			va_start(ap, format);
-			n = vsnprintf(log->tmpbuf->data, log->tmpbuf->max, format, ap);
-			va_end(ap);
+		_redo = 1;
+		while (_redo != 0) {
 
-			assert(n > 0);
-			if (n > log->tmpbuf->max) {
+			_avail = (_outbuf_max - _outbuf_len) - 1;
+			assert(_avail > 0);
+			
+			va_start(_ap, format);
+			_result = vsnprintf(&_outbuf[_outbuf_len], _avail, format, _ap);
+			va_end(_ap);
+
+			assert(_result > 0);
+			if (_result > _avail) {
 				// there was not enough space, so we need to increase it, and try again.
-				expbuf_shrink(log->tmpbuf, n + 1);
+				_outbuf = realloc(_outbuf, _outbuf_max + _result + DEFAULT_BUFFER_SIZE);
+				assert(_outbuf);
+				_outbuf_max += _result + DEFAULT_BUFFER_SIZE;
+				assert(_redo != 0);
 			}
 			else {
-				assert(n <= log->tmpbuf->max);
-				log->tmpbuf->length = n;
-				redo = 0;
+				assert(_result <= _avail);
+				_outbuf_len += _result;
+				assert(_outbuf_len < _outbuf_max);
+				_redo = 0;
 			}
 		}
 
-		// we now have the built string in our tmpbuf.  We need to add it to the complete built buffer.
-		assert(log->tmpbuf->length > 0);
-		assert(log->buildbuf->length == 0);
+		// Now that we have built our output line, we need to add a linefeed to it.
+		assert(_outbuf_len < _outbuf_max);
+		assert(_outbuf[_outbuf_len] == 0);
+		_outbuf[_outbuf_len] = '\n';
+		_outbuf_len ++;
+		_outbuf[_outbuf_len] = 0;
+		
+		// if the log_event is null, then we need to set the timeout event.
+		if (_log_event == NULL) {
+			#if (_EVENT_NUMERIC_VERSION < 0x02000000)
+				_log_event = calloc(1, sizeof(*_log_event));
+				evtimer_set(_log_event, log_handler, NULL);
+				assert(_evbase);
+				event_base_set(_evbase, _log_event);
+			#else
+				_log_event = evtimer_new(_evbase, log_handler, NULL);
+			#endif
+			assert(_log_event);
+			evtimer_add(_log_event, &_timeout);
 			
-		expbuf_set(log->buildbuf, timebuf, strlen(timebuf));
-		expbuf_add(log->buildbuf, log->tmpbuf->data, log->tmpbuf->length);
-		expbuf_add(log->buildbuf, "\n", 1);
-
-		// if evbase is NULL, then we will need to write directly.
-		if (log->evbase == NULL) {
-			if (log->outbuf->length > 0) {
-				log_print(log, log->outbuf);
-				expbuf_free(log->outbuf);
-			}
-			
-			log_print(log, log->buildbuf);
 		}
-		else {
-			// we have an evbase, so we need to add our build data to the outbuf.
-			expbuf_add(log->outbuf, log->buildbuf->data, log->buildbuf->length);
-		
-			// if the log_event is null, then we need to set the timeout event.
-			if (log->log_event == NULL) {
-				#if (_EVENT_NUMERIC_VERSION < 0x02000000)
-					log->log_event = calloc(1, sizeof(*log->log_event));
-					evtimer_set(log->log_event, log_handler, (void *) log);
-					event_base_set(log->evbase, log->log_event);
-				#else
-					log->log_event = evtimer_new(log->evbase, log_handler, (void *) log);
-				#endif
-				assert(log->log_event);
-				evtimer_add(log->log_event, &t);
-			}
-		}
-		
-		
-		
-		
-		expbuf_clear(log->buildbuf);
 	}
 }
 
@@ -274,6 +303,7 @@ void log_inclevel(void)
 {
 	assert(_loglevel >= 0);
 	_loglevel ++;
+	logger(LOG_MINIMAL, "Increasing logging level to %s", levelstr(_loglevel));
 }
 
 void log_declevel(void)
@@ -281,6 +311,7 @@ void log_declevel(void)
 	assert(_loglevel >= 0);
 	if (_loglevel > 0)
 		_loglevel --;
+	logger(LOG_MINIMAL, "Decreasing logging level to %s", levelstr(_loglevel));
 }
 
 inline short int log_getlevel(void)

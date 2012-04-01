@@ -426,7 +426,7 @@ static void read_handler(int fd, short int flags, void *arg)
 			
 			client->timeout = 0;
 			
-			if (_verbose > 2) {
+/*			if (_verbose > 2) {
 				pp =  client->in.buffer + client->in.offset;
 				printf("Data received.  length=%d\n", res);
 				for (processed=0; processed < res; processed++, pp++) {
@@ -434,7 +434,8 @@ static void read_handler(int fd, short int flags, void *arg)
 				}
 				
 			}
-			
+*/
+
 			// got some data.
 			assert(res <= avail);
 			client->in.length += res;

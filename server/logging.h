@@ -13,8 +13,9 @@
 #define LOG_DEBUG   6
 
 
-void log_init(char *logfile, short int loglevel, int maxfilesize);
+void log_init(const char *logfile, short int loglevel, int maxfilesize);
 void log_shutdown(void);
+void log_prepareshutdown(void);
 
 void log_setlevel(short int loglevel);
 void log_inclevel(void);

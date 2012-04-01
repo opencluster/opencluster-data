@@ -104,7 +104,8 @@ INC_NODE= \
 	event-compat.h \
 	$(H_GLOBALS) \
 	$(H_TIMEOUT) \
-	$(H_PUSH)
+	$(H_PUSH) \
+	$(H_LOGGING)
 
 INC_OCD= \
 	$(H_ITEM) \
@@ -130,7 +131,8 @@ INC_PROCESS= \
 	$(H_CONSTANTS) \
 	$(H_PUSH) \
 	$(H_ITEM) \
-	$(H_BUCKET_DATA)
+	$(H_BUCKET_DATA) \
+	$(H_LOGGING)
 
 INC_PUSH= \
 	$(H_PUSH) \
@@ -139,7 +141,8 @@ INC_PUSH= \
 	$(H_GLOBALS) \
 	$(H_NODE) \
 	$(H_SERVER) \
-	$(H_CLIENT)
+	$(H_CLIENT) \
+	$(H_LOGGING)
 
 INC_SECONDS= \
 	$(H_SECONDS) \
@@ -151,7 +154,8 @@ INC_SERVER= \
 	$(H_SERVER) \
 	event-compat.h \
 	$(H_GLOBALS) \
-	$(H_CLIENT)
+	$(H_CLIENT) \
+	$(H_LOGGING)
 
 INC_SETTLE= \
 	$(H_SETTLE) \
@@ -160,14 +164,16 @@ INC_SETTLE= \
 	$(H_NODE) \
 	$(H_CONSTANTS) \
 	$(H_BUCKET) \
-	$(H_TIMEOUT)
+	$(H_TIMEOUT) \
+	$(H_LOGGING)
 
 INC_STATS= \
 	$(H_STATS) \
 	event-compat.h \
 	$(H_NODE) \
 	$(H_GLOBALS) \
-	$(H_TIMEOUT)
+	$(H_TIMEOUT) \
+	$(H_LOGGING)
 
 INC_TIMEOUT=$(H_TIMEOUT)
 

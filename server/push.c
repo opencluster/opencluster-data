@@ -2,6 +2,7 @@
 
 #include "client.h"
 #include "globals.h"
+#include "logging.h"
 #include "node.h"
 #include "payload.h"
 #include "protocol.h"
@@ -59,7 +60,7 @@ void push_hashmask_update(bucket_t *bucket)
 				if (_clients[i]->handle >= 0) {
 					// we have a client, that seems to be connected.
 
-					printf("[%d] sending HASHMASK: (%08X/%08X)\n", _seconds, _mask, bucket->hash);
+					logger(LOG_DEBUG, "sending HASHMASK: (%08X/%08X)", _mask, bucket->hash);
 					client_send_message(_clients[i], NULL, CMD_HASHMASK, payload_length(), payload_ptr());
 				}
 			}
@@ -151,8 +152,7 @@ void push_serverhello(client_t *client)
 	assert(payload_length() == 0);
 	payload_string(_interface);
 	
-	printf("[%u] SERVERHELLO: Interface:'%s', length=%d, payload=%d\n", 
-		   _seconds, _interface, (int)strlen(_interface), payload_length());
+	logger(LOG_DEBUG, "SERVERHELLO: Interface:'%s', length=%d, payload=%d", _interface, (int)strlen(_interface), payload_length());
 	
 	client_send_message(client, NULL, CMD_SERVERHELLO, payload_length(), payload_ptr());
 	payload_clear();
@@ -170,7 +170,7 @@ void push_loadlevels(client_t *client)
 	
 	assert(payload_length() == 0);
 	
-	printf("[%d] LOADLEVELS: \n", _seconds);
+	logger(LOG_DEBUG, "sending LOADLEVELS");
 	
 	client_send_message(client, NULL, CMD_LOADLEVELS, 0, NULL);
 	assert(payload_length() == 0);
@@ -186,7 +186,7 @@ void push_accept_bucket(client_t *client, hash_t key)
 	payload_int(_mask);
 	payload_int(key);
 	
-	printf("[%d] sending ACCEPT_BUCKET: (%08X/%08X)\n", _seconds, _mask, key);
+	logger(LOG_DEBUG, "sending ACCEPT_BUCKET: (%08X/%08X)", _mask, key);
 	
 	client_send_message(client, NULL, CMD_ACCEPT_BUCKET, payload_length(), payload_ptr());
 	payload_clear();
@@ -250,9 +250,8 @@ void push_control_bucket(client_t *client, bucket_t *bucket, int level)
 		payload_string(_interface);
 	}
 
-	if (_verbose > 2)
-		printf("[%u] CONTROL_BUCKET(bucket:%X): Interface:'%s', length=%d, payload=%d\n", 
-		   _seconds, bucket->hash, _interface, (int)strlen(_interface), payload_length());
+	logger(LOG_DEBUG, "CONTROL_BUCKET(bucket:%X): Interface:'%s', length=%d, payload=%d", 
+		   bucket->hash, _interface, (int)strlen(_interface), payload_length());
 	
 	assert(payload_length() > 0);
 	client_send_message(client, NULL, CMD_CONTROL_BUCKET, payload_length(), payload_ptr());
@@ -286,12 +285,12 @@ void push_sync_item(client_t *client, item_t *item)
 	if (item->value->type == VALUE_INT) {
 		cmd = CMD_SYNC_INT;
 		payload_int(item->value->data.i);
-		printf("[%d] sending MIGRATE_INT: (%08X:%08X, %d)\n", _seconds, item->map_key, item->item_key, item->value->data.i);
+		logger(LOG_DEBUG, "sending MIGRATE_INT: (%08X:%08X, %d)", item->map_key, item->item_key, item->value->data.i);
 	}
 	else if (item->value->type == VALUE_STRING) {
 		cmd = CMD_SYNC_STRING;
 		payload_data(item->value->data.s.length, item->value->data.s.data);
-		printf("[%d] sending MIGRATE_STRING: (%08X:%08X, '%s')\n", _seconds, item->map_key, item->item_key, item->value->data.s.data);
+		logger(LOG_DEBUG, "sending MIGRATE_STRING: (%08X:%08X, '%s')", item->map_key, item->item_key, item->value->data.s.data);
 	}
 	else {
 		assert(0);
@@ -319,12 +318,12 @@ void push_sync_name(client_t *client, hash_t key, char *name, int int_key)
 	if (name) {
 		payload_string(name);
 		cmd = CMD_SYNC_NAME;
-		printf("[%d] sending SYNC_NAME: (%08X:'%s')\n", _seconds, key, name);
+		logger(LOG_DEBUG, "sending SYNC_NAME: (%08X:'%s')", key, name);
 	}
 	else {
 		payload_int(int_key);
 		cmd = CMD_SYNC_NAME_INT;
-		printf("[%d] sending SYNC_NAME_INT: (%08X:%d)\n", _seconds, key, int_key);
+		logger(LOG_DEBUG, "sending SYNC_NAME_INT: (%08X:%d)", key, int_key);
 	}
 	
 	assert(cmd > 0);

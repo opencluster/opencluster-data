@@ -216,6 +216,8 @@ static void sigint_handler(evutil_socket_t fd, short what, void *arg)
 		_sighup_event = NULL;
 	}
 	
+	log_prepareshutdown();
+	
 	// start the shutdown event.  This timeout event will just keep ticking over until the _shutdown 
 	// value is back down to 0, then it will stop resetting the event, and the loop can exit.... 
 	// therefore shutting down the service completely.
@@ -270,6 +272,7 @@ static void usage(void) {
 		"                       6 - DEBUG\n"
 		"\n"
 		"-h                 print this help and exit\n"
+	);
 	return;
 }
 
@@ -511,7 +514,7 @@ int main(int argc, char **argv)
 	// enter the processing loop.  This function will not return until there is
 	// nothing more to do and the service has shutdown.  Therefore everything
 	// needs to be setup and running before this point.  
-	logger(LOG_INFO, "Starting main loop."); }
+	logger(LOG_INFO, "Starting main loop.");
 	assert(_evbase);
 	event_base_dispatch(_evbase);
 

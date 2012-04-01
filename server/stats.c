@@ -3,6 +3,7 @@
 #include "stats.h"
 
 #include "globals.h"
+#include "logging.h"
 #include "node.h"
 #include "timeout.h"
 
@@ -72,9 +73,7 @@ static void stats_handler(int fd, short int flags, void *arg)
 	}
 	
 	if (changed > 0) {
-		if (_verbose) {
-			printf("Stats. Nodes:%d\n", new_nodes);
-		}
+		logger(LOG_STATS, "Stats. Nodes:%d", new_nodes);
 	}
 	
 	evtimer_add(_stats_event, &_timeout_stats);
