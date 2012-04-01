@@ -2,12 +2,12 @@ package org.opencluster;
 
 import org.junit.Assert;
 import org.junit.Test;
+import org.opencluster.util.HashMask;
 import org.opencluster.util.ProtocolCommand;
 import org.opencluster.util.ProtocolHeader;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.net.SocketOption;
 import java.net.StandardSocketOptions;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
@@ -139,6 +139,19 @@ public class ProtocolTest {
                                 System.out.print("[" + buf.get(i) + "]");
                             }
                             System.out.println();
+                            if( ProtocolCommand.HASH_MASK.equals(header.getCommand())) {
+                                if(buf.limit() - buf.position() >= header.getDataLength()) {
+                                    HashMask hashMask = new HashMask();
+                                    bytesRead = hashMask.readFromByteBuffer(buf);
+                                    System.out.println("Read in " + bytesRead + " bytes.");
+                                    System.out.println(hashMask.toString());
+                                    for (int i = (buf.position() - bytesRead); i < buf.position(); i++) {
+                                        System.out.print("[" + buf.get(i) + "]");
+                                    }
+                                } else {
+                                    System.out.println("Not enough data available to read in hash mask.  Needed " + header.getDataLength() + " bytes. Found " + (buf.limit() - buf.position()) + " bytes.");
+                                }
+                            }
                         }
 
                         int remaining = buf.limit() - (buf.position() + 1);

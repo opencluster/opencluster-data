@@ -17,13 +17,13 @@ import java.nio.ByteBuffer;
  */
 public class ProtocolHeader {
 
-    ProtocolCommand command = ProtocolCommand.NO_COMMAND;
+    private ProtocolCommand command = ProtocolCommand.NO_COMMAND;
 
-    ProtocolCommand replyToCommand = ProtocolCommand.NO_COMMAND;
+    private ProtocolCommand replyToCommand = ProtocolCommand.NO_COMMAND;
 
-    int userSpecifiedID = 0;
+    private int userSpecifiedID = 0;
 
-    int dataLength = 0;
+    private int dataLength = 0;
 
     public ProtocolHeader(ProtocolCommand command) {
         this.command = command;
@@ -63,6 +63,38 @@ public class ProtocolHeader {
         buf.putInt(dataLength);
         int endPos = buf.position();
         return (endPos - startPos);
+    }
+
+    public ProtocolCommand getCommand() {
+        return command;
+    }
+
+    public void setCommand(ProtocolCommand command) {
+        this.command = command;
+    }
+
+    public ProtocolCommand getReplyToCommand() {
+        return replyToCommand;
+    }
+
+    public void setReplyToCommand(ProtocolCommand replyToCommand) {
+        this.replyToCommand = replyToCommand;
+    }
+
+    public int getUserSpecifiedID() {
+        return userSpecifiedID;
+    }
+
+    public void setUserSpecifiedID(int userSpecifiedID) {
+        this.userSpecifiedID = userSpecifiedID;
+    }
+
+    public int getDataLength() {
+        return dataLength;
+    }
+
+    public void setDataLength(int dataLength) {
+        this.dataLength = dataLength;
     }
 
     @Override
