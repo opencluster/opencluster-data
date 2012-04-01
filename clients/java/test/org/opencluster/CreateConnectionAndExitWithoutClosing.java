@@ -6,7 +6,6 @@ import java.net.StandardSocketOptions;
 import java.nio.channels.SocketChannel;
 
 /**
- * Created by IntelliJ IDEA.
  * User: Brian Gorrie
  * Date: 5/11/11
  * Time: 10:24 PM

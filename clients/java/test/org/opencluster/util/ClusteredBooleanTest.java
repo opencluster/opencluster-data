@@ -4,7 +4,6 @@ import org.junit.Assert;
 import org.junit.Test;
 
 /**
- * Created by IntelliJ IDEA.
  * User: Brian Gorrie
  * Date: 15/12/11
  * Time: 5:30 PM

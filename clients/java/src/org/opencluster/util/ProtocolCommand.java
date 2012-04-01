@@ -1,7 +1,6 @@
 package org.opencluster.util;
 
 /**
- * Created by IntelliJ IDEA.
  * User: Brian Gorrie
  * Date: 3/01/12
  * Time: 1:19 PM

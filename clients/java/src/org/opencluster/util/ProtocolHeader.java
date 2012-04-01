@@ -3,7 +3,6 @@ package org.opencluster.util;
 import java.nio.ByteBuffer;
 
 /**
- * Created by IntelliJ IDEA.
  * User: Brian Gorrie
  * Date: 3/01/12
  * Time: 1:16 PM
