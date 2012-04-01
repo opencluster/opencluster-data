@@ -254,6 +254,7 @@ static int process_data(client_t *client)
 		// least that.
 		if (client->in.length < HEADER_SIZE) {
 			// we didn't have enough, even for the header, so we are stopping.
+                        printf("[process_data] There wasn't enough data to build anything so not processing the buffer. in.length=%d",client->in.length);
 			stopped = 1;
 		}
 		else {
@@ -369,6 +370,7 @@ static void read_handler(int fd, short int flags, void *arg)
 	int avail;
 	int res;
 	int processed;
+	unsigned char *pp;
 	
 	assert(fd >= 0);
 	assert(flags != 0);
@@ -423,6 +425,15 @@ static void read_handler(int fd, short int flags, void *arg)
 		if (res > 0) {
 			
 			client->timeout = 0;
+			
+			if (_verbose > 2) {
+				pp =  client->in.buffer + client->in.offset;
+				printf("Data received.  length=%d\n", res);
+				for (processed=0; processed < res; processed++, pp++) {
+					printf("  %04d: %02X (%d)\n", processed, *pp, *pp);
+				}
+				
+			}
 			
 			// got some data.
 			assert(res <= avail);

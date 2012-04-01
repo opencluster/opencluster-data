@@ -48,5 +48,16 @@ public class ProtocolHeader {
         buf.putInt(userSpecifiedID);
         buf.putInt(dataLength);
     }
+
+    @Override
+    public String toString() {
+        return "ProtocolHeader{" +
+                "command=" + command +
+                ", replyToCommand=" + replyToCommand +
+                ", userSpecifiedID=" + userSpecifiedID +
+                ", dataLength=" + dataLength +
+                '}';
+    }
+
 }
 

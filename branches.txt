@@ -28,6 +28,9 @@ empty-migrate
 	tests, so it should be looked at.  It makes sense that a number of cluster nodes would likely 
 	be started before any data is put in them.
 
+serverinfo
+	When new nodes connect to existing servers, they need to let their connected clients know about it.
+
 shutdown
 	Better handling of the system shutdown.  When a Ctrl-C signal is received it should fire up 
 	events to shutdown all the components, mark a variable that the stats can monitor.  When the 
