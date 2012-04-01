@@ -42,11 +42,28 @@ public class ProtocolHeader {
         this.dataLength = dataLength;
     }
 
-    public void writeToByteBuffer(ByteBuffer buf) {
+    public ProtocolHeader() {
+        // empty constructor for reading data.
+    }
+
+    public int readFromByteBuffer(ByteBuffer buf) {
+        int startPos = buf.position();
+        command = ProtocolCommand.fromCode(buf.getShort());
+        replyToCommand = ProtocolCommand.fromCode(buf.getShort());
+        userSpecifiedID = buf.getInt();
+        dataLength = buf.getInt();
+        int endPos = buf.position();
+        return (endPos - startPos);
+    }
+
+    public int writeToByteBuffer(ByteBuffer buf) {
+        int startPos = buf.position();
         buf.putShort(command.getCode());
         buf.putShort(replyToCommand.getCode());
         buf.putInt(userSpecifiedID);
         buf.putInt(dataLength);
+        int endPos = buf.position();
+        return (endPos - startPos);
     }
 
     @Override

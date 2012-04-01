@@ -127,12 +127,27 @@ public class ProtocolTest {
                     buf.rewind();
 
                     if (buf.limit() > 0) {
+
                         System.out.println();
                         System.out.println("Read data from Socket Channel");
 
-                        System.out.println("buf:" + buf.toString());
-                        for (int i = 0; i < buf.limit(); i++) {
-                            System.out.print("[" + buf.get(i) + "]");
+                        while (buf.limit() - buf.position() >= 12) {
+                            ProtocolHeader header = new ProtocolHeader();
+                            int bytesRead = header.readFromByteBuffer(buf);
+                            System.out.println("Read in " + bytesRead + " bytes.");
+                            System.out.println(header.toString());
+                            for (int i = (buf.position() - bytesRead); i < buf.position(); i++) {
+                                System.out.print("[" + buf.get(i) + "]");
+                            }
+                            System.out.println();
+                        }
+
+                        int remaining = buf.limit() - (buf.position() + 1);
+                        if (remaining > 0) {
+                            System.out.println("There is unread data remaining: " + remaining + " bytes.");
+                            for (int i = buf.position(); i < buf.limit(); i++) {
+                                System.out.print("[" + buf.get(i) + "]");
+                            }
                         }
                         System.out.println();
                     }

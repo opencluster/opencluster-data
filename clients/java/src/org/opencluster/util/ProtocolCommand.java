@@ -30,7 +30,9 @@ package org.opencluster.util;
  */
 public enum ProtocolCommand {
 
+    UNKNOWN_COMMAND(-1),
     NO_COMMAND(0),
+    ACK(1),
     HELLO(10),
     CAPABILITIES(11),
     SHUTTING_DOWN(15),
@@ -59,6 +61,16 @@ public enum ProtocolCommand {
 
     public short getCode() {
         return code;
+    }
+
+    public static ProtocolCommand fromCode(short code) {
+        ProtocolCommand[] values = values();
+        for(int i = 0; i < values.length; i++) {
+            if(values[i].getCode() == code) {
+                return values[i];
+            }
+        }
+        return UNKNOWN_COMMAND;
     }
 
 }
