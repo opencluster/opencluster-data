@@ -17,6 +17,7 @@
 #include "timeout.h"
 
 #include <assert.h>
+#include <ctype.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -357,6 +358,74 @@ assert(0);
 
 
 
+static void log_data(char *tag, unsigned char *data, int length)
+{
+	int i;
+	int col;
+	char buffer[512];	// line buffer.
+	int len;  			// buffer length;
+	int start;
+	
+	assert(tag);
+	assert(data);
+	assert(length > 0);
+
+	i = 0;
+	while (i < length) {
+
+		start = i;
+		
+		// first put the tag in the buffer.
+		strncpy(buffer, tag, sizeof(buffer));
+		len = strlen(tag);
+		
+		// now put the line count.
+		len += sprintf(buffer+len, "%04X: ", i);
+		
+		// now display the columns of text.
+		for (col=0; col<16; col++) {
+			if (i < length && col==7) {
+				len += sprintf(buffer+len, "%02x-", data[i]);
+			}
+			else if (i < length) {
+				len += sprintf(buffer+len, "%02x ", data[i]);
+			}
+			else {
+				len += sprintf(buffer+len, "   ");
+			}
+			
+			i++;
+		}
+		
+		// add a seperator
+		len += sprintf(buffer+len, ": ");
+		
+		// now we display the plain text.
+		assert(start >= 0);
+		assert(start < i);
+		for (col=0; col<16; col++) {
+			if (start < length) {
+				if (isprint(data[start])) {
+					len += sprintf(buffer+len, "%c", data[start]);
+				}
+				else {
+					len += sprintf(buffer+len, ".");
+				}
+			}
+			else {
+				len += sprintf(buffer+len, " ");
+			}
+			
+			start++;
+		}
+
+		assert(i == start);
+		logger(LOG_EXTRA, "%s", buffer);
+	}
+}
+
+
+
 
 
 
@@ -370,7 +439,6 @@ static void read_handler(int fd, short int flags, void *arg)
 	int avail;
 	int res;
 	int processed;
-	unsigned char *pp;
 	
 	assert(fd >= 0);
 	assert(flags != 0);
@@ -386,7 +454,6 @@ static void read_handler(int fd, short int flags, void *arg)
 		
 			// we timed out, so we should kill the client.
 			logger(LOG_ERROR, "client timed out. handle=%d", fd);
-
 			
 			// because the client has timed out, we need to clear out any data that we currently 
 			// have for it.
@@ -426,15 +493,9 @@ static void read_handler(int fd, short int flags, void *arg)
 			
 			client->timeout = 0;
 			
-/*			if (_verbose > 2) {
-				pp =  client->in.buffer + client->in.offset;
-				printf("Data received.  length=%d\n", res);
-				for (processed=0; processed < res; processed++, pp++) {
-					printf("  %04d: %02X (%d)\n", processed, *pp, *pp);
-				}
-				
+			if (log_getlevel() >= LOG_EXTRA) {
+				log_data("IN: ", (unsigned char *)client->in.buffer + client->in.offset, res);
 			}
-*/
 
 			// got some data.
 			assert(res <= avail);
@@ -549,6 +610,10 @@ static void write_handler(int fd, short int flags, void *arg)
 	
 	res = send(client->handle, client->out.buffer + client->out.offset, client->out.length, 0);
 	if (res > 0) {
+		
+		if (log_getlevel() >= LOG_EXTRA) {
+			log_data("OUT: ", (unsigned char *)client->out.buffer + client->out.offset, res);
+		}
 		
 		assert(res <= client->out.length);
 		if (res == client->out.length) {

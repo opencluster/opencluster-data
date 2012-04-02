@@ -11,6 +11,7 @@
 #define LOG_STATS   4
 #define LOG_INFO    5
 #define LOG_DEBUG   6
+#define LOG_EXTRA   7
 
 
 void log_init(const char *logfile, short int loglevel, int maxfilesize);

@@ -10,7 +10,6 @@
 	#include "event-compat.h"
 
 	extern struct event_base *_evbase;
-// 	extern int _verbose;
 	extern int _daemonize;
 	extern const char *_username;
 	extern const char *_pid_file;

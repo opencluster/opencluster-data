@@ -270,6 +270,7 @@ static void usage(void) {
 		"                       4 - STATS\n"
 		"                       5 - INFO\n"
 		"                       6 - DEBUG\n"
+		"                       7 - EXTRA\n"
 		"\n"
 		"-h                 print this help and exit\n"
 	);

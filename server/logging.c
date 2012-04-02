@@ -39,7 +39,7 @@ char * _outbuf = NULL;
 int    _outbuf_len = 0;
 int    _outbuf_max = 0;
 
-char *_level_strings[] = {"MINIMAL", "FATAL", "ERROR", "WARN", "STATS", "INFO", "DEBUG"};
+char *_level_strings[] = {"MINIMAL", "FATAL", "ERROR", "WARN", "STATS", "INFO", "DEBUG", "EXTRA"};
 
 struct timeval _timeout = {.tv_sec = DEFAULT_LOG_TIMER, .tv_usec = 0};
 
