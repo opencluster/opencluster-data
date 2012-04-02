@@ -58,9 +58,12 @@ int _avail;
 inline static char * levelstr(short int level)
 {
 	assert(level >= 0);
-	assert(level < (sizeof(_level_strings) / sizeof(_level_strings[0])));
-	
-	return(_level_strings[level]);
+	if (level < (sizeof(_level_strings) / sizeof(_level_strings[0]))) {
+		return(_level_strings[level]);
+	}
+	else {
+		return("UNKNOWN");
+	}
 }
 
 
