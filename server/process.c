@@ -5,6 +5,7 @@
 #include "constants.h"
 #include "globals.h"
 #include "item.h"
+#include "logging.h"
 #include "node.h"
 #include "payload.h"
 #include "process.h"
@@ -26,7 +27,7 @@ void process_ack(client_t *client, header_t *header)
 
 	if (header->repcmd == CMD_SERVERHELLO) {
 		active = node_active_inc();
-		if (_verbose) printf("Active cluster node connections: %d\n", active);
+		logger(LOG_INFO, "Active cluster node connections: %d", active);
 	}
 }
 
@@ -185,16 +186,13 @@ void process_loadlevels(client_t *client, header_t *header, void *ptr)
 	if (_bucket_transfer == 0 && transferring == 0) {
 
 		
-		printf("[%u] Processing loadlevel data from: '%s'\n",
-			_seconds, ((node_t*)client->node)->name); 
+		logger(LOG_DEBUG, "Processing loadlevel data from: '%s'", ((node_t*)client->node)->name); 
 
 		
 		// first check to see if the target needs to have some buckets switched (if it has more secondaries than primaries)
 		// before contemplating promoting any buckets, we need to make sure it wont destabilize us.
 		if ((_primary_buckets-1 >= _secondary_buckets+1) && (backups > primary)) {
-			if (_verbose > 2) 
-				printf("[%u] Attempting to switch with '%s'\n",
-					   _seconds, ((node_t*)client->node)->name); 
+			logger(LOG_DEBUG, "Attempting to switch with '%s'", ((node_t*)client->node)->name); 
 			if (attempt_switch(client) == 0) {
 				// we started a promotion process, so we dont need to continue.
 				assert(payload_length() == 0);
@@ -245,8 +243,7 @@ void process_loadlevels(client_t *client, header_t *header, void *ptr)
 			assert(bucket->hash >= 0);
 			assert(client->node);
 			assert(((node_t*)client->node)->name);
-			printf("[%u] Migrating bucket #%X to '%s'\n",
-					   _seconds, bucket->hash, ((node_t*)client->node)->name); 
+			logger(LOG_DEBUG, "Migrating bucket #%X to '%s'", bucket->hash, ((node_t*)client->node)->name); 
 	
 			assert(_bucket_transfer == 0);
 			_bucket_transfer = 1;
@@ -328,7 +325,7 @@ static void send_transfer_items(bucket_t *bucket)
 
 	avail = TRANSIT_MAX - data_in_transit();
 	
-	if (_verbose > 3) printf("Requesting %d items to migrate.\n", avail);
+	logger(LOG_DEBUG, "Requesting %d items to migrate.", avail);
 	
 	// ask the data system for a certain number of migrate items.
 	assert(bucket->data);
@@ -378,8 +375,7 @@ void process_accept_bucket(client_t *client, header_t *header, void *ptr)
 	_migrate_sync ++;
 	assert(_migrate_sync > 0);
 	
-	if (_verbose > 4) 
-		printf("Setting Migration SYNC counter to: %d\n", _migrate_sync);
+	logger(LOG_DEBUG, "Setting Migration SYNC counter to: %d", _migrate_sync);
 
 	assert(data_in_transit() == 0);
 	
@@ -419,8 +415,7 @@ void process_control_bucket_complete(client_t *client, header_t *header, void *p
 	assert(bucket->transfer_client == client);
 	bucket->transfer_client = NULL;
 	
-	if (_verbose > 2) 
-		printf("Bucket migration complete: %X\n", hash);
+	logger(LOG_INFO, "Bucket migration complete: %X", hash);
 
 	// do we need to let other nodes that the transfer is complete?
 
@@ -491,8 +486,7 @@ void process_sync_name_ack(client_t *client, header_t *header, void *ptr)
 
 	assert(bucket->transfer_client == client || (bucket->backup_node && bucket->backup_node->client == client) );
 	
-	if (_verbose > 2) 
-		printf("Migration of item name complete: %X\n", hash);
+	logger(LOG_DEBUG, "Migration of item name complete: %X", hash);
 }
 
 
@@ -535,8 +529,7 @@ void process_sync_ack(client_t *client, header_t *header, void *ptr)
 		assert(bucket->backup_node && bucket->backup_node->client == client);
 	}
 
-	if (_verbose > 2) 
-		printf("Migration of item name complete: %X\n", hash);
+	logger(LOG_INFO, "Migration of item complete: %X", hash);
 }
 
 

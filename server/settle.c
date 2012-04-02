@@ -7,6 +7,7 @@
 #include "bucket.h"
 #include "constants.h"
 #include "globals.h"
+#include "logging.h"
 #include "node.h"
 #include "timeout.h"
 
@@ -37,10 +38,10 @@ static void settle_handler(int fd, short int flags, void *arg)
 	assert(flags & EV_TIMEOUT);
 	assert(arg == NULL);
 
-	if (_verbose) printf("SETTLE: handle=%d\n", fd);
+	logger(LOG_DEBUG, "SETTLE: handle=%d", fd);
 	
 	if (node_active_count() == 0) {
-		if (_verbose) printf("Settle timeout.  No Node connections.  Setting up cluster.\n");
+		logger(LOG_INFO, "Settle timeout.  No Node connections.  Setting up cluster.");
 		
 		assert(_mask == 0);
 		_mask = STARTING_MASK;
@@ -50,7 +51,7 @@ static void settle_handler(int fd, short int flags, void *arg)
 		
 		_settling = 0;
 		
-		if (_verbose) printf("Current buckets: %d\n", _primary_buckets + _secondary_buckets);
+		logger(LOG_INFO, "Current buckets: %d", _primary_buckets + _secondary_buckets);
 	}
 }
 

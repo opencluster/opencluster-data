@@ -3,6 +3,7 @@
 #include "bucket.h"
 #include "commands.h"
 #include "globals.h"
+#include "logging.h"
 #include "payload.h"
 #include "protocol.h"
 #include "push.h"
@@ -39,7 +40,7 @@ void cmd_get_int(client_t *client, header_t *header, char *payload)
 	key_hash = data_int(&next);
 	
 	
-	if (_verbose > 3) printf("[%u] CMD: get (integer)\n\n", _seconds);
+	logger(LOG_INFO, "CMD: get (integer)");
 
 	value = buckets_get_value(map_hash, key_hash);
 	
@@ -229,7 +230,7 @@ void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
 	mask = data_int(&next);
 	key_hash = data_int(&next);
 	
-	if (_verbose > 2) printf("[%u] CMD: accept bucket (%08X/%08X)\n\n", _seconds, mask, key_hash);
+	logger(LOG_INFO, "CMD: accept bucket (%08X/%08X)", mask, key_hash);
 
 	assert(payload_length() == 0);
 
@@ -239,13 +240,13 @@ void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
 
 	if (_bucket_transfer != 0) {
 		//  we are currently transferring another bucket, therefore we cannot accept another one.
-		if (_verbose > 2) printf("[%u] cant accept bucket, already transferring one.\n", _seconds);
+		logger(LOG_WARN, "cant accept bucket, already transferring one.");
 		reply = REPLY_CANT_ACCEPT_BUCKET;
 	}
 	else if (mask != _mask) {
 		// the masks are different, we cannot accept a bucket unless our masks match... which should 
 		// balance out once hashmasks have proceeded through all the nodes.
-		if (_verbose > 2) printf("[%u] cant accept bucket, masks are not compatible.\n", _seconds);
+		logger(LOG_WARN, "cant accept bucket, masks are not compatible.");
 		reply = REPLY_CANT_ACCEPT_BUCKET;
 	}
 	else {
@@ -266,11 +267,11 @@ void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
 		
 		assert(_buckets);
 		if (_buckets[key_hash]) {
-			if (_verbose > 2) printf("[%u] cant accept bucket, already have that bucket.\n", _seconds);
+			logger(LOG_ERROR, "cant accept bucket, already have that bucket.");
 			reply = REPLY_CANT_ACCEPT_BUCKET;
 		}
 		else {
-			if (_verbose > 2) printf("[%u] accepting bucket.\n", _seconds);
+			logger(LOG_INFO, "accepting bucket.");
 			reply = REPLY_ACCEPTING_BUCKET;
 			
 			assert(_bucket_transfer == 0);
@@ -333,7 +334,7 @@ void cmd_set_int(client_t *client, header_t *header, char *payload)
 	memcpy(name, str, name_len);
 	name[name_len] = 0;
 	
-	if (_verbose > 2) printf("[%u] CMD: set (integer): [%d/%d]'%s'=%d\n\n", _seconds, map_hash, key_hash, name, value->data.i);
+	logger(LOG_INFO, "CMD: set (integer): [%d/%d]'%s'=%d", map_hash, key_hash, name, value->data.i);
 
 	// eventually we will add the ability to wait until the data has been competely distributed 
 	// before returning an ack.
@@ -407,7 +408,7 @@ void cmd_serverhello(client_t *client, header_t *header, char *payload)
 		// need to send to the node, the list of hashmasks.
 		push_hashmasks(client);
 		
-		printf("Adding '%s' as a New Node.\n", name);
+		logger(LOG_INFO, "Adding '%s' as a New Node.", name);
 	}
 	else {
 		
@@ -497,7 +498,7 @@ void cmd_hashmask(client_t *client, header_t *header, char *payload)
 	
 	// check that the mask is the same as our existing mask... 
 
-	printf("debug: cmd_hashmask.  orig mask:%X, new mask:%X\n", _mask, mask);
+	logger(LOG_DEBUG, "debug: cmd_hashmask.  orig mask:%X, new mask:%X", _mask, mask);
 	
 	if (mask < _mask) {
 		// if the mask supplied is LESS than the mask we use, then when we read in the data, we need 
@@ -573,9 +574,7 @@ void cmd_control_bucket(client_t *client, header_t *header, char *payload)
 	level = data_int(&next);
 	remote_host = data_string_copy(&next);
 	
-	if (_verbose > 2) 
-		printf("[%u] CMD: bucket control (%08X/%08X), level:%d, remote:'%s'\n\n", 
-			   _seconds, mask, key_hash, level, remote_host);
+	logger(LOG_INFO, "CMD: bucket control (%08X/%08X), level:%d, remote:'%s'", mask, key_hash, level, remote_host);
 
 	// regardless of the reply, the payload will be the same.
 	assert(payload_length() == 0);
@@ -824,8 +823,7 @@ void cmd_sync_name(client_t *client, header_t *header, char *payload)
 	name = data_string_copy(&next);
 	assert(name);
 	
-	if (_verbose > 4)
-		printf("Received: CMD_SYNC_NAME: %08X='%s'\n", key_hash, name);
+	logger(LOG_INFO, "Received: CMD_SYNC_NAME: %08X='%s'", key_hash, name);
 	
 	// NOTE: name is controlled by the tree after this function call.
 	result = buckets_store_name(key_hash, name, 0);

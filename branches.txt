@@ -4,6 +4,11 @@ stats-dump
 	SIGHUP should trigger a dump of as much info as possible, including the hashmasks for buckets in 
 	the server, the list of other server nodes, and some stats on the amount of data stored.
 
+command-callback
+	The current method of parsing the commands and replies is a switch statement.  However, an array 
+	of similar callback functions might be better.  They would get setup when the daemon is starting 
+	up.  An array lookup should be a touch faster than a bunch of IF statements.
+
 verify-cluster
 	make sure that the migration is moving the buckets evenly, and that clients are getting the 
 	right information.   When a migration is completed, make sure the client is asking the server 
@@ -14,10 +19,8 @@ empty-migrate
 	tests, so it should be looked at.  It makes sense that a number of cluster nodes would likely 
 	be started before any data is put in them.
 
-system-logging
-	Rather than printing to the output stream, we need to log certain info to a logfile that gets 
-	renamed when it gets too big.  The log data can be output using an event.  SIGUSR1 and SIGUSR2 
-	should be used to increase or decrease the logging level during runtime.
+serverinfo
+	When new nodes connect to existing servers, they need to let their connected clients know about it.
 
 shutdown
 	Better handling of the system shutdown.  When a Ctrl-C signal is received it should fire up 

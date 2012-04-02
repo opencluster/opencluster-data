@@ -7,6 +7,7 @@
 
 #include "event-compat.h"
 #include "globals.h"
+#include "logging.h"
 #include "push.h"
 #include "timeout.h"
 
@@ -74,15 +75,12 @@ static void node_connect_handler(int fd, short int flags, void *arg)
 	int error;
 	
 	assert(fd >= 0 && flags != 0 && node);
-	if (_verbose) printf("[%d] CONNECT: handle=%d\n", _seconds, fd);
+	logger(LOG_INFO, "CONNECT: handle=%d", fd);
 
 	if (flags & EV_TIMEOUT) {
 		// timeout on the connect.  Need to handle that somehow.
 		
-		if (_verbose) 
-			printf("[%d] Timeout connecting to: %s\n", 
-				   _seconds, node->name);
-		
+		logger(LOG_WARN, "Timeout connecting to: %s", node->name);
 		assert(0);
 	}
 	else {
@@ -98,7 +96,7 @@ static void node_connect_handler(int fd, short int flags, void *arg)
 		getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &foo);
 		if (error == ECONNREFUSED) {
 
-			if (_verbose) printf("Unable to connect to: %s\n", node->name);
+			logger(LOG_ERROR, "Unable to connect to: %s", node->name);
 
 			// close the socket that didn't connect.
 			close(fd);
@@ -111,7 +109,7 @@ static void node_connect_handler(int fd, short int flags, void *arg)
 			evtimer_add(node->wait_event, &_timeout_node_wait);
 		}
 		else {
-			if (_verbose) printf("Connected to node: %s\n", node->name);
+			logger(LOG_INFO, "Connected to node: %s", node->name);
 			
 			// we've connected to another server.... 
 			// TODO: we still dont know if its a valid connection, but we can delay the _settling event.
@@ -169,7 +167,7 @@ static void node_connect(node_t *node)
 	assert(errno == EINPROGRESS);
 
 		
-	if (_verbose) printf("attempting to connect to node: %s\n", node->name);
+	logger(LOG_INFO, "attempting to connect to node: %s", node->name);
 	
 	// set the connect event with a timeout.
 	assert(node->connect_event == NULL);
@@ -194,7 +192,7 @@ static void node_wait_handler(int fd, short int flags, void *arg)
 	assert(arg);
 	
 	assert(node->name);
-	if (_verbose) printf("WAIT: node:'%s'\n", node->name);
+	logger(LOG_INFO, "WAIT: node:'%s'", node->name);
 	
 	assert(node->connect_event == NULL);
 	assert(node->wait_event);
