@@ -358,7 +358,7 @@ assert(0);
 
 
 
-static void log_data(char *tag, unsigned char *data, int length)
+static void log_data(int handle, char *tag, unsigned char *data, int length)
 {
 	int i;
 	int col;
@@ -380,7 +380,7 @@ static void log_data(char *tag, unsigned char *data, int length)
 		len = strlen(tag);
 		
 		// now put the line count.
-		len += sprintf(buffer+len, "%04X: ", i);
+		len += sprintf(buffer+len, "[%d] %04X: ", handle, i);
 		
 		// now display the columns of text.
 		for (col=0; col<16; col++) {
@@ -494,7 +494,7 @@ static void read_handler(int fd, short int flags, void *arg)
 			client->timeout = 0;
 			
 			if (log_getlevel() >= LOG_EXTRA) {
-				log_data("IN: ", (unsigned char *)client->in.buffer + client->in.offset, res);
+				log_data(fd, "IN: ", (unsigned char *)client->in.buffer + client->in.offset, res);
 			}
 
 			// got some data.
@@ -612,7 +612,7 @@ static void write_handler(int fd, short int flags, void *arg)
 	if (res > 0) {
 		
 		if (log_getlevel() >= LOG_EXTRA) {
-			log_data("OUT: ", (unsigned char *)client->out.buffer + client->out.offset, res);
+			log_data(client->handle, "OUT: ", (unsigned char *)client->out.buffer + client->out.offset, res);
 		}
 		
 		assert(res <= client->out.length);
