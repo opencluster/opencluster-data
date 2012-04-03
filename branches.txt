@@ -1,10 +1,5 @@
 This file provides some information about active branches in the repository.
 
-goodbye
-	Make sure that the server handles GOODBYE messages and closes the socket.  This is because there 
-	seems to be an underlying problem with the way the java client closes sockets.   We should 
-	investigate that further anyway, but for now we can ensure that GOODBYE does what we want.
-
 command-callback
 	The current method of parsing the commands and replies is a switch statement.  However, an array 
 	of similar callback functions might be better.  They would get setup when the daemon is starting 
@@ -61,5 +56,9 @@ client-shutdown
 client-maps
 	The C client does not handle maps properly (or at all), so it needs to be able to use maps.
 
+client-disconnect
+	The C client is not handling things if it loses the connection to the server.  Now that we have 
+	implemented the GOODBYE command, we lose connection to the server when the server closes it.   
+	The client needs to be able to mark it as failed, and re-connect when needed.
 
 

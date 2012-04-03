@@ -28,6 +28,7 @@
 
 #define CMD_ACK         1
 #define CMD_HELLO       10
+#define CMD_GOODBYE     20
 #define CMD_SERVER_INFO 100
 #define CMD_HASHMASK    120
 #define CMD_SET_INT     2000
@@ -1257,6 +1258,7 @@ void server_disconnect(cluster_t *cluster, server_t *server)
 {
 	int i;
 	hashmask_t *hashmask;
+	message_t *msg;
 	
 	assert(cluster);
 	assert(server);
@@ -1273,6 +1275,14 @@ void server_disconnect(cluster_t *cluster, server_t *server)
 		if (hashmask->backup == server) {
 			hashmask->backup = NULL;
 		}
+	}
+	
+	// send a GOODBYE command  first.
+	msg = message_new(cluster, CMD_GOODBYE);
+			
+	// send the request and receive the reply.
+	if (send_request(cluster, server, msg, WAIT_FOR_REPLY) != 0) {
+		assert(0); // what?
 	}
 	
 	// close the connection.

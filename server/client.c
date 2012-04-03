@@ -258,7 +258,7 @@ static int process_data(client_t *client)
 		// least that.
 		if (client->in.length < HEADER_SIZE) {
 			// we didn't have enough, even for the header, so we are stopping.
-                        printf("[process_data] There wasn't enough data to build anything so not processing the buffer. in.length=%d",client->in.length);
+            logger(LOG_DEBUG, "[process_data] There wasn't enough data to build anything so not processing the buffer. in.length=%d", client->in.length);
 			stopped = 1;
 		}
 		else {
@@ -327,6 +327,7 @@ assert(0);
 						case CMD_CONTROL_BUCKET: cmd_control_bucket(client, &header, ptr);		break;
 						case CMD_HASHMASK:		 cmd_hashmask(client, &header, ptr);			break;
 						case CMD_HELLO: 		 cmd_hello(client, &header); 					break;
+						case CMD_GOODBYE:		 cmd_goodbye(client, &header);					break;
 						case CMD_SERVERHELLO: 	 cmd_serverhello(client, &header, ptr); 		break;
 						default:
 							// got an invalid command, so we need to reply with an 'unknown' reply.
@@ -652,6 +653,16 @@ static void write_handler(int fd, short int flags, void *arg)
 		client_free(client);
 		client = NULL;
 	}
+
+	
+	if (client) {
+		if (client->closing > 0 && client->write_event == NULL) {
+			// we can now close the connection because we have sent everything.
+			logger(LOG_INFO, "Closing connection to client [%d]", client->handle);
+			client_free(client);
+			client = NULL;
+		}
+	}
 }
 
 
@@ -839,4 +850,16 @@ void clients_dump(void)
 		}
 	}
 	stat_dumpstr(NULL);
+}
+
+
+// mark the client to indicate that the socket needs to be closed as soon as all outgoing data has 
+// been sent.  Since we will be sending an ACK back to the client, then we cant close now, we must 
+// wait until the data has been sent.
+void client_closing(client_t *client)
+{
+	assert(client);
+	assert(client->closing == 0);
+
+	client->closing = 1;
 }

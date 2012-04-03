@@ -374,6 +374,20 @@ void cmd_ping(client_t *client, header_t *header)
 }
 
 
+void cmd_goodbye(client_t *client, header_t *header)
+{
+	assert(client);
+	assert(header);
+
+	logger(LOG_INFO, "CMD: goodbye");
+	
+	client_closing(client);
+	
+	// send the ACK reply.
+	client_send_message(client, header, REPLY_ACK, 0, NULL);
+}
+
+
 
 void cmd_serverhello(client_t *client, header_t *header, char *payload)
 {
