@@ -14,6 +14,7 @@
 #include "process.h"
 #include "protocol.h"
 #include "push.h"
+#include "stats.h"
 #include "timeout.h"
 
 #include <assert.h>
@@ -61,11 +62,13 @@ client_t * client_new(void)
 	client->out.offset = 0;
 	client->out.length = 0;
 	client->out.max = 0;
+	client->out.total = 0;
 	
 	client->in.buffer = NULL;
 	client->in.offset = 0;
 	client->in.length = 0;
 	client->in.max = 0;
+	client->in.total = 0;
 	
 	client->nextid = 0;
 	
@@ -493,6 +496,9 @@ static void read_handler(int fd, short int flags, void *arg)
 			
 			client->timeout = 0;
 			
+			stats_bytes_in(res);
+			client->in.total += res;
+			
 			if (log_getlevel() >= LOG_EXTRA) {
 				log_data(fd, "IN: ", (unsigned char *)client->in.buffer + client->in.offset, res);
 			}
@@ -610,6 +616,9 @@ static void write_handler(int fd, short int flags, void *arg)
 	
 	res = send(client->handle, client->out.buffer + client->out.offset, client->out.length, 0);
 	if (res > 0) {
+		
+		stats_bytes_out(res);
+		client->out.total += res;
 		
 		if (log_getlevel() >= LOG_EXTRA) {
 			log_data(client->handle, "OUT: ", (unsigned char *)client->out.buffer + client->out.offset, res);
@@ -796,4 +805,38 @@ void client_shutdown(client_t *client)
 		assert(client->shutdown_event);
 		evtimer_add(client->shutdown_event, &_timeout_now);
 	}
+}
+
+
+
+static void client_dump(client_t *client)
+{
+	assert(client);
+	
+	stat_dumpstr("    [%d] Node=%s, Data Received=%ld, Data Sent=%ld", 
+				 client->handle,
+				 client->node ? "yes" : "no",
+				 client->in.total,
+				 client->out.total
+				);
+}
+
+
+void clients_dump(void)
+{
+	int i;
+	
+	stat_dumpstr("CLIENTS");
+	
+	if (_client_count > 0) {
+		stat_dumpstr(NULL);
+		stat_dumpstr("  Client List:");
+		
+		for (i=0; i<_client_count; i++) {
+			if (_clients[i]) {
+				client_dump(_clients[i]);
+			}
+		}
+	}
+	stat_dumpstr(NULL);
 }

@@ -210,7 +210,6 @@ static void sigint_handler(evutil_socket_t fd, short what, void *arg)
 	event_free(_sigint_event);
 	_sigint_event = NULL;
 
-	stats_prepareshutdown();
 	log_prepareshutdown();
 	
 	// start the shutdown event.  This timeout event will just keep ticking over until the _shutdown 
@@ -225,20 +224,6 @@ static void sigint_handler(evutil_socket_t fd, short what, void *arg)
 }
 
 
-//--------------------------------------------------------------------------------------------------
-// When SIGHUP is received, we need to print out detailed statistics to the logfile.  This will 
-// include as much information as we can gather quickly.
-static void sighup_handler(evutil_socket_t fd, short what, void *arg)
-{
-	assert(arg == NULL);
-
-	// clear out all cached objects.
-	assert(0);
-
-	// reload the config database file.
-	assert(0);
-
-}
 
 
 //-----------------------------------------------------------------------------

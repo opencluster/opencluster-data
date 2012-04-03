@@ -9,6 +9,7 @@
 #include "item.h"
 #include "logging.h"
 #include "push.h"
+#include "stats.h"
 
 #include <assert.h>
 #include <stdlib.h>
@@ -69,6 +70,9 @@ bucket_data_t * data_new(hash_t hashmask)
 	data->tree = g_tree_new(key_compare_fn);
 	assert(data->tree);
 	data->next = NULL;
+	
+	data->item_count = 0;
+	data->data_size = 0;
 	
 	assert(_mask > 0);
 	assert(hashmask >= 0 && hashmask <= _mask);
@@ -654,3 +658,11 @@ void data_migrated(bucket_data_t *data, hash_t map_hash, hash_t key_hash)
 #endif
 }
 
+
+
+
+void data_dump(bucket_data_t *data)
+{
+	stat_dumpstr("      Data Items: %ld", data->item_count);
+	stat_dumpstr("      Data Bytes: %ld", data->data_size);
+}

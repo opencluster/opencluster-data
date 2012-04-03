@@ -87,8 +87,7 @@ static bucket_t * find_nobackup_bucket(void)
 				if (_buckets[i]->backup_node == NULL) {
 					bucket = _buckets[i];
 
-					printf("[%u] Attempting to migrate bucket #%X that has no backup copy.\n",
-					   _seconds, bucket->hash); 
+					logger(LOG_INFO, "Attempting to migrate bucket #%X that has no backup copy.", bucket->hash); 
 					
 					
 					assert(bucket->hash == i);

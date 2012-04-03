@@ -8,6 +8,7 @@
 #include "item.h"
 #include "logging.h"
 #include "push.h"
+#include "stats.h"
 #include "timeout.h"
 
 #include <assert.h>
@@ -492,3 +493,82 @@ int buckets_store_name(hash_t key_hash, char *name, int int_key)
 		return(-1);
 	}
 }
+
+
+
+
+static void bucket_dump(bucket_t *bucket)
+{
+	node_t *node;
+	
+	assert(bucket);
+	
+	stat_dumpstr("    Bucket: 0x%08X", bucket->hash);
+	if (bucket->level == 0) {
+		stat_dumpstr("      Mode: Primary");
+		assert(bucket->target_node == NULL);
+		if (bucket->backup_node) {
+			assert(bucket->backup_node->name);
+			stat_dumpstr("      Backup Node: %s", bucket->backup_node->name);
+		}
+		else {
+			stat_dumpstr("      Backup Node: ");
+		}
+	}
+	else if (bucket->level == 1) {
+		stat_dumpstr("      Mode: Secondary");
+		assert(bucket->backup_node == NULL);
+		assert(bucket->target_node);
+		assert(bucket->target_node->name);
+		stat_dumpstr("      Source Node: %s", bucket->target_node->name);
+	}
+	else {
+		stat_dumpstr("      Mode: Unknown");
+	}
+	
+	assert(bucket->data);
+	data_dump(bucket->data);
+
+	if (bucket->transfer_client) {
+		node = bucket->transfer_client->node;
+		assert(node);
+		assert(node->name);
+		stat_dumpstr("      Currently transferring to: %s", node->name);
+		stat_dumpstr("      Transfer Mode: %d", bucket->transfer_mode_special);
+	}
+}
+
+
+void buckets_dump(void)
+{
+	int i;
+	
+	stat_dumpstr("BUCKETS");
+	stat_dumpstr("  Mask: 0x%08X", _mask);
+	stat_dumpstr("  Buckets without backups: %d", _nobackup_buckets);
+	stat_dumpstr("  Primary Buckets: %d", _primary_buckets);
+	stat_dumpstr("  Secondary Buckets: %d", _secondary_buckets);
+	stat_dumpstr("  Bucket currently transferring: %s", _bucket_transfer == 0 ? "no" : "yes");
+	stat_dumpstr("  Migration Sync Counter: %d", _migrate_sync);
+
+	stat_dumpstr("  List of Buckets:");
+	
+	for (i=0; i<=_mask; i++) {
+		if (_buckets[i]) {
+			bucket_dump(_buckets[i]);
+		}
+	}
+	stat_dumpstr(NULL);
+}
+
+
+void hashmasks_dump(void)
+{
+
+// the list of hashmasks is to know which servers are responsible for which buckets.
+// this list of hashmasks will also replace the need to 'settle'.  Instead, a timed event will 
+// occur periodically that checks that the hashmask coverage is complete.
+// hashmask_t ** _hashmasks = NULL;
+
+}
+

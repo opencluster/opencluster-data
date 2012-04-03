@@ -61,7 +61,8 @@ INC_BUCKET_DATA=\
 	$(H_ITEM) \
 	$(H_GLOBALS) \
 	$(H_PUSH) \
-	$(H_LOGGING)
+	$(H_LOGGING) \
+	$(H_STATS)
 
 INC_BUCKET= \
 	$(H_BUCKET) \
@@ -69,7 +70,8 @@ INC_BUCKET= \
 	$(H_GLOBALS) \
 	$(H_PUSH) \
 	$(H_TIMEOUT) \
-	$(H_LOGGING)
+	$(H_LOGGING) \
+	$(H_STATS)
 
 INC_CLIENT= \
 	$(H_CLIENT) \
@@ -82,7 +84,8 @@ INC_CLIENT= \
 	$(H_PROCESS) \
 	$(H_COMMANDS) \
 	$(H_TIMEOUT) \
-	$(H_LOGGING)
+	$(H_LOGGING) \
+	$(H_STATS)
 
 INC_COMMANDS= \
 	$(H_COMMANDS) \
@@ -105,7 +108,8 @@ INC_NODE= \
 	$(H_GLOBALS) \
 	$(H_TIMEOUT) \
 	$(H_PUSH) \
-	$(H_LOGGING)
+	$(H_LOGGING) \
+	$(H_STATS)
 
 INC_OCD= \
 	$(H_ITEM) \

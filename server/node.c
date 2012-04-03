@@ -9,6 +9,7 @@
 #include "globals.h"
 #include "logging.h"
 #include "push.h"
+#include "stats.h"
 #include "timeout.h"
 
 #include <assert.h>
@@ -420,4 +421,39 @@ void node_shutdown(node_t *node)
 		evtimer_add(node->shutdown_event, &_timeout_now);
 	}
 }
+
+
+static void node_dump(int index, node_t *node)
+{
+	assert(node);
+
+	stat_dumpstr("    [%02d] '%s', Connected=%s, Connect_attempts=%d", 
+				 index, 
+				 node->name, 
+				 node->client ? "yes" : "no", 
+				 node->connect_attempts);
+}
+
+
+// dump to the stats logger, all the information that we have about the nodes;
+void nodes_dump(void)
+{
+	int i;
+	
+	stat_dumpstr("NODES");
+	stat_dumpstr("  Active Nodes: %d", _active_nodes);
+	
+	if (_node_count > 0) {
+		stat_dumpstr(NULL);
+		stat_dumpstr("  Node List:");
+		
+		for (i=0; i<_node_count; i++) {
+			if (_nodes[i]) {
+				node_dump(i, _nodes[i]);
+			}
+		}
+	}
+	stat_dumpstr(NULL);
+}
+
 

@@ -1,8 +1,9 @@
 This file provides some information about active branches in the repository.
 
-stats-dump
-	SIGHUP should trigger a dump of as much info as possible, including the hashmasks for buckets in 
-	the server, the list of other server nodes, and some stats on the amount of data stored.
+goodbye
+	Make sure that the server handles GOODBYE messages and closes the socket.  This is because there 
+	seems to be an underlying problem with the way the java client closes sockets.   We should 
+	investigate that further anyway, but for now we can ensure that GOODBYE does what we want.
 
 command-callback
 	The current method of parsing the commands and replies is a switch statement.  However, an array 
@@ -12,7 +13,14 @@ command-callback
 verify-cluster
 	make sure that the migration is moving the buckets evenly, and that clients are getting the 
 	right information.   When a migration is completed, make sure the client is asking the server 
-	for the right information.
+	for the right information.  
+
+	After adding the Stats Dump, I can see that the buckets are not migrating correctly, and various 
+	stats are not getting set right.  
+
+	  * after the migrate, the _nobackup_buckets is still 16.
+	  * after the migrate, all the buckets on the first node are listed as primary, all on the 
+	    second node are secondary.  It should have been half and half.
 
 empty-migrate
 	Make sure that the cluster can migrate empty buckets.  There was an issue with this when doing 

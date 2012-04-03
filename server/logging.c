@@ -184,6 +184,7 @@ void log_init(const char *logfile, short int loglevel, int maxfilesize)
 }
 
 
+// we must turn off these signals while the shutdown is happening or the event-loop will never exit.
 void log_prepareshutdown(void)
 {
 	assert(_sigusr1_event);

@@ -19,6 +19,7 @@ typedef struct {
 		int offset;
 		int length;
 		int max;
+		long long total;
 	} in, out;
 	
 	int nextid;
@@ -41,6 +42,8 @@ void client_accept(client_t *client, evutil_socket_t handle, struct sockaddr *ad
 void client_send_message(client_t *client, header_t *header, short command, int length, void *payload);
 void client_attach_node(client_t *client, void *node, int fd);
 void client_shutdown(client_t *client);
+
+void clients_dump(void);
 
 
 // functions that are used to pull data out of the communication channel.  Since both 'commands' and 

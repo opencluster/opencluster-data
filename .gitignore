@@ -13,5 +13,6 @@ server/queue.o
 migration-test
 server/ocd.debug
 server/*.o
-server/logs-*
+server/a-logs-*
+server/b-logs-*
 
