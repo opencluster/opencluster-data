@@ -1,10 +1,5 @@
 This file provides some information about active branches in the repository.
 
-command-callback
-	The current method of parsing the commands and replies is a switch statement.  However, an array 
-	of similar callback functions might be better.  They would get setup when the daemon is starting 
-	up.  An array lookup should be a touch faster than a bunch of IF statements.
-
 verify-cluster
 	make sure that the migration is moving the buckets evenly, and that clients are getting the 
 	right information.   When a migration is completed, make sure the client is asking the server 
