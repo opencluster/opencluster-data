@@ -2,6 +2,7 @@
 
 #include "stats.h"
 
+#include "bucket.h"
 #include "globals.h"
 #include "logging.h"
 #include "node.h"

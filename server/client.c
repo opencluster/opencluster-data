@@ -43,6 +43,41 @@ static void read_handler(int fd, short int flags, void *arg);
 static void write_handler(int fd, short int flags, void *arg);
 
 
+void **_commands = NULL;
+int _command_max = 0;
+
+void client_init_commands(int max)
+{
+	assert(_commands == NULL);
+	assert(_command_max == 0);
+	assert(max > 0);
+	
+	_commands = calloc(max, sizeof(void *));
+	_command_max = max;
+	
+	cmd_init();
+	process_init();
+}
+
+void client_add_cmd(int cmd, void *fn)
+{
+	int new_max;
+	
+	assert(_commands);
+	assert(_command_max > 0);
+	
+	if (cmd >= _command_max) {
+		new_max = cmd + 512;
+		_commands = realloc(_commands, sizeof(void *) * new_max);
+		for ( ; _command_max < new_max; _command_max++) {
+			_commands[_command_max] = NULL;
+		}
+	}
+	
+	assert(cmd < _command_max);
+	assert(_commands[cmd] == NULL);
+	_commands[cmd] = fn;
+}
 
 
 client_t * client_new(void)
@@ -241,6 +276,8 @@ static int process_data(client_t *client)
 	char *ptr;
 	header_t header;
 	raw_header_t *raw;
+
+	void (*func)(client_t *client, header_t *header, char *payload);
 	
 	assert(sizeof(char) == 1);
 	assert(sizeof(short int) == 2);
@@ -288,59 +325,31 @@ static int process_data(client_t *client)
 				// get a pointer to the payload
 				ptr = client->in.buffer + client->in.offset + HEADER_SIZE;
 				assert(ptr);
-				
-				if (header.repcmd != 0) {
-					// we have received a reply to a command we issued.  So we need to process that reply.
-					// we have enough data, so we need to pass it on to the functions that handle it.
-					switch (header.command) {
-						case REPLY_ACK:     			process_ack(client, &header); 					break;
-						case REPLY_SYNC_NAME_ACK:       process_sync_name_ack(client, &header, ptr);    break;
-						case REPLY_SYNC_ACK:            process_sync_ack(client, &header, ptr);         break;
-						case REPLY_LOADLEVELS:			process_loadlevels(client, &header, ptr);		break;
-						case REPLY_ACCEPTING_BUCKET:	process_accept_bucket(client, &header, ptr);	break;
-						case REPLY_CONTROL_BUCKET_COMPLETE: process_control_bucket_complete(client, &header, ptr);	break;
-						case REPLY_UNKNOWN:				process_unknown(client, &header); 				break;
-						default:
-							logger(LOG_ERROR, "Unknown reply: Reply=%d, Command=%d, userid=%d, length=%d", 
+
+				if (header.command >= _command_max || _commands[header.command] == NULL) {
+
+					if (header.repcmd != 0) {
+						logger(LOG_ERROR, "Unknown reply: Reply=%d, Command=%d, userid=%d, length=%d", 
 									header.repcmd, header.command, header.userid, header.length);
-								
-#ifndef NDEBUG
-assert(0);
-#endif							
-							break;
 					}
+					else {
+						logger(LOG_ERROR, "Unknown command received: Command=%d, userid=%d, length=%d", header.command, header.userid, header.length);
+						client_send_message(client, &header, REPLY_UNKNOWN, 0, NULL);
+					}
+
+					#ifndef NDEBUG
+					assert(0);
+					#endif							
+					
+					
 				}
 				else {
-				
-					// we have enough data, so we need to pass it on to the functions that handle it.
-					switch (header.command) {
-						case CMD_GET_INT: 		 cmd_get_int(client, &header, ptr); 			break;
-						case CMD_GET_STR: 		 cmd_get_str(client, &header, ptr); 			break;
-						case CMD_SET_INT: 		 cmd_set_int(client, &header, ptr); 			break;
-						case CMD_SET_STR: 		 cmd_set_str(client, &header, ptr); 			break;
-						case CMD_SYNC_INT: 		 cmd_sync_int(client, &header, ptr); 			break;
-						case CMD_SYNC_NAME:      cmd_sync_name(client, &header, ptr); 			break;
-						case CMD_SYNC_STRING: 	 cmd_sync_string(client, &header, ptr);			break;
-						case CMD_PING: 	         cmd_ping(client, &header); 					break;
-						case CMD_LOADLEVELS: 	 cmd_loadlevels(client, &header);				break;
-						case CMD_ACCEPT_BUCKET:  cmd_accept_bucket(client, &header, ptr);		break;
-						case CMD_CONTROL_BUCKET: cmd_control_bucket(client, &header, ptr);		break;
-						case CMD_HASHMASK:		 cmd_hashmask(client, &header, ptr);			break;
-						case CMD_HELLO: 		 cmd_hello(client, &header); 					break;
-						case CMD_GOODBYE:		 cmd_goodbye(client, &header);					break;
-						case CMD_SERVERHELLO: 	 cmd_serverhello(client, &header, ptr); 		break;
-						default:
-							// got an invalid command, so we need to reply with an 'unknown' reply.
-							// since we have the raw command still in our buffer, we can use that 
-							// without having to build a normal reply.
-							logger(LOG_ERROR, "Unknown command received: Command=%d, userid=%d, length=%d", header.command, header.userid, header.length);
-							client_send_message(client, &header, REPLY_UNKNOWN, 0, NULL);
-#ifndef NDEBUG
-assert(0);
-#endif							
-							break;
-					}
+					
+					assert(_commands[header.command]);
+					func = _commands[header.command];
+					(*func)(client, &header, ptr);
 				}
+				
 				
 				// need to adjust the details of the incoming buffer.
 				client->in.length -= (header.length + HEADER_SIZE);
@@ -353,7 +362,9 @@ assert(0);
 					client->in.offset += (header.length + HEADER_SIZE);
 				}
 				assert( ( client->in.length + client->in.offset ) <= client->in.max);
-	}	}	}
+			}	
+		}	
+	}
 	
 	assert(stopped != 0);
 	

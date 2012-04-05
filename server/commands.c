@@ -1,8 +1,10 @@
 // commands.c
 
 #include "bucket.h"
+#include "client.h"
 #include "commands.h"
 #include "globals.h"
+#include "header.h"
 #include "logging.h"
 #include "payload.h"
 #include "protocol.h"
@@ -22,8 +24,9 @@ extern hashmask_t ** _hashmasks;
 
 
 
+
 // Get a value from storage.
-void cmd_get_int(client_t *client, header_t *header, char *payload)
+static void cmd_get_int(client_t *client, header_t *header, char *payload)
 {
 	char *next;
 	int map_hash;
@@ -72,7 +75,7 @@ void cmd_get_int(client_t *client, header_t *header, char *payload)
 
 
 // Get a value from storage.
-void cmd_get_str(client_t *client, header_t *header, char *payload)
+static void cmd_get_str(client_t *client, header_t *header, char *payload)
 {
 	char *next;
 	int map_hash;
@@ -119,7 +122,7 @@ void cmd_get_str(client_t *client, header_t *header, char *payload)
 
 
 // Set a value into the hash storage.
-void cmd_set_str(client_t *client, header_t *header, char *payload)
+static void cmd_set_str(client_t *client, header_t *header, char *payload)
 {
 	char *next;
 	int map_hash;
@@ -187,7 +190,7 @@ void cmd_set_str(client_t *client, header_t *header, char *payload)
 
 
 
-void cmd_loadlevels(client_t *client, header_t *header)
+static void cmd_loadlevels(client_t *client, header_t *header)
 {
 	assert(client);
 	assert(header);
@@ -213,7 +216,7 @@ void cmd_loadlevels(client_t *client, header_t *header)
 
 
 // Get a value from storage.
-void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
+static void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
 {
 	char *next;
 	hash_t mask;
@@ -297,7 +300,7 @@ void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
 
 
 // Set a value into the hash storage.
-void cmd_set_int(client_t *client, header_t *header, char *payload)
+static void cmd_set_int(client_t *client, header_t *header, char *payload)
 {
 	char *next;
 	int map_hash;
@@ -362,7 +365,7 @@ void cmd_set_int(client_t *client, header_t *header, char *payload)
 
 
 
-void cmd_ping(client_t *client, header_t *header)
+static void cmd_ping(client_t *client, header_t *header)
 {
 	assert(client);
 	assert(header);
@@ -374,7 +377,7 @@ void cmd_ping(client_t *client, header_t *header)
 }
 
 
-void cmd_goodbye(client_t *client, header_t *header)
+static void cmd_goodbye(client_t *client, header_t *header)
 {
 	assert(client);
 	assert(header);
@@ -389,7 +392,7 @@ void cmd_goodbye(client_t *client, header_t *header)
 
 
 
-void cmd_serverhello(client_t *client, header_t *header, char *payload)
+static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 {
 	char *next;
 	char *name = NULL;
@@ -485,7 +488,7 @@ void cmd_serverhello(client_t *client, header_t *header, char *payload)
  * This command is recieved from other nodes, which describe a bucket that node handles.
  * Over-write current internal data with whatever is in here.
  */
-void cmd_hashmask(client_t *client, header_t *header, char *payload)
+static void cmd_hashmask(client_t *client, header_t *header, char *payload)
 {
 	char *next;
 	hash_t mask;
@@ -567,7 +570,7 @@ void cmd_hashmask(client_t *client, header_t *header, char *payload)
 // a bucket is being migrated to this server, and the other node is telling us that all the data has 
 // been transferred, and now it is passing control to this node.  When this operation is complete, 
 // then the other node will finalize its part in the migration, and migration will be over.
-void cmd_control_bucket(client_t *client, header_t *header, char *payload)
+static void cmd_control_bucket(client_t *client, header_t *header, char *payload)
 {
 	char *next;
 	hash_t mask;
@@ -678,7 +681,7 @@ void cmd_control_bucket(client_t *client, header_t *header, char *payload)
 
 // the hello command does not require a payload, and simply does a reply.   
 // However, it triggers a servermap, and a hashmasks command to follow it.
-void cmd_hello(client_t *client, header_t *header)
+static void cmd_hello(client_t *client, header_t *header)
 {
 	assert(client);
 	assert(header);
@@ -700,7 +703,7 @@ void cmd_hello(client_t *client, header_t *header)
 
 // Set a value into the hash storage for a new bucket we are receiving.  Almost the same as 
 // cmd_set_str, except the data received is slightly different.
-void cmd_sync_string(client_t *client, header_t *header, char *payload)
+static void cmd_sync_string(client_t *client, header_t *header, char *payload)
 {
 	char *next;
 	int map_hash;
@@ -766,7 +769,7 @@ void cmd_sync_string(client_t *client, header_t *header, char *payload)
 
 // Set a value into the hash storage for a new bucket we are receiving.  Almost the same as 
 // cmd_set_str, except the data received is slightly different.
-void cmd_sync_int(client_t *client, header_t *header, char *payload)
+static void cmd_sync_int(client_t *client, header_t *header, char *payload)
 {
 	char *next;
 	int map_hash;
@@ -820,7 +823,7 @@ void cmd_sync_int(client_t *client, header_t *header, char *payload)
 
 // Set a value into the hash storage for a new bucket we are receiving.  Almost the same as 
 // cmd_set_str, except the data received is slightly different.
-void cmd_sync_name(client_t *client, header_t *header, char *payload)
+static void cmd_sync_name(client_t *client, header_t *header, char *payload)
 {
 	char *next;
 	hash_t key_hash;
@@ -858,5 +861,24 @@ void cmd_sync_name(client_t *client, header_t *header, char *payload)
 }
 
 
+void cmd_init(void)
+{
+	// add the commands to the client processing code.
+	client_add_cmd(CMD_GET_INT, cmd_get_int);
+	client_add_cmd(CMD_GET_STR, cmd_get_str);
+	client_add_cmd(CMD_SET_INT, cmd_set_int);
+	client_add_cmd(CMD_SET_STR, cmd_set_str);
+	client_add_cmd(CMD_SYNC_INT, cmd_sync_int);
+	client_add_cmd(CMD_SYNC_NAME, cmd_sync_name);
+	client_add_cmd(CMD_SYNC_STRING, cmd_sync_string);
+	client_add_cmd(CMD_PING, cmd_ping);
+	client_add_cmd(CMD_LOADLEVELS, cmd_loadlevels);
+	client_add_cmd(CMD_ACCEPT_BUCKET, cmd_accept_bucket);
+	client_add_cmd(CMD_CONTROL_BUCKET, cmd_control_bucket);
+	client_add_cmd(CMD_HASHMASK, cmd_hashmask);
+	client_add_cmd(CMD_HELLO, cmd_hello);
+	client_add_cmd(CMD_GOODBYE, cmd_goodbye);
+	client_add_cmd(CMD_SERVERHELLO, cmd_serverhello);
+}
 
 

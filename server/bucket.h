@@ -76,6 +76,9 @@ int buckets_nobackup_count(void);
 void bucket_destroy(bucket_t *bucket);
 
 
+void buckets_dump(void);
+void hashmasks_dump(void);
+
 
 #ifndef __BUCKET_C
 	extern bucket_t ** _buckets;

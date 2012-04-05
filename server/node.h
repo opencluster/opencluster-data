@@ -33,6 +33,7 @@ int node_active_inc(void);
 int node_active_dec(void);
 int node_active_count(void);
 
+void nodes_dump(void);
 
 
 
