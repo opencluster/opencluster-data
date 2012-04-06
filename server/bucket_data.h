@@ -25,6 +25,9 @@ typedef struct __bucket_data_t {
 	// if we already have an 'oldtree' and we need to split again, then we put the existing old tree 
 	// inside this new one.   When the data is eventually moved out of it, it can be deleted.
 	struct __bucket_data_t *next;
+	
+	long long item_count;
+	long long data_size;
 
 } bucket_data_t;
 
@@ -52,6 +55,7 @@ int data_in_transit(void);
 void data_in_transit_dec(void);
 void data_migrated(bucket_data_t *data, hash_t map, hash_t hash);
 
+void data_dump(bucket_data_t *data);
 
 
 #endif

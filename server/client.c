@@ -9,13 +9,16 @@
 #include "constants.h"
 #include "globals.h"
 #include "header.h"
+#include "logging.h"
 #include "node.h"
 #include "process.h"
 #include "protocol.h"
 #include "push.h"
+#include "stats.h"
 #include "timeout.h"
 
 #include <assert.h>
+#include <ctype.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,11 +62,13 @@ client_t * client_new(void)
 	client->out.offset = 0;
 	client->out.length = 0;
 	client->out.max = 0;
+	client->out.total = 0;
 	
 	client->in.buffer = NULL;
 	client->in.offset = 0;
 	client->in.length = 0;
 	client->in.max = 0;
+	client->in.total = 0;
 	
 	client->nextid = 0;
 	
@@ -117,7 +122,7 @@ void client_accept(client_t *client, evutil_socket_t handle, struct sockaddr *ad
 	assert(client->handle < 0);
 	client->handle = handle;
 	
-	if (_verbose) printf("[%u] New client - handle=%d\n", _seconds, handle);
+	logger(LOG_INFO, "New client - handle=%d", handle);
 
 	assert(_evbase);
 	assert(client->handle > 0);
@@ -140,7 +145,7 @@ void client_free(client_t *client)
 	assert(client);
 	assert(client->transfer_bucket == NULL);
 	
-	if (_verbose >= 2) printf("[%u] client_free: handle=%d, in_len=%d(%d), out_len=%d(%d)\n", _seconds, client->handle, client->in.length, client->in.offset, client->out.length, client->out.offset);
+	logger(LOG_INFO, "client_free: handle=%d", client->handle);
 
 	if (client->node) {
 		node_detach_client(client->node);
@@ -196,8 +201,7 @@ void client_free(client_t *client)
 				resize ++;
 	}	}	}
 	
-	if (_verbose > 0) 
-		printf("[%u] found:%d, client_count:%d\n", _seconds, found, _client_count);
+	logger(LOG_INFO, "found:%d, client_count:%d", found, _client_count);
 	
 	assert(found == 1);
 	
@@ -254,7 +258,7 @@ static int process_data(client_t *client)
 		// least that.
 		if (client->in.length < HEADER_SIZE) {
 			// we didn't have enough, even for the header, so we are stopping.
-                        printf("[process_data] There wasn't enough data to build anything so not processing the buffer. in.length=%d",client->in.length);
+            logger(LOG_DEBUG, "[process_data] There wasn't enough data to build anything so not processing the buffer. in.length=%d", client->in.length);
 			stopped = 1;
 		}
 		else {
@@ -270,11 +274,10 @@ static int process_data(client_t *client)
 			header.userid = ntohl(raw->userid);
 			header.length = ntohl(raw->length);
 			
-			if (_verbose > 4) {
-				printf("[%u] New telegram: Command=%d, repcmd=%d, userid=%d, length=%d, buffer_length=%d\n", 
-					_seconds, header.command, header.repcmd, 
+			
+			logger(LOG_DEBUG, "New telegram: Command=%d, repcmd=%d, userid=%d, length=%d, buffer_length=%d", 
+					header.command, header.repcmd, 
 					header.userid, header.length, client->in.length);
-			}
 			
 			if ((client->in.length-HEADER_SIZE) < header.length) {
 				// we dont have enough data yet.
@@ -298,11 +301,9 @@ static int process_data(client_t *client)
 						case REPLY_CONTROL_BUCKET_COMPLETE: process_control_bucket_complete(client, &header, ptr);	break;
 						case REPLY_UNKNOWN:				process_unknown(client, &header); 				break;
 						default:
-							if (_verbose > 1) {
-								printf("[%u] Unknown reply: Reply=%d, Command=%d, userid=%d, length=%d\n", 
-									_seconds, header.repcmd, header.command, header.userid, header.length);
+							logger(LOG_ERROR, "Unknown reply: Reply=%d, Command=%d, userid=%d, length=%d", 
+									header.repcmd, header.command, header.userid, header.length);
 								
-							}
 #ifndef NDEBUG
 assert(0);
 #endif							
@@ -326,12 +327,13 @@ assert(0);
 						case CMD_CONTROL_BUCKET: cmd_control_bucket(client, &header, ptr);		break;
 						case CMD_HASHMASK:		 cmd_hashmask(client, &header, ptr);			break;
 						case CMD_HELLO: 		 cmd_hello(client, &header); 					break;
+						case CMD_GOODBYE:		 cmd_goodbye(client, &header);					break;
 						case CMD_SERVERHELLO: 	 cmd_serverhello(client, &header, ptr); 		break;
 						default:
 							// got an invalid command, so we need to reply with an 'unknown' reply.
 							// since we have the raw command still in our buffer, we can use that 
 							// without having to build a normal reply.
-							if (_verbose > 1) { printf("[%u] Unknown command received: Command=%d, userid=%d, length=%d\n", _seconds, header.command, header.userid, header.length); }
+							logger(LOG_ERROR, "Unknown command received: Command=%d, userid=%d, length=%d", header.command, header.userid, header.length);
 							client_send_message(client, &header, REPLY_UNKNOWN, 0, NULL);
 #ifndef NDEBUG
 assert(0);
@@ -360,6 +362,74 @@ assert(0);
 
 
 
+static void log_data(int handle, char *tag, unsigned char *data, int length)
+{
+	int i;
+	int col;
+	char buffer[512];	// line buffer.
+	int len;  			// buffer length;
+	int start;
+	
+	assert(tag);
+	assert(data);
+	assert(length > 0);
+
+	i = 0;
+	while (i < length) {
+
+		start = i;
+		
+		// first put the tag in the buffer.
+		strncpy(buffer, tag, sizeof(buffer));
+		len = strlen(tag);
+		
+		// now put the line count.
+		len += sprintf(buffer+len, "[%d] %04X: ", handle, i);
+		
+		// now display the columns of text.
+		for (col=0; col<16; col++) {
+			if (i < length && col==7) {
+				len += sprintf(buffer+len, "%02x-", data[i]);
+			}
+			else if (i < length) {
+				len += sprintf(buffer+len, "%02x ", data[i]);
+			}
+			else {
+				len += sprintf(buffer+len, "   ");
+			}
+			
+			i++;
+		}
+		
+		// add a seperator
+		len += sprintf(buffer+len, ": ");
+		
+		// now we display the plain text.
+		assert(start >= 0);
+		assert(start < i);
+		for (col=0; col<16; col++) {
+			if (start < length) {
+				if (isprint(data[start])) {
+					len += sprintf(buffer+len, "%c", data[start]);
+				}
+				else {
+					len += sprintf(buffer+len, ".");
+				}
+			}
+			else {
+				len += sprintf(buffer+len, " ");
+			}
+			
+			start++;
+		}
+
+		assert(i == start);
+		logger(LOG_EXTRA, "%s", buffer);
+	}
+}
+
+
+
 
 
 
@@ -373,7 +443,6 @@ static void read_handler(int fd, short int flags, void *arg)
 	int avail;
 	int res;
 	int processed;
-	unsigned char *pp;
 	
 	assert(fd >= 0);
 	assert(flags != 0);
@@ -388,9 +457,7 @@ static void read_handler(int fd, short int flags, void *arg)
 		if (client->timeout >= client->timeout_limit) {
 		
 			// we timed out, so we should kill the client.
-			if (_verbose > 2) {
-				printf("[%u] client timed out. handle=%d\n", _seconds, fd);
-			}
+			logger(LOG_ERROR, "client timed out. handle=%d", fd);
 			
 			// because the client has timed out, we need to clear out any data that we currently 
 			// have for it.
@@ -430,15 +497,13 @@ static void read_handler(int fd, short int flags, void *arg)
 			
 			client->timeout = 0;
 			
-			if (_verbose > 2) {
-				pp =  client->in.buffer + client->in.offset;
-				printf("Data received.  length=%d\n", res);
-				for (processed=0; processed < res; processed++, pp++) {
-					printf("  %04d: %02X (%d)\n", processed, *pp, *pp);
-				}
-				
-			}
+			stats_bytes_in(res);
+			client->in.total += res;
 			
+			if (log_getlevel() >= LOG_EXTRA) {
+				log_data(fd, "IN: ", (unsigned char *)client->in.buffer + client->in.offset, res);
+			}
+
 			// got some data.
 			assert(res <= avail);
 			client->in.length += res;
@@ -451,7 +516,7 @@ static void read_handler(int fd, short int flags, void *arg)
 		}
 		else {
 			// the connection was closed, or there was an error.
-			if (_verbose > 2)  printf("socket %d closed. res=%d, errno=%d,'%s'\n", fd, res, errno, strerror(errno));
+			logger(LOG_ERROR, "socket %d closed. res=%d, errno=%d,'%s'", fd, res, errno, strerror(errno));
 			
 			// free the client resources.
 			if (client->node) {
@@ -553,6 +618,13 @@ static void write_handler(int fd, short int flags, void *arg)
 	res = send(client->handle, client->out.buffer + client->out.offset, client->out.length, 0);
 	if (res > 0) {
 		
+		stats_bytes_out(res);
+		client->out.total += res;
+		
+		if (log_getlevel() >= LOG_EXTRA) {
+			log_data(client->handle, "OUT: ", (unsigned char *)client->out.buffer + client->out.offset, res);
+		}
+		
 		assert(res <= client->out.length);
 		if (res == client->out.length) {
 			client->out.offset = 0;
@@ -580,6 +652,16 @@ static void write_handler(int fd, short int flags, void *arg)
 		// the connection has closed, so we need to clean up.
 		client_free(client);
 		client = NULL;
+	}
+
+	
+	if (client) {
+		if (client->closing > 0 && client->write_event == NULL) {
+			// we can now close the connection because we have sent everything.
+			logger(LOG_INFO, "Closing connection to client [%d]", client->handle);
+			client_free(client);
+			client = NULL;
+		}
 	}
 }
 
@@ -734,4 +816,50 @@ void client_shutdown(client_t *client)
 		assert(client->shutdown_event);
 		evtimer_add(client->shutdown_event, &_timeout_now);
 	}
+}
+
+
+
+static void client_dump(client_t *client)
+{
+	assert(client);
+	
+	stat_dumpstr("    [%d] Node=%s, Data Received=%ld, Data Sent=%ld", 
+				 client->handle,
+				 client->node ? "yes" : "no",
+				 client->in.total,
+				 client->out.total
+				);
+}
+
+
+void clients_dump(void)
+{
+	int i;
+	
+	stat_dumpstr("CLIENTS");
+	
+	if (_client_count > 0) {
+		stat_dumpstr(NULL);
+		stat_dumpstr("  Client List:");
+		
+		for (i=0; i<_client_count; i++) {
+			if (_clients[i]) {
+				client_dump(_clients[i]);
+			}
+		}
+	}
+	stat_dumpstr(NULL);
+}
+
+
+// mark the client to indicate that the socket needs to be closed as soon as all outgoing data has 
+// been sent.  Since we will be sending an ACK back to the client, then we cant close now, we must 
+// wait until the data has been sent.
+void client_closing(client_t *client)
+{
+	assert(client);
+	assert(client->closing == 0);
+
+	client->closing = 1;
 }

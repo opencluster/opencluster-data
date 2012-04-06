@@ -1,23 +1,29 @@
 This file provides some information about active branches in the repository.
 
-system-logging
-	Rather than printing to the output stream, we need to log certain info to a logfile that gets 
-	renamed when it gets too big.  The log data can be output using an event.  SIGUSR1 and SIGUSR2 
-	should be used to increase or decrease the logging level during runtime.
-
-stats-dump
-	SIGHUP should trigger a dump of as much info as possible, including the hashmasks for buckets in 
-	the server, the list of other server nodes, and some stats on the amount of data stored.
+command-callback
+	The current method of parsing the commands and replies is a switch statement.  However, an array 
+	of similar callback functions might be better.  They would get setup when the daemon is starting 
+	up.  An array lookup should be a touch faster than a bunch of IF statements.
 
 verify-cluster
 	make sure that the migration is moving the buckets evenly, and that clients are getting the 
 	right information.   When a migration is completed, make sure the client is asking the server 
-	for the right information.
+	for the right information.  
+
+	After adding the Stats Dump, I can see that the buckets are not migrating correctly, and various 
+	stats are not getting set right.  
+
+	  * after the migrate, the _nobackup_buckets is still 16.
+	  * after the migrate, all the buckets on the first node are listed as primary, all on the 
+	    second node are secondary.  It should have been half and half.
 
 empty-migrate
 	Make sure that the cluster can migrate empty buckets.  There was an issue with this when doing 
 	tests, so it should be looked at.  It makes sense that a number of cluster nodes would likely 
 	be started before any data is put in them.
+
+serverinfo
+	When new nodes connect to existing servers, they need to let their connected clients know about it.
 
 shutdown
 	Better handling of the system shutdown.  When a Ctrl-C signal is received it should fire up 
@@ -50,5 +56,9 @@ client-shutdown
 client-maps
 	The C client does not handle maps properly (or at all), so it needs to be able to use maps.
 
+client-disconnect
+	The C client is not handling things if it loses the connection to the server.  Now that we have 
+	implemented the GOODBYE command, we lose connection to the server when the server closes it.   
+	The client needs to be able to mark it as failed, and re-connect when needed.
 
 

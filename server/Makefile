@@ -22,6 +22,7 @@ OBJS=\
 	client.o commands.o \
 	event-compat.o \
 	item.o \
+	logging.o \
 	node.o \
 	payload.o process.o push.o \
 	seconds.o server.o settle.o stats.o \
@@ -30,6 +31,8 @@ OBJS=\
 	ocd.o
 
 # we define the headers and their dependencies.
+H_GLOBALS=globals.h event-compat.h
+H_LOGGING=logging.h $(H_GLOBALS)
 H_HASH=hash.h
 H_VALUE=value.h
 H_ITEM=item.h $(H_HASH) $(H_VALUE)
@@ -42,7 +45,6 @@ H_NODE=node.h $(H_CLIENT)
 H_BUCKET_DATA=bucket_data.h $(H_VALUE) $(H_HASH) $(H_ITEM) $(H_CLIENT) $(H_CONSTANTS) $(H_NODE)
 H_BUCKET=bucket.h $(H_HASH) $(H_NODE) $(H_BUCKET_DATA) $(H_VALUE)
 H_PUSH=push.h $(H_CLIENT) $(H_BUCKET)
-H_GLOBALS=globals.h event-compat.h
 H_STATS=stats.h
 H_SECONDS=seconds.h
 H_PROCESS=process.h $(H_CLIENT) $(H_HEADER)
@@ -58,14 +60,18 @@ INC_BUCKET_DATA=\
 	$(H_HASH) \
 	$(H_ITEM) \
 	$(H_GLOBALS) \
-	$(H_PUSH)
+	$(H_PUSH) \
+	$(H_LOGGING) \
+	$(H_STATS)
 
 INC_BUCKET= \
 	$(H_BUCKET) \
 	$(H_ITEM) \
 	$(H_GLOBALS) \
 	$(H_PUSH) \
-	$(H_TIMEOUT)
+	$(H_TIMEOUT) \
+	$(H_LOGGING) \
+	$(H_STATS)
 
 INC_CLIENT= \
 	$(H_CLIENT) \
@@ -77,7 +83,9 @@ INC_CLIENT= \
 	$(H_HEADER) \
 	$(H_PROCESS) \
 	$(H_COMMANDS) \
-	$(H_TIMEOUT)
+	$(H_TIMEOUT) \
+	$(H_LOGGING) \
+	$(H_STATS)
 
 INC_COMMANDS= \
 	$(H_COMMANDS) \
@@ -87,16 +95,21 @@ INC_COMMANDS= \
 	$(H_PAYLOAD) \
 	$(H_PROTOCOL) \
 	$(H_PUSH) \
-	$(H_TIMEOUT)
+	$(H_TIMEOUT) \
+	$(H_LOGGING)
 
 INC_ITEM=$(H_ITEM)
+
+INC_LOGGING=$(H_LOGGING)
 
 INC_NODE= \
 	$(H_NODE) \
 	event-compat.h \
 	$(H_GLOBALS) \
 	$(H_TIMEOUT) \
-	$(H_PUSH)
+	$(H_PUSH) \
+	$(H_LOGGING) \
+	$(H_STATS)
 
 INC_OCD= \
 	$(H_ITEM) \
@@ -107,7 +120,8 @@ INC_OCD= \
 	$(H_SECONDS) \
 	$(H_STATS) \
 	$(H_SETTLE) \
-	$(H_PAYLOAD)
+	$(H_PAYLOAD) \
+	$(H_LOGGING)
 
 INC_PAYLOAD=$(H_PAYLOAD)
 
@@ -121,7 +135,8 @@ INC_PROCESS= \
 	$(H_CONSTANTS) \
 	$(H_PUSH) \
 	$(H_ITEM) \
-	$(H_BUCKET_DATA)
+	$(H_BUCKET_DATA) \
+	$(H_LOGGING)
 
 INC_PUSH= \
 	$(H_PUSH) \
@@ -130,7 +145,8 @@ INC_PUSH= \
 	$(H_GLOBALS) \
 	$(H_NODE) \
 	$(H_SERVER) \
-	$(H_CLIENT)
+	$(H_CLIENT) \
+	$(H_LOGGING)
 
 INC_SECONDS= \
 	$(H_SECONDS) \
@@ -142,7 +158,8 @@ INC_SERVER= \
 	$(H_SERVER) \
 	event-compat.h \
 	$(H_GLOBALS) \
-	$(H_CLIENT)
+	$(H_CLIENT) \
+	$(H_LOGGING)
 
 INC_SETTLE= \
 	$(H_SETTLE) \
@@ -151,14 +168,16 @@ INC_SETTLE= \
 	$(H_NODE) \
 	$(H_CONSTANTS) \
 	$(H_BUCKET) \
-	$(H_TIMEOUT)
+	$(H_TIMEOUT) \
+	$(H_LOGGING)
 
 INC_STATS= \
 	$(H_STATS) \
 	event-compat.h \
 	$(H_NODE) \
 	$(H_GLOBALS) \
-	$(H_TIMEOUT)
+	$(H_TIMEOUT) \
+	$(H_LOGGING)
 
 INC_TIMEOUT=$(H_TIMEOUT)
 
@@ -184,6 +203,9 @@ commands.o: commands.c $(INC_COMMANDS)
 
 item.o: item.c $(INC_ITEM)
 	gcc -c -o $@ item.c $(DEBUG_ARGS) $(ARGS)
+
+logging.o: logging.c $(INC_LOGGING)
+	gcc -c -o $@ logging.c $(DEBUG_ARGS) $(ARGS)
 
 node.o: node.c $(INC_NODE)
 	gcc `pkg-config --cflags glib-2.0` -c -o $@ node.c $(DEBUG_ARGS) $(ARGS)

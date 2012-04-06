@@ -14,6 +14,7 @@
 #include "bucket.h"
 #include "constants.h"
 #include "item.h"
+#include "logging.h"
 #include "payload.h"
 #include "seconds.h"
 #include "server.h"
@@ -48,6 +49,8 @@ int _verbose = 0;
 int _daemonize = 0;
 const char *_username = NULL;
 const char *_pid_file = NULL;
+const char *_logfile = NULL;
+int _logfile_max = 0;
 
 
 // the mask is used to determine which bucket a hash belongs to.
@@ -69,7 +72,6 @@ unsigned int _mask = 0;
 // signal catchers that are used to clean up, and store final data before 
 // shutting down.
 struct event *_sigint_event = NULL;
-struct event *_sighup_event = NULL;
 
 
 
@@ -208,10 +210,7 @@ static void sigint_handler(evutil_socket_t fd, short what, void *arg)
 	event_free(_sigint_event);
 	_sigint_event = NULL;
 
-	if (_sighup_event) {
-		event_free(_sighup_event);
-		_sighup_event = NULL;
-	}
+	log_prepareshutdown();
 	
 	// start the shutdown event.  This timeout event will just keep ticking over until the _shutdown 
 	// value is back down to 0, then it will stop resetting the event, and the loop can exit.... 
@@ -225,54 +224,36 @@ static void sigint_handler(evutil_socket_t fd, short what, void *arg)
 }
 
 
-//--------------------------------------------------------------------------------------------------
-// When SIGHUP is received, we need to print out detailed statistics to the logfile.  This will 
-// include as much information as we can gather quickly.
-static void sighup_handler(evutil_socket_t fd, short what, void *arg)
-{
-	assert(arg == NULL);
-
-	// clear out all cached objects.
-	assert(0);
-
-	// reload the config database file.
-	assert(0);
-
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 //-----------------------------------------------------------------------------
 // print some info to the user, so that they can know what the parameters do.
 static void usage(void) {
-	printf(PACKAGE " " VERSION "\n");
-	printf("-l <ip_addr:port>  interface to listen on, default is localhost:13600\n");
-	printf("-c <num>           max simultaneous connections, default is 1024\n");
-	printf("-m <mb>            mb of RAM to allocate to the cluster.\n");
-	printf("-n <node>          Other cluster node to connect to. Can be specified more than once.\n");
-	printf("\n");
-	printf("-d                 run as a daemon\n");
-	printf("-P <file>          save PID in <file>, only used with -d option\n");
-	printf("-u <username>      assume identity of <username> (only when run as root)\n");
-	printf("\n");
-	printf("-v                 verbose (print errors/warnings while in event loop)\n");
-	printf("-h                 print this help and exit\n");
+	printf(
+		PACKAGE " " VERSION "\n"
+		"-l <ip_addr:port>  interface to listen on, default is localhost:13600\n"
+		"-c <num>           max simultaneous connections, default is 1024\n"
+		"-n <node>          Other cluster node to connect to. Can be specified more than once.\n"
+		"\n"
+		"-d                 run as a daemon\n"
+		"-P <file>          save PID in <file>, only used with -d option\n"
+		"-u <username>      assume identity of <username> (only when run as root)\n"
+		"\n"
+		"-g <filemask>      Logfile location and prefix.  The actual logfile name will be\n"
+		"                   appended with a datestamp.\n"
+		"-m <mb>            mb limit before a new logfile is created.\n"
+		"-v                 verbose (print errors/warnings while in event loop)\n"
+		"                     eg, -vvv will set it to level 3 (WARN)\n"
+		"                       1 - FATAL\n"
+		"                       2 - ERROR\n"
+		"                       3 - WARN\n"
+		"                       4 - STATS\n"
+		"                       5 - INFO\n"
+		"                       6 - DEBUG\n"
+		"                       7 - EXTRA\n"
+		"\n"
+		"-h                 print this help and exit\n"
+	);
 	return;
 }
 
@@ -295,6 +276,8 @@ static void parse_params(int argc, char **argv)
 		"P:"    /* PID file */
 		"l:"    /* interfaces to listen on */
 		"n:"    /* other node to connect to */
+		"g:"	/* logfile */
+		"m:"	/* logfile maximum size */
 		)) != -1) {
 		switch (c) {
 			case 'c':
@@ -336,11 +319,28 @@ static void parse_params(int argc, char **argv)
 				_node_count ++;
 				break;
 				
+			case 'g':
+				assert(_logfile == NULL);
+				_logfile = strdup(optarg);
+				assert(_logfile);
+				break;
+				
+			case 'm':
+				assert(_logfile_max == 0);
+				_logfile_max = atoi(optarg);
+				assert(_logfile_max >= 0);
+				
 			default:
 				fprintf(stderr, "Illegal argument \"%c\"\n", c);
 				return;
 				
-}	}	}
+		}	
+	}
+	
+	if (_verbose <= 0) {
+		_verbose = LOG_INFO;
+	}
+}
 
 // this is used to fork the process and run in the background as a different user.  
 void daemonize(const char *username, const char *pidfile, const int noclose)
@@ -418,44 +418,6 @@ void daemonize(const char *username, const char *pidfile, const int noclose)
 
 
 
-/*
-// send a message to all connected clients informing them of the new hashmask info.
-static void all_hashmask(unsigned int hashmask, int level)
-{
-	int j;
-	
-	assert(level >= 0);
-	assert(hashmask <= _mask);
-	
-	assert(_payload_length == 0);
-	
-	assert(_mask > 0);
-	assert(_stats.primary_buckets > 0 || _stats.secondary_buckets > 0);
-	
-	// build the message first.
-	// first comes the mask.
-	payload_int(_mask);
-	payload_int(hashmask);
-	payload_int(level);
-	
-	
-	// for each client
-	for (j=0; j<_client_count; j++) {
-		assert(_clients);
-		if (_clients[j]) {
-		
-			// check if there is a read-event setup for the client.  Because that is a good 
-			// indicater that the client is connected.
-			if (_clients[j]->read_event) {
-				// send the message to the client.
-				send_message(_clients[j], NULL, CMD_HASHMASK, _payload_length, _payload);	
-			}
-		}
-	}
-
-	_payload_length = 0;
-}
-*/
 
 
 
@@ -500,12 +462,10 @@ int main(int argc, char **argv)
 	// initialise signal handlers.
 	assert(_evbase);
 	_sigint_event = evsignal_new(_evbase, SIGINT, sigint_handler, NULL);
-	_sighup_event = evsignal_new(_evbase, SIGHUP, sighup_handler, NULL);
 	assert(_sigint_event);
-	assert(_sighup_event);
 	event_add(_sigint_event, NULL);
-	event_add(_sighup_event, NULL);
 
+	log_init(_logfile, _verbose, _logfile_max);
 	
 	seconds_init();
 	
@@ -532,7 +492,7 @@ int main(int argc, char **argv)
 	// enter the processing loop.  This function will not return until there is
 	// nothing more to do and the service has shutdown.  Therefore everything
 	// needs to be setup and running before this point.  
-	if (_verbose > 0) { printf("Starting main loop.\n"); }
+	logger(LOG_INFO, "Starting main loop.");
 	assert(_evbase);
 	event_base_dispatch(_evbase);
 
@@ -540,11 +500,16 @@ int main(int argc, char **argv)
 /// Shutdown
 ///============================================================================
 
-	if (_verbose > 0) { printf("Freeing the event base.\n"); }
+	// need to shut the log down now, because we have lost the event loop and cant actually use it 
+	// any more.
+	log_shutdown();
+	
 	assert(_evbase);
 	event_base_free(_evbase);
 	_evbase = NULL;
 
+	
+	
 	// server interface should be shutdown.
 // 	assert(_server == NULL);
 // 	assert(_node_count == 0);
@@ -553,14 +518,11 @@ int main(int argc, char **argv)
 
 	// make sure signal handlers have been cleared.
 	assert(_sigint_event == NULL);
-	assert(_sighup_event == NULL);
 
 	
 	payload_free();
 	
 	// we are done, cleanup what is left in the control structure.
-	if (_verbose > 0) { printf("Final cleanup.\n"); }
-	
 	_interface = NULL;
 	
 	if (_username) { free((void*)_username); _username = NULL; }
@@ -568,7 +530,6 @@ int main(int argc, char **argv)
 	
 // 	assert(_conncount == 0);
 	assert(_sigint_event == NULL);
-	assert(_sighup_event == NULL);
 	assert(_evbase == NULL);
 	
 	return 0;

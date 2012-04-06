@@ -7,7 +7,9 @@
 #include "globals.h"
 #include "hash.h"
 #include "item.h"
+#include "logging.h"
 #include "push.h"
+#include "stats.h"
 
 #include <assert.h>
 #include <stdlib.h>
@@ -68,6 +70,9 @@ bucket_data_t * data_new(hash_t hashmask)
 	data->tree = g_tree_new(key_compare_fn);
 	assert(data->tree);
 	data->next = NULL;
+	
+	data->item_count = 0;
+	data->data_size = 0;
 	
 	assert(_mask > 0);
 	assert(hashmask >= 0 && hashmask <= _mask);
@@ -233,8 +238,7 @@ static maplist_t * find_maplist(hash_t key_hash, bucket_data_t *data)
 
 	while (current) {
 		
-		if (_verbose > 4)
-			printf("find_maplist: Looking in container %08X/%08X\n", current->mask, current->hashmask);
+		logger(LOG_DEBUG, "find_maplist: Looking in container %08X/%08X", current->mask, current->hashmask);
 		
 		list = g_tree_lookup(current->tree, &key_hash);
 		if (list == NULL) {
@@ -436,8 +440,7 @@ gboolean migrate_map_fn(gpointer p_key, gpointer p_value, void *p_data)
 	assert(item->migrate <= _migrate_sync);
 	if (item->migrate < _migrate_sync) {
 		
-		if (_verbose > 4) 
-			printf("migrate: map %08X ready to migrate.  Sending now.\n", *key);
+		logger(LOG_DEBUG, "migrate: map %08X ready to migrate.  Sending now.", *key);
 		
 		push_sync_item(data->client, item);
 		_in_transit ++;
@@ -448,8 +451,7 @@ gboolean migrate_map_fn(gpointer p_key, gpointer p_value, void *p_data)
 		
 		item->migrate = _migrate_sync;
 		
-		if (_verbose > 4) 
-			printf("migrate: items in list: %d\n", data->items_count);
+		logger(LOG_DEBUG, "migrate: items in list: %d", data->items_count);
 		
 	}
 	
@@ -487,8 +489,7 @@ gboolean migrate_hash_fn(gpointer p_key, gpointer p_value, void *p_data)
 		assert(_migrate_sync > 0);
 		assert(map->migrate >= 0);
 		
-		if (_verbose > 5)
-			printf("migrate: found hash: %08X, migrate=%d\n", *key, map->migrate);
+		logger(LOG_DEBUG, "migrate: found hash: %08X, migrate=%d", *key, map->migrate);
 	
 		assert(map->migrate <= _migrate_sync);
 		assert(map->migrate_name <= _migrate_sync);
@@ -503,8 +504,7 @@ gboolean migrate_hash_fn(gpointer p_key, gpointer p_value, void *p_data)
 			// found one.
 			// now we need to search the inner tree
 			
-			if (_verbose > 4) 
-				printf("migrate: hash %08X is ready to migrate.\n", *key);
+			logger(LOG_DEBUG, "migrate: hash %08X is ready to migrate.", *key);
 			
 			g_tree_foreach(map->mapstree, migrate_map_fn, data);
 			
@@ -514,9 +514,9 @@ gboolean migrate_hash_fn(gpointer p_key, gpointer p_value, void *p_data)
 				// will mark the map with the current migrate sync value.
 				map->migrate = _migrate_sync;
 				
-				if (_verbose > 4)
-					printf(
-						"migrate: hash %08X seems to have all its maps migrated, so we mark the hash as complete.\n",
+				logger(LOG_DEBUG,
+						"migrate: hash %08X seems to have all its maps migrated, "
+						"so we mark the hash as complete.",
 						*key
   						);
 			}
@@ -562,14 +562,12 @@ int data_migrate_items(client_t *client, bucket_data_t *data, hash_t hashmask, i
 	trav.search_hash = hashmask;
 	current = data;
 
-	if (_verbose > 4) 
-		printf("About to search the data for hashmask:%08X/%08X, limit:%d\n", 
+	logger(LOG_DEBUG, "About to search the data for hashmask:%08X/%08X, limit:%d", 
 			   _mask, hashmask, limit);
 	
 	while (current && trav.items_count < limit) {
 
-		if (_verbose > 4)
-			printf("Searching container: %08X/%08X\n", 
+		logger(LOG_DEBUG, "Searching container: %08X/%08X", 
 				   current->mask, current->hashmask);
 		
 		assert(current->tree);
@@ -582,7 +580,7 @@ int data_migrate_items(client_t *client, bucket_data_t *data, hash_t hashmask, i
 		
 		current = current->next;
 	}
-	if (_verbose > 4) printf("found %d items\n", trav.items_count);
+	logger(LOG_DEBUG, "found %d items", trav.items_count);
 	
 	assert(trav.items_count >= 0);
 	return(trav.items_count);
@@ -660,3 +658,11 @@ void data_migrated(bucket_data_t *data, hash_t map_hash, hash_t key_hash)
 #endif
 }
 
+
+
+
+void data_dump(bucket_data_t *data)
+{
+	stat_dumpstr("      Data Items: %ld", data->item_count);
+	stat_dumpstr("      Data Bytes: %ld", data->data_size);
+}

@@ -6,6 +6,7 @@
 #include "event-compat.h"
 #include "client.h"
 #include "globals.h"
+#include "logging.h"
 
 #include <assert.h>
 #include <fcntl.h>
@@ -83,7 +84,7 @@ void server_listen(void)
 		assert(_server->listener == NULL);
 		assert(_evbase);
 		
-		if (_verbose) printf("listen: %s\n", _interface);
+		logger(LOG_INFO, "listen: %s", _interface);
 
 		_server->listener = evconnlistener_new_bind(
 								_evbase,
@@ -103,13 +104,13 @@ void server_listen(void)
 void server_shutdown(void)
 {
 	if (_server) {
-		if (_verbose) printf("Shutting down server interface: %s\n", _interface);
+		logger(LOG_INFO, "Shutting down server interface: %s", _interface);
 
 		// need to close the listener socket.
 		if (_server->listener) {
 			evconnlistener_free(_server->listener);
 			_server->listener = NULL;
-			printf("Stopping listening on: %s\n", _interface);
+			logger(LOG_INFO, "Stopping listening on: %s", _interface);
 		}
 		
 		free(_server);

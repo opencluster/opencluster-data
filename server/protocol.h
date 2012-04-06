@@ -7,7 +7,8 @@
 #define REPLY_UNKNOWN					 9
 #define CMD_HELLO						 10
 #define CMD_SHUTTINGDOWN				 15
-#define CMD_PING						 30
+#define CMD_GOODBYE                      20
+#define CMD_PING                         30
 #define CMD_SERVERHELLO					 50
 #define CMD_SERVERINFO					 100
 #define CMD_HASHMASK					 120
