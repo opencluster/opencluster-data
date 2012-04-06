@@ -1162,6 +1162,18 @@
   </component>
   <component name="WebServicesPlugin" addRequiredLibraries="true" />
   <component name="libraryTable">
+    <library name="commons-lang3-3.1">
+      <CLASSES>
+        <root url="jar://$PROJECT_DIR$/clients/java/lib/commons-lang/commons-lang3-3.1.jar!/" />
+        <root url="jar://$PROJECT_DIR$/clients/java/lib/commons-lang/commons-lang3-3.1-tests.jar!/" />
+      </CLASSES>
+      <JAVADOC>
+        <root url="jar://$PROJECT_DIR$/clients/java/lib/commons-lang/commons-lang3-3.1-javadoc.jar!/" />
+      </JAVADOC>
+      <SOURCES>
+        <root url="jar://$PROJECT_DIR$/clients/java/lib/commons-lang/commons-lang3-3.1-sources.jar!/" />
+      </SOURCES>
+    </library>
     <library name="junit">
       <CLASSES>
         <root url="jar://$PROJECT_DIR$/clients/java/lib/junit/junit-4.10.jar!/" />
