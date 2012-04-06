@@ -10,8 +10,12 @@ import java.net.InetSocketAddress;
 import java.net.SocketOption;
 import java.net.StandardSocketOptions;
 import java.nio.ByteBuffer;
+import java.nio.channels.ClosedChannelException;
 import java.nio.channels.SocketChannel;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -30,15 +34,82 @@ public class Client {
     private int port;
     private SocketChannel connection;
     private int sendBufferSize;
-    private int recieveBufferSize;
+    private int receiveBufferSize;
+
+    private ExecutorService readingThread = Executors.newSingleThreadExecutor();
 
     public void Client() {
-        LOG.finest("Class created.");
+        LOG.info("Class created.");
     }
 
     public void start() throws IOException {
         // start the client.
         connection = createConnection();
+
+        ProtocolHeader header = new ProtocolHeader(ProtocolCommand.HELLO);
+
+        LOG.info(header.toString());
+
+        writeHeaderToConnection(connection, header);
+
+        readingThread.submit(new Runnable() {
+            @Override
+            public void run() {
+                boolean exitLoop = false;
+                for (; !exitLoop && !readingThread.isShutdown() && !readingThread.isTerminated(); ) {
+                    try {
+                        readFromSocketChannel(connection);
+                        Thread.sleep(50L);
+                    } catch (InterruptedException t) {
+                        LOG.info("Thread interrupted.");
+                        exitLoop = true;
+                    } catch (ClosedChannelException c) {
+                        LOG.info("Connection to server closed.");
+                        exitLoop = true;
+                    } catch (Throwable t) {
+                        LogUtil.logSevereException(LOG, "Exception reading data.", t);
+                        try {
+                            Thread.sleep(2000L);
+                        } catch (InterruptedException e) {
+                            //
+                        }
+                    }
+                }
+            }
+        });
+
+    }
+
+    public void stop() throws IOException {
+        ProtocolHeader header = new ProtocolHeader(ProtocolCommand.GOODBYE);
+
+        LOG.info(header.toString());
+
+        writeHeaderToConnection(connection, header);
+
+        // Allow the server time to respond.
+        try {
+            Thread.sleep(1000L);
+        } catch (InterruptedException e) {
+            LOG.info("Thread interrupted.");
+        }
+
+        readingThread.shutdown();
+
+        try {
+            readingThread.awaitTermination(1000, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            LOG.info("Thread interrupted.");
+        }
+
+        connection.close();
+
+        try {
+            Thread.sleep(1000L);
+        } catch (InterruptedException e) {
+            LOG.info("Thread interrupted.");
+        }
+
     }
 
     public void addServer(String hostNameOrIP, int port) {
@@ -53,8 +124,8 @@ public class Client {
 
         sendBufferSize = sChannel.getOption(StandardSocketOptions.SO_SNDBUF);
         LOG.info("Using send buffer size: " + sendBufferSize);
-        recieveBufferSize = sChannel.getOption(StandardSocketOptions.SO_RCVBUF);
-        LOG.info("Using recieve buffer size: " + recieveBufferSize);
+        receiveBufferSize = sChannel.getOption(StandardSocketOptions.SO_RCVBUF);
+        LOG.info("Using receive buffer size: " + receiveBufferSize);
 
         // Send a connection request to the server; this method is non-blocking
         sChannel.connect(new InetSocketAddress(hostNameOrIP, port));
@@ -64,78 +135,69 @@ public class Client {
             try {
                 Thread.sleep(100L);
             } catch (InterruptedException e) {
-                LOG.finest("Interrupted exception occurred.");
+                LOG.info("Interrupted exception occurred.");
             }
         }
 
         Set<SocketOption<?>> socketOptions = sChannel.supportedOptions();
-        for(SocketOption<?> socketOption : socketOptions ) {
-            LOG.info("Supported option: " + socketOption.toString() +", Current Value: " + sChannel.getOption(socketOption));
+        for (SocketOption<?> socketOption : socketOptions) {
+            LOG.info("Supported option: " + socketOption.toString() + ", Current Value: " + sChannel.getOption(socketOption));
         }
 
         return sChannel;
     }
 
 
-    private void readFromSocketChannel(SocketChannel sChannel) {
+    private void readFromSocketChannel(SocketChannel sChannel) throws IOException {
         int numBytesRead = 0;
         do {
-            ByteBuffer buf = ByteBuffer.allocateDirect(recieveBufferSize);
+            ByteBuffer buf = ByteBuffer.allocateDirect(receiveBufferSize);
 
-            try {
-                // Clear the buffer and read bytes from socket
-                buf.clear();
+            // Clear the buffer and read bytes from socket
+            buf.clear();
 
-                numBytesRead = sChannel.read(buf);
+            numBytesRead = sChannel.read(buf);
 
-                if (numBytesRead == -1) {
-                    // No more bytes can be read from the channel
-                    // do nothing
-                    LOG.finest("No more data to read from channel.");
-                } else {
+            if (numBytesRead > 0) {
 
-                    // To read the bytes, flip the buffer
-                    buf.flip();
+                // To read the bytes, flip the buffer
+                buf.flip();
 
-                    // Read the bytes from the buffer ...;
-                    // see Getting Bytes from a ByteBuffer
-                    buf.rewind();
+                // Read the bytes from the buffer ...;
+                // see Getting Bytes from a ByteBuffer
+                buf.rewind();
 
-                    if (buf.limit() > 0) {
+                if (buf.limit() > 0) {
 
-                        LOG.finest("Read data from Socket Channel");
+                    LOG.info("Read data from Socket Channel");
 
-                        while (buf.limit() - buf.position() >= 12) {
-                            ProtocolHeader header = new ProtocolHeader();
-                            int bytesRead = header.readFromByteBuffer(buf);
-                            LOG.finest("Read in " + bytesRead + " bytes.");
-                            LOG.finest(header.toString());
-                            LogUtil.logByteBuffer(LOG, Level.FINEST, buf,buf.position() - bytesRead, buf.limit());
+                    while (buf.limit() - buf.position() >= 12) {
+                        ProtocolHeader header = new ProtocolHeader();
+                        int bytesRead = header.readFromByteBuffer(buf);
+                        LOG.info("Read in " + bytesRead + " bytes.");
+                        LOG.info(header.toString());
+                        LogUtil.logByteBuffer(LOG, Level.INFO, buf, buf.position() - bytesRead, buf.position());
 
-                            if( ProtocolCommand.HASH_MASK.equals(header.getCommand())) {
-                                if(buf.limit() - buf.position() >= header.getDataLength()) {
-                                    HashMask hashMask = new HashMask();
-                                    bytesRead = hashMask.readFromByteBuffer(buf);
-                                    LOG.finest("Read in " + bytesRead + " bytes.");
-                                    LOG.finest(hashMask.toString());
-                                    LogUtil.logByteBuffer(LOG, Level.FINEST, buf,buf.position() - bytesRead, buf.limit());
+                        if (ProtocolCommand.HASH_MASK.equals(header.getCommand())) {
+                            if (buf.limit() - buf.position() >= header.getDataLength()) {
+                                HashMask hashMask = new HashMask();
+                                bytesRead = hashMask.readFromByteBuffer(buf);
+                                LOG.info("Read in " + bytesRead + " bytes.");
+                                LOG.info(hashMask.toString());
+                                LogUtil.logByteBuffer(LOG, Level.INFO, buf, buf.position() - bytesRead, buf.position());
 
-                                } else {
-                                    LOG.finest("Not enough data available to read in hash mask.  Needed " + header.getDataLength() + " bytes. Found " + (buf.limit() - buf.position()) + " bytes.");
-                                }
+                            } else {
+                                LOG.info("Not enough data available to read in hash mask.  Needed " + header.getDataLength() + " bytes. Found " + (buf.limit() - buf.position()) + " bytes.");
                             }
                         }
+                    }
 
-                        int remaining = buf.limit() - (buf.position() + 1);
-                        if (remaining > 0) {
-                            LOG.finest("There is unread data remaining: " + remaining + " bytes.");
-                            LogUtil.logByteBuffer(LOG, Level.FINEST, buf, buf.position(), buf.limit());
-                        }
+                    int remaining = buf.limit() - (buf.position() + 1);
+                    if (remaining > 0) {
+                        LOG.info("There is unread data remaining: " + remaining + " bytes.");
+                        LogUtil.logByteBuffer(LOG, Level.INFO, buf, buf.position(), buf.limit());
                     }
                 }
-            } catch (IOException e) {
-                LOG.finest("IO Exception occurred.");
-                e.printStackTrace();
             }
         } while (numBytesRead > 0);
     }
@@ -151,17 +213,17 @@ public class Client {
             // Prepare the buffer for reading by the socket
             buf.flip();
 
-            LOG.finest("Bytes in buffer: " + buf.limit());
+            LOG.info("Bytes in buffer: " + buf.limit());
 
             // Write bytes
             int numBytesWritten = sChannel.write(buf);
 
-            LOG.finest("Bytes Written To Socket: " + numBytesWritten);
+            LOG.info("Bytes Written To Socket: " + numBytesWritten);
 
-            LogUtil.logByteBuffer(LOG, Level.FINEST, buf);
+            LogUtil.logByteBuffer(LOG, Level.INFO, buf, 0, numBytesWritten);
 
         } catch (IOException e) {
-            LogUtil.logSevereException(LOG, "Exception occurred while attempting to write header to output stream.",e);
+            LogUtil.logSevereException(LOG, "Exception occurred while attempting to write header to output stream.", e);
         }
     }
 

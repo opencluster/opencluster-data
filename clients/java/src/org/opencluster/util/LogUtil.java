@@ -22,19 +22,19 @@ public class LogUtil {
         log.setUseParentHandlers(false);
         log.setLevel(level);
         Handler[] handlers = log.getHandlers();
-        for(Handler h : handlers) {
+        for (Handler h : handlers) {
             log.removeHandler(h);
         }
         log.addHandler(handler);
 
         log.info("Setting logging to log level: " + level + ".");
         Enumeration<String> loggerNames = LogManager.getLogManager().getLoggerNames();
-        for(; loggerNames.hasMoreElements();) {
+        for (; loggerNames.hasMoreElements(); ) {
             String loggerName = loggerNames.nextElement();
             Logger logger = LogManager.getLogManager().getLogger(loggerName);
             logger.setLevel(level);
             handlers = logger.getHandlers();
-            for(Handler h : handlers) {
+            for (Handler h : handlers) {
                 logger.removeHandler(h);
             }
             logger.addHandler(handler);
@@ -75,14 +75,18 @@ public class LogUtil {
 
     public static void logExceptionAtLogLevel(Logger log, Level level, String message, Throwable t) {
         log.log(level, message);
-        log.log(level, ExceptionUtils.getMessage(t));
-        log.log(level, ExceptionUtils.getStackTrace(t));
-        log.log(level, ExceptionUtils.getRootCauseMessage(t));
-        log.log(level, ExceptionUtils.getStackTrace(ExceptionUtils.getRootCause(t)));
+        if (t != null) {
+            log.log(level, ExceptionUtils.getMessage(t));
+            log.log(level, ExceptionUtils.getStackTrace(t));
+            if (ExceptionUtils.getRootCause(t) != null) {
+                log.log(level, ExceptionUtils.getRootCauseMessage(t));
+                log.log(level, ExceptionUtils.getStackTrace(ExceptionUtils.getRootCause(t)));
+            }
+        }
     }
 
     public static void logByteBuffer(Logger log, Level level, ByteBuffer buf) {
-        logByteBuffer(log,level,buf,0,buf.limit());
+        logByteBuffer(log, level, buf, 0, buf.limit());
     }
 
     public static void logByteBuffer(Logger log, Level level, ByteBuffer buf, int startPos, int endPos) {

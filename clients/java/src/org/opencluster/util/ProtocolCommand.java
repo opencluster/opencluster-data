@@ -35,7 +35,7 @@ public enum ProtocolCommand {
     HELLO(10),
     CAPABILITIES(11),
     SHUTTING_DOWN(15),
-    //GOODBYE(20), // Goodbye is no longer supported as a command.
+    GOODBYE(20),
     PING(30),
     SERVER_HELLO(50),
     SERVER_INFO(100),

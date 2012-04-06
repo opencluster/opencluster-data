@@ -28,11 +28,17 @@ public class ClientTest {
 
     @Test
     public void TestClient() {
-        LogUtil.setupDefaultLogLevel(LOG, Level.ALL);
+        LogUtil.setupDefaultLogLevel(LOG, Level.FINEST);
         Client client = new Client();
         client.addServer(HOST_NAME_OR_IP, PORT);
         try {
             client.start();
+            try {
+                Thread.sleep(10000L);
+            } catch (InterruptedException e) {
+                //
+            }
+            client.stop();
         } catch (IOException e) {
             LogUtil.logSevereException(LOG, "Unable to start the client.", e);
         }
