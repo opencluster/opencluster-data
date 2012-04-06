@@ -41,6 +41,16 @@ public class ProtocolTest {
 
         readFromSocketChannel(sChannel);
 
+        readFromSocketChannel(sChannel);
+
+        try {
+            Thread.sleep(1000L);
+        } catch (InterruptedException e) {
+            //
+        }
+
+        readFromSocketChannel(sChannel);
+
         closeConnection(sChannel);
 
     }
