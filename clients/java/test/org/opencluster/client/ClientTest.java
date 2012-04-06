@@ -1,13 +1,11 @@
 package org.opencluster.client;
 
-import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.junit.Assert;
 import org.junit.Test;
+import org.opencluster.util.LogUtil;
 
 import java.io.IOException;
-import java.util.Enumeration;
 import java.util.logging.Level;
-import java.util.logging.LogManager;
 import java.util.logging.Logger;
 
 /**
@@ -30,32 +28,14 @@ public class ClientTest {
 
     @Test
     public void TestClient() {
-        setupLogLevel();
+        LogUtil.setupDefaultLogLevel(LOG, Level.ALL);
         Client client = new Client();
         client.addServer(HOST_NAME_OR_IP, PORT);
         try {
             client.start();
         } catch (IOException e) {
-            logException(e, "Unable to start the client.");
+            LogUtil.logSevereException(LOG, "Unable to start the client.", e);
         }
-    }
-
-    private void logException(Throwable e, String msg) {
-        LOG.severe(msg);
-        LOG.severe(ExceptionUtils.getMessage(e));
-        LOG.severe(ExceptionUtils.getStackTrace(e));
-        LOG.severe(ExceptionUtils.getRootCauseMessage(e));
-        LOG.severe(ExceptionUtils.getStackTrace(ExceptionUtils.getRootCause(e)));
-    }
-
-    private void setupLogLevel() {
-        LOG.info("Setting logging to log everything.");
-        Enumeration<String> loggerNames = LogManager.getLogManager().getLoggerNames();
-        for(; loggerNames.hasMoreElements();) {
-            String loggerName = loggerNames.nextElement();
-            LogManager.getLogManager().getLogger(loggerName).setLevel(Level.ALL);
-        }
-        LOG.info("Log level has now been set up.");
     }
 
 }
