@@ -8,6 +8,7 @@
 #include "item.h"
 #include "logging.h"
 #include "push.h"
+#include "server.h"
 #include "stats.h"
 #include "timeout.h"
 
@@ -147,6 +148,7 @@ bucket_t * bucket_new(hash_t hash)
 	assert(data_in_transit() == 0);
 	assert(bucket->oldbucket_event == NULL);
 	assert(bucket->transfer_mode_special == 0);
+	assert(bucket->switching == 0);
 			
 	bucket->data = data_new(hash);
 	
@@ -219,7 +221,6 @@ void buckets_split_mask(int mask)
 		oldlist[0] = malloc(sizeof(hashmask_t));
 		assert(oldlist[0]);
 		
-		oldlist[0]->local = 0;
 		oldlist[0]->primary = NULL;
 		oldlist[0]->secondary = NULL;
 	}
@@ -449,9 +450,9 @@ void buckets_init(void)
 		
 		_hashmasks[i] = calloc(1, sizeof(hashmask_t));
 		assert(_hashmasks[i]);
-		
-		_hashmasks[i]->local = -1;
-		_hashmasks[i]->primary = NULL;
+
+		assert(_interface);
+		_hashmasks[i]->primary = strdup(_interface);
 		_hashmasks[i]->secondary = NULL;
 	}
 
@@ -500,34 +501,46 @@ int buckets_store_name(hash_t key_hash, char *name, int int_key)
 static void bucket_dump(bucket_t *bucket)
 {
 	node_t *node;
+	char *mode = NULL;
+	char *altmode = NULL;
+	char *altnode = NULL;
 	
 	assert(bucket);
 	
-	stat_dumpstr("    Bucket: 0x%08X", bucket->hash);
 	if (bucket->level == 0) {
-		stat_dumpstr("      Mode: Primary");
+		mode = "Primary";
+		altmode = "Backup";
 		assert(bucket->target_node == NULL);
 		if (bucket->backup_node) {
 			assert(bucket->backup_node->name);
-			stat_dumpstr("      Backup Node: %s", bucket->backup_node->name);
+			altnode = bucket->backup_node->name;
 		}
 		else {
-			stat_dumpstr("      Backup Node: ");
+			altnode = "";
 		}
 	}
 	else if (bucket->level == 1) {
-		stat_dumpstr("      Mode: Secondary");
+		mode = "Secondary";
 		assert(bucket->backup_node == NULL);
 		assert(bucket->target_node);
 		assert(bucket->target_node->name);
-		stat_dumpstr("      Source Node: %s", bucket->target_node->name);
+		altmode = "Source";
+		altnode = bucket->target_node->name;
 	}
 	else {
-		stat_dumpstr("      Mode: Unknown");
+		mode = "Unknown";
+		altmode = "Unknown";
+		altnode = "";
 	}
+
+	assert(mode);
+	assert(altmode);
+	assert(altnode);
+	stat_dumpstr("    Bucket:0x%08X, Mode:%s, %s Node:%s", 
+				 bucket->hash, mode, altmode, altnode);
 	
 	assert(bucket->data);
-	data_dump(bucket->data);
+//	data_dump(bucket->data);
 
 	if (bucket->transfer_client) {
 		node = bucket->transfer_client->node;
@@ -564,11 +577,24 @@ void buckets_dump(void)
 
 void hashmasks_dump(void)
 {
+	int i;
 
 // the list of hashmasks is to know which servers are responsible for which buckets.
 // this list of hashmasks will also replace the need to 'settle'.  Instead, a timed event will 
 // occur periodically that checks that the hashmask coverage is complete.
 // hashmask_t ** _hashmasks = NULL;
 
+	assert(_hashmasks);
+	
+	stat_dumpstr("HASHMASKS");
+	for (i=0; i<=_mask; i++) {
+		assert(_hashmasks[i]);
+
+		stat_dumpstr("  Hashmask:0x%08X, Primary:'%s', Secondary:'%s'", i, 
+					 _hashmasks[i]->primary ? _hashmasks[i]->primary : "",
+					 _hashmasks[i]->secondary ? _hashmasks[i]->secondary : "");
+	}
+	
+	stat_dumpstr(NULL);
 }
 

@@ -71,7 +71,8 @@ INC_BUCKET= \
 	$(H_PUSH) \
 	$(H_TIMEOUT) \
 	$(H_LOGGING) \
-	$(H_STATS)
+	$(H_STATS) \
+	$(H_SERVER)
 
 INC_CLIENT= \
 	$(H_CLIENT) \

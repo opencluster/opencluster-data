@@ -645,6 +645,9 @@ static void cmd_control_bucket(client_t *client, header_t *header, char *payload
 			assert(bucket->target_node == NULL);
 			assert(bucket->backup_node);
 			assert(bucket->backup_node->client);
+			
+			_primary_buckets ++;
+			assert(_primary_buckets > 0);
 		}
 		else {
 			// we are receiving a backup bucket.  
@@ -657,6 +660,9 @@ static void cmd_control_bucket(client_t *client, header_t *header, char *payload
 			assert(bucket->backup_node == NULL);
 			assert(bucket->target_node);
 			assert(bucket->target_node->client);
+			
+			_secondary_buckets ++;
+			assert(_secondary_buckets > 0);
 		}
 
 		bucket->transfer_client = NULL;

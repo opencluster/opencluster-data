@@ -45,6 +45,7 @@ static int attempt_switch(client_t *client)
 {
 	bucket_t *bucket = NULL;
 	int i;
+	char *tmps;
 	
 	// go through all the buckets.
 	for (i=0; i<=_mask && bucket == NULL; i++) {
@@ -64,10 +65,14 @@ static int attempt_switch(client_t *client)
 					printf("[%u] Attempting to promote bucket #%X on '%s'\n",
 					   _seconds, bucket->hash, ((node_t*)client->node)->name); 
 
+					assert(bucket->transfer_client == NULL);
+					bucket->transfer_client = client;
 					
+					assert(bucket->switching == 0);
+					bucket->switching = 1;
+				
 					// we found a bucket we can promote, so we send out the command to start it.
-					assert(0);
-					
+					push_control_bucket(client, bucket, bucket->level);
 				}
 			}
 		}
@@ -426,18 +431,56 @@ static void process_control_bucket_complete(client_t *client, header_t *header, 
 
 	// if we transferred a backup node, or we transferred a primary that already has a backup node, 
 	// then we dont need this copy of the bucket anymore, so we can delete it.
-	if (bucket->level == 0 && bucket->backup_node == NULL) {
-		assert(client->node);
-		bucket->backup_node = client->node;
+	if (bucket->switching == 0) {
+		// we are not switching, but migrating a bucket.
+		if (bucket->level == 0 && bucket->backup_node == NULL) {
+			assert(client->node);
+			bucket->backup_node = client->node;
+			assert(_nobackup_buckets > 0);
+			_nobackup_buckets --;
+			assert(_nobackup_buckets >= 0);
+		}
+		else {
+			if (bucket->level == 0) {
+				_primary_buckets --;
+			}
+			else {
+				assert(bucket->level == 1);
+				_secondary_buckets --;
+			}
+			
+			bucket_destroy(bucket);
+			bucket = NULL;
+		}
 	}
 	else {
-		bucket_destroy(bucket);
-		bucket = NULL;
-	}
+		
+		// we are switching a bucket.  So if we are currently primary, then we need to switch to 
+		// secondary, and vice-versa.
+		
+		assert(bucket->switching == 1);
+		
+		if (bucket->level == 0) {
+			bucket->level = 1;
+			_primary_buckets --;
+			_secondary_buckets ++;
+			
+			assert(_primary_buckets >= 0);
+			assert(_secondary_buckets > 0);
+		}
+		else {
+			assert(bucket->level == 1);
+			bucket->level = 0;
+			_primary_buckets ++;
+			_secondary_buckets --;
 
+			assert(_primary_buckets > 0);
+			assert(_secondary_buckets >= 0);
+		}
+	}
+	
 	assert(_bucket_transfer == 1);
 	_bucket_transfer = 0;
-
 
 	// now that this migration is complete, we need to ask for loadlevels again.
 	push_loadlevels(client);
