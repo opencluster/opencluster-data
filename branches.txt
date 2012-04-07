@@ -1,5 +1,11 @@
 This file provides some information about active branches in the repository.
 
+debug-logging
+	When running a debug build, it is possible taht it logs information out to the log, but then
+	an assert fires, and the data is never written to the log, because it buffers it and sets an 
+	event to fire.  When assert happens process exits immediately.  So, when compiling a debug 
+	build, it will instead log data to the logfile immediately, rather than setting an event.
+
 verify-cluster
 	make sure that the migration is moving the buckets evenly, and that clients are getting the 
 	right information.   When a migration is completed, make sure the client is asking the server 

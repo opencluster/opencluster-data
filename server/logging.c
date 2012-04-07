@@ -285,6 +285,11 @@ void logger(short int level, const char *format, ...)
 		_outbuf_len ++;
 		_outbuf[_outbuf_len] = 0;
 		
+		
+/** If we are doing a NDEBUG build (production grade), then we set an event to process this log data 
+    out to a file.   Otherwise, we write the data directly.
+**/
+#ifdef NDEBUG
 		// if the log_event is null, then we need to set the timeout event.
 		if (_log_event == NULL) {
 			#if (_EVENT_NUMERIC_VERSION < 0x02000000)
@@ -299,6 +304,22 @@ void logger(short int level, const char *format, ...)
 			evtimer_add(_log_event, &_timeout);
 			
 		}
+#else
+		assert(_outbuf_len > 0);
+		assert(_outbuf_len <= _outbuf_max);
+		assert(_outbuf);
+
+		if ((_fp == NULL) || (_outbuf_len + _written) > _maxfilesize) {
+			log_nextfile();
+		}
+
+		if (_fp) {
+			fwrite(_outbuf, _outbuf_len, 1, _fp);
+			_outbuf_len = 0;
+			
+			fflush(_fp);
+		}
+#endif
 	}
 }
 
