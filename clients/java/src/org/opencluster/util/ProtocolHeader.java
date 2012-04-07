@@ -3,7 +3,6 @@ package org.opencluster.util;
 import java.nio.ByteBuffer;
 
 /**
- * Created by IntelliJ IDEA.
  * User: Brian Gorrie
  * Date: 3/01/12
  * Time: 1:16 PM
@@ -18,13 +17,13 @@ import java.nio.ByteBuffer;
  */
 public class ProtocolHeader {
 
-    ProtocolCommand command = ProtocolCommand.NO_COMMAND;
+    private ProtocolCommand command = ProtocolCommand.NO_COMMAND;
 
-    ProtocolCommand replyToCommand = ProtocolCommand.NO_COMMAND;
+    private ProtocolCommand replyToCommand = ProtocolCommand.NO_COMMAND;
 
-    int userSpecifiedID = 0;
+    private int userSpecifiedID = 0;
 
-    int dataLength = 0;
+    private int dataLength = 0;
 
     public ProtocolHeader(ProtocolCommand command) {
         this.command = command;
@@ -42,11 +41,60 @@ public class ProtocolHeader {
         this.dataLength = dataLength;
     }
 
-    public void writeToByteBuffer(ByteBuffer buf) {
+    public ProtocolHeader() {
+        // empty constructor for reading data.
+    }
+
+    public int readFromByteBuffer(ByteBuffer buf) {
+        int startPos = buf.position();
+        command = ProtocolCommand.fromCode(buf.getShort());
+        replyToCommand = ProtocolCommand.fromCode(buf.getShort());
+        userSpecifiedID = buf.getInt();
+        dataLength = buf.getInt();
+        int endPos = buf.position();
+        return (endPos - startPos);
+    }
+
+    public int writeToByteBuffer(ByteBuffer buf) {
+        int startPos = buf.position();
         buf.putShort(command.getCode());
         buf.putShort(replyToCommand.getCode());
         buf.putInt(userSpecifiedID);
         buf.putInt(dataLength);
+        int endPos = buf.position();
+        return (endPos - startPos);
+    }
+
+    public ProtocolCommand getCommand() {
+        return command;
+    }
+
+    public void setCommand(ProtocolCommand command) {
+        this.command = command;
+    }
+
+    public ProtocolCommand getReplyToCommand() {
+        return replyToCommand;
+    }
+
+    public void setReplyToCommand(ProtocolCommand replyToCommand) {
+        this.replyToCommand = replyToCommand;
+    }
+
+    public int getUserSpecifiedID() {
+        return userSpecifiedID;
+    }
+
+    public void setUserSpecifiedID(int userSpecifiedID) {
+        this.userSpecifiedID = userSpecifiedID;
+    }
+
+    public int getDataLength() {
+        return dataLength;
+    }
+
+    public void setDataLength(int dataLength) {
+        this.dataLength = dataLength;
     }
 
     @Override

@@ -1,7 +1,6 @@
 package org.opencluster.util;
 
 /**
- * Created by IntelliJ IDEA.
  * User: Brian Gorrie
  * Date: 3/01/12
  * Time: 1:19 PM
@@ -30,11 +29,13 @@ package org.opencluster.util;
  */
 public enum ProtocolCommand {
 
+    UNKNOWN_COMMAND(-1),
     NO_COMMAND(0),
+    ACK(1),
     HELLO(10),
     CAPABILITIES(11),
     SHUTTING_DOWN(15),
-    //GOODBYE(20), // Goodbye is no longer supported as a command.
+    GOODBYE(20),
     PING(30),
     SERVER_HELLO(50),
     SERVER_INFO(100),
@@ -59,6 +60,16 @@ public enum ProtocolCommand {
 
     public short getCode() {
         return code;
+    }
+
+    public static ProtocolCommand fromCode(short code) {
+        ProtocolCommand[] values = values();
+        for(int i = 0; i < values.length; i++) {
+            if(values[i].getCode() == code) {
+                return values[i];
+            }
+        }
+        return UNKNOWN_COMMAND;
     }
 
 }

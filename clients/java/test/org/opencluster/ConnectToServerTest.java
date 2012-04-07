@@ -12,7 +12,6 @@ import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 
 /**
- * Created by IntelliJ IDEA.
  * User: Brian Gorrie
  * Date: 5/11/11
  * Time: 8:09 PM

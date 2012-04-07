@@ -2,18 +2,17 @@ package org.opencluster;
 
 import org.junit.Assert;
 import org.junit.Test;
+import org.opencluster.util.HashMask;
 import org.opencluster.util.ProtocolCommand;
 import org.opencluster.util.ProtocolHeader;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.net.SocketOption;
 import java.net.StandardSocketOptions;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 
 /**
- * Created by IntelliJ IDEA.
  * User: Brian Gorrie
  * Date: 5/11/11
  * Time: 8:09 PM
@@ -39,6 +38,16 @@ public class ProtocolTest {
         ProtocolHeader header = new ProtocolHeader(ProtocolCommand.HELLO);
 
         writeHeaderToConnection(sChannel, header);
+
+        readFromSocketChannel(sChannel);
+
+        readFromSocketChannel(sChannel);
+
+        try {
+            Thread.sleep(1000L);
+        } catch (InterruptedException e) {
+            //
+        }
 
         readFromSocketChannel(sChannel);
 
@@ -127,12 +136,40 @@ public class ProtocolTest {
                     buf.rewind();
 
                     if (buf.limit() > 0) {
+
                         System.out.println();
                         System.out.println("Read data from Socket Channel");
 
-                        System.out.println("buf:" + buf.toString());
-                        for (int i = 0; i < buf.limit(); i++) {
-                            System.out.print("[" + buf.get(i) + "]");
+                        while (buf.limit() - buf.position() >= 12) {
+                            ProtocolHeader header = new ProtocolHeader();
+                            int bytesRead = header.readFromByteBuffer(buf);
+                            System.out.println("Read in " + bytesRead + " bytes.");
+                            System.out.println(header.toString());
+                            for (int i = (buf.position() - bytesRead); i < buf.position(); i++) {
+                                System.out.print("[" + buf.get(i) + "]");
+                            }
+                            System.out.println();
+                            if( ProtocolCommand.HASH_MASK.equals(header.getCommand())) {
+                                if(buf.limit() - buf.position() >= header.getDataLength()) {
+                                    HashMask hashMask = new HashMask();
+                                    bytesRead = hashMask.readFromByteBuffer(buf);
+                                    System.out.println("Read in " + bytesRead + " bytes.");
+                                    System.out.println(hashMask.toString());
+                                    for (int i = (buf.position() - bytesRead); i < buf.position(); i++) {
+                                        System.out.print("[" + buf.get(i) + "]");
+                                    }
+                                } else {
+                                    System.out.println("Not enough data available to read in hash mask.  Needed " + header.getDataLength() + " bytes. Found " + (buf.limit() - buf.position()) + " bytes.");
+                                }
+                            }
+                        }
+
+                        int remaining = buf.limit() - (buf.position() + 1);
+                        if (remaining > 0) {
+                            System.out.println("There is unread data remaining: " + remaining + " bytes.");
+                            for (int i = buf.position(); i < buf.limit(); i++) {
+                                System.out.print("[" + buf.get(i) + "]");
+                            }
                         }
                         System.out.println();
                     }
