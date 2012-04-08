@@ -1,11 +1,10 @@
 package org.opencluster.util;
 
-import org.apache.commons.lang3.exception.ExceptionUtils;
-import sun.util.logging.LoggingSupport;
-
-import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
-import java.util.Enumeration;
+import java.util.*;
 import java.util.logging.*;
 
 /**
@@ -74,15 +73,124 @@ public class LogUtil {
     }
 
     public static void logExceptionAtLogLevel(Logger log, Level level, String message, Throwable t) {
+        // log the message
         log.log(level, message);
         if (t != null) {
-            log.log(level, ExceptionUtils.getMessage(t));
-            log.log(level, ExceptionUtils.getStackTrace(t));
-            if (ExceptionUtils.getRootCause(t) != null) {
-                log.log(level, ExceptionUtils.getRootCauseMessage(t));
-                log.log(level, ExceptionUtils.getStackTrace(ExceptionUtils.getRootCause(t)));
+
+            // log the actual exception
+            String shortClassName = getShortClassName(t);
+            String throwableMessage = t.getMessage();
+            String exceptionMessage = shortClassName + ": " + (throwableMessage == null ? "" : throwableMessage);
+            log.log(level, exceptionMessage);
+            StringWriter stringWriter = new StringWriter();
+            PrintWriter printWriter = new PrintWriter(stringWriter, true);
+            t.printStackTrace(printWriter);
+            log.log(level, stringWriter.getBuffer().toString());
+
+            // dig into the cause
+            Throwable throwable = t;
+            String[] methodNames = new String[]{
+                    "getCause",
+                    "getNextException",
+                    "getTargetException",
+                    "getException",
+                    "getSourceException",
+                    "getRootCause",
+                    "getCausedByException",
+                    "getNested",
+                    "getLinkedException",
+                    "getNestedException",
+                    "getLinkedCause",
+                    "getThrowable",
+            };
+            List<Throwable> list = new ArrayList<Throwable>();
+            Throwable cause;
+            while (throwable != null && !list.contains(throwable)) {
+                list.add(throwable);
+                cause = null;
+                for (int i = 0, methodNamesLength = methodNames.length; cause == null && i < methodNamesLength; i++) {
+                    String methodName = methodNames[i];
+                    if (methodName != null) {
+                        Method method = null;
+                        try {
+                            method = throwable.getClass().getMethod(methodName);
+                        } catch (Throwable t1) {
+                            //
+                        }
+
+                        if (method != null && Throwable.class.isAssignableFrom(method.getReturnType())) {
+                            try {
+                                cause = (Throwable) method.invoke(throwable);
+                            } catch (Throwable t1) {
+                                //
+                            }
+                        }
+                    }
+                }
+                throwable = cause;
+            }
+            Throwable rootCause = list.size() < 2 ? null : list.get(list.size() - 1);
+            if (rootCause != null) {
+                shortClassName = getShortClassName(rootCause);
+                throwableMessage = rootCause.getMessage();
+                throwableMessage = shortClassName + ": " + (throwableMessage == null ? "" : throwableMessage);
+                log.log(level, throwableMessage);
+                stringWriter = new StringWriter();
+                printWriter = new PrintWriter(stringWriter, true);
+                rootCause.printStackTrace(printWriter);
+                log.log(level, stringWriter.getBuffer().toString());
             }
         }
+    }
+
+
+    public static String getShortClassName(Object object) {
+
+        Map<String, String> abbreviationToPrimitiveMap = new HashMap<String, String>();
+
+        abbreviationToPrimitiveMap.put("I", "int");
+        abbreviationToPrimitiveMap.put("Z", "boolean");
+        abbreviationToPrimitiveMap.put("F", "float");
+        abbreviationToPrimitiveMap.put("J", "long");
+        abbreviationToPrimitiveMap.put("S", "short");
+        abbreviationToPrimitiveMap.put("B", "byte");
+        abbreviationToPrimitiveMap.put("D", "double");
+        abbreviationToPrimitiveMap.put("C", "char");
+
+        String shortClassName = null;
+        if (object != null) {
+            Class<?> cls = object.getClass();
+            shortClassName = "";
+            if (cls != null) {
+                String className = cls.getName();
+                if (className != null && className.length() != 0) {
+                    StringBuilder arrayPrefix = new StringBuilder();
+                    if (className.startsWith("[")) {
+                        while (className.charAt(0) == '[') {
+                            className = className.substring(1);
+                            arrayPrefix.append("[]");
+                        }
+                        if (className.charAt(0) == 'L' && className.charAt(className.length() - 1) == ';') {
+                            className = className.substring(1, className.length() - 1);
+                        }
+                    }
+
+                    if (abbreviationToPrimitiveMap.containsKey(className)) {
+                        className = abbreviationToPrimitiveMap.get(className);
+                    }
+
+                    int lastDotIdx = className.lastIndexOf('.');
+                    int innerIdx = className.indexOf(
+                            '$', lastDotIdx == -1 ? 0 : lastDotIdx + 1);
+                    String out = className.substring(lastDotIdx + 1);
+                    if (innerIdx != -1) {
+                        out = out.replace('$', '.');
+                    }
+                    shortClassName = out + arrayPrefix;
+                }
+            }
+        }
+        return shortClassName;
     }
 
     public static void logByteBuffer(Logger log, Level level, ByteBuffer buf) {
