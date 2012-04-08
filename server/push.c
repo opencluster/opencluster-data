@@ -224,9 +224,6 @@ void push_control_bucket(client_t *client, bucket_t *bucket, int level)
 	// sending a backup node, then there could be a source node elsewhere (moving a bucket), or we 
 	// are the source (bucket had no backup).
 
-	assert(bucket);
-	assert(bucket->hash >= 0);
-	
 	if (level == 0) {
 		assert(_hashmasks);
 		assert(_hashmasks[bucket->hash]);

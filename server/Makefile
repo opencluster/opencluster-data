@@ -48,7 +48,7 @@ H_PUSH=push.h $(H_CLIENT) $(H_BUCKET)
 H_STATS=stats.h
 H_SECONDS=seconds.h
 H_PROCESS=process.h $(H_CLIENT) $(H_HEADER)
-H_COMMANDS=commands.h $(H_CLIENT) $(H_HEADER)
+H_COMMANDS=commands.h 
 H_PAYLOAD=payload.h
 H_TIMEOUT=timeout.h
 H_SETTLE=settle.h
@@ -71,7 +71,8 @@ INC_BUCKET= \
 	$(H_PUSH) \
 	$(H_TIMEOUT) \
 	$(H_LOGGING) \
-	$(H_STATS)
+	$(H_STATS) \
+	$(H_SERVER)
 
 INC_CLIENT= \
 	$(H_CLIENT) \
@@ -96,7 +97,9 @@ INC_COMMANDS= \
 	$(H_PROTOCOL) \
 	$(H_PUSH) \
 	$(H_TIMEOUT) \
-	$(H_LOGGING)
+	$(H_LOGGING) \
+	$(H_CLIENT) \
+	$(H_HEADER)
 
 INC_ITEM=$(H_ITEM)
 
@@ -177,7 +180,8 @@ INC_STATS= \
 	$(H_NODE) \
 	$(H_GLOBALS) \
 	$(H_TIMEOUT) \
-	$(H_LOGGING)
+	$(H_LOGGING) \
+	$(H_BUCKET)
 
 INC_TIMEOUT=$(H_TIMEOUT)
 
@@ -232,7 +236,7 @@ server.o: server.c $(INC_SERVER)
 	gcc `pkg-config --cflags glib-2.0` -c -o $@ server.c $(DEBUG_ARGS) $(ARGS)
 
 stats.o: stats.c $(INC_STATS)
-	gcc -c -o $@ stats.c $(DEBUG_ARGS) $(ARGS)
+	gcc `pkg-config --cflags glib-2.0` -c -o $@ stats.c $(DEBUG_ARGS) $(ARGS)
 
 timeout.o: timeout.c $(INC_TIMEOUT)
 	gcc -c -o $@ timeout.c $(DEBUG_ARGS) $(ARGS)

@@ -36,6 +36,7 @@ typedef struct {
 	// client we are transferring this bucket to.  if this is not null, then a transfer is in progress.
 	client_t *transfer_client;
 	int transfer_mode_special;
+	int switching;
 
 	
 	struct event *shutdown_event;
@@ -52,8 +53,10 @@ typedef struct {
 
 
 typedef struct {
-	int local;
+	// string of the primary node for this hashmask
 	char *primary;
+	
+	// string of the secondary node for this hashmask.
 	char *secondary;
 } hashmask_t;
 
@@ -76,6 +79,9 @@ int buckets_nobackup_count(void);
 void bucket_destroy(bucket_t *bucket);
 
 
+void buckets_dump(void);
+void hashmasks_dump(void);
+
 
 #ifndef __BUCKET_C
 	extern bucket_t ** _buckets;
@@ -83,6 +89,8 @@ void bucket_destroy(bucket_t *bucket);
 	extern int _primary_buckets;
 	extern int _secondary_buckets;
 	extern hashmask_t ** _hashmasks;
+	extern int _nobackup_buckets;
+
 #endif
 
 

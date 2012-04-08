@@ -478,6 +478,8 @@ int main(int argc, char **argv)
 	// statistics are generated every second, setup a timer that can fire and handle the stats.
 	stats_init();
 
+	client_init_commands(4096);
+	
 	// initialise the servers that we listen on.
 	server_listen();
 
