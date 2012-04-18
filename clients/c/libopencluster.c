@@ -1122,6 +1122,8 @@ int server_connect(cluster_t *cluster, server_t *server)
 	message_t *msg;
 	int res=-1;
 	
+	assert(cluster);
+	assert(server);
 	
 	// if server has a handle, then we exit, because we are already connected to it.
 	if (server->handle < 0) {
@@ -1436,10 +1438,15 @@ int cluster_setint(cluster_t *cluster, const char *name, const int value, const 
 	server = hashmask->server;
 	
 	// make sure server is connected.  if not, then connect and wait for the initial handshaking.
-	if (server == NULL) {
+	while (server == NULL) {
 		// we are not connected to this server yet.  So we need to connect first.
 		cluster_connect(cluster);
+		server = hashmask->server;
+		
+		// *** should we have some sort of loop counter in here?
 	}
+	
+	assert(server);
 	
 	// build the message and send it off.
 	msg = message_new(cluster, CMD_SET_INT);
@@ -1496,10 +1503,13 @@ int cluster_setstr(cluster_t *cluster, const char *name, const char *value, cons
 	server = hashmask->server;
 	
 	// make sure server is connected.  if not, then connect and wait for the initial handshaking.
-	if (server == NULL) {
+	while (server == NULL) {
 		// we are not connected to this server yet.  So we need to connect first.
 		cluster_connect(cluster);
+		server = hashmask->server;
 	}
+	
+	assert(server);
 	
 	// build the message and send it off.
 	msg = message_new(cluster, CMD_SET_STR);

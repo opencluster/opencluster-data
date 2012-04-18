@@ -1,13 +1,5 @@
 This file provides some information about active branches in the repository.
 
-empty-migrate
-	Make sure that the cluster can migrate empty buckets.  There was an issue with this when doing 
-	tests, so it should be looked at.  It makes sense that a number of cluster nodes would likely 
-	be started before any data is put in them.
-
-client-multiple-connects
-	The client is not currently communicating properly with a multi-node cluster.  
-
 backup-push
 	The nodes in the cluster are supposed to push changes to the backup nodes.  
 	Make sure this is working.
