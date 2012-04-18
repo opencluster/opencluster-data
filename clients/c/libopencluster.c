@@ -1243,7 +1243,6 @@ int cluster_connect(cluster_t *cluster)
 		assert(server);
 
 		res = server_connect(cluster, server);
-		assert(res == 0);
 		if (res == 0) {
 			connected ++;
 		}
@@ -1439,7 +1438,7 @@ int cluster_setint(cluster_t *cluster, const char *name, const int value, const 
 	// make sure server is connected.  if not, then connect and wait for the initial handshaking.
 	if (server == NULL) {
 		// we are not connected to this server yet.  So we need to connect first.
-		assert(0);
+		cluster_connect(cluster);
 	}
 	
 	// build the message and send it off.
@@ -1499,7 +1498,7 @@ int cluster_setstr(cluster_t *cluster, const char *name, const char *value, cons
 	// make sure server is connected.  if not, then connect and wait for the initial handshaking.
 	if (server == NULL) {
 		// we are not connected to this server yet.  So we need to connect first.
-		assert(0);
+		cluster_connect(cluster);
 	}
 	
 	// build the message and send it off.
