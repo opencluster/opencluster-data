@@ -62,7 +62,8 @@ INC_BUCKET_DATA=\
 	$(H_GLOBALS) \
 	$(H_PUSH) \
 	$(H_LOGGING) \
-	$(H_STATS)
+	$(H_STATS) \
+	$(H_SECONDS)
 
 INC_BUCKET= \
 	$(H_BUCKET) \
@@ -99,7 +100,8 @@ INC_COMMANDS= \
 	$(H_TIMEOUT) \
 	$(H_LOGGING) \
 	$(H_CLIENT) \
-	$(H_HEADER)
+	$(H_HEADER) \
+	$(H_SERVER)
 
 INC_ITEM=$(H_ITEM)
 
@@ -149,7 +151,8 @@ INC_PUSH= \
 	$(H_NODE) \
 	$(H_SERVER) \
 	$(H_CLIENT) \
-	$(H_LOGGING)
+	$(H_LOGGING) \
+	$(H_SECONDS)
 
 INC_SECONDS= \
 	$(H_SECONDS) \

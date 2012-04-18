@@ -53,8 +53,6 @@ const char *_logfile = NULL;
 int _logfile_max = 0;
 
 
-// the mask is used to determine which bucket a hash belongs to.
-unsigned int _mask = 0;
 
 
 

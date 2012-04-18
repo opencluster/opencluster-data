@@ -1,22 +1,9 @@
 This file provides some information about active branches in the repository.
 
-debug-logging
-	When running a debug build, it is possible taht it logs information out to the log, but then
-	an assert fires, and the data is never written to the log, because it buffers it and sets an 
-	event to fire.  When assert happens process exits immediately.  So, when compiling a debug 
-	build, it will instead log data to the logfile immediately, rather than setting an event.
-
-verify-cluster
-	make sure that the migration is moving the buckets evenly, and that clients are getting the 
-	right information.   When a migration is completed, make sure the client is asking the server 
-	for the right information.  
-
-	After adding the Stats Dump, I can see that the buckets are not migrating correctly, and various 
-	stats are not getting set right.  
-
-	  * after the migrate, the _nobackup_buckets is still 16.
-	  * after the migrate, all the buckets on the first node are listed as primary, all on the 
-	    second node are secondary.  It should have been half and half.
+logfile-limit
+	The -m option doesn't seem to be working.  Get it working, and make sure that it actually does 
+	switch to new files when the current one will reach the limit.  Make sure that it works for the 
+	release and the debug versions since they have different codepaths now.
 
 empty-migrate
 	Make sure that the cluster can migrate empty buckets.  There was an issue with this when doing 
@@ -62,4 +49,7 @@ client-disconnect
 	implemented the GOODBYE command, we lose connection to the server when the server closes it.   
 	The client needs to be able to mark it as failed, and re-connect when needed.
 
-
+Reconnecting Nodes
+	If a node is known, but it connects, the server is failing because it is adding the node name to 
+	the list again.  This is incorrect.  It needs to look at the list to see if the node is already 
+	in there.  If it is, it doesnt need to be added again.

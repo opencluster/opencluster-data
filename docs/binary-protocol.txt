@@ -29,8 +29,8 @@ flexible so that future changes to the protocol do not result in clients and ser
 of different versions being unable to communicate with each other.
 
 Therefore some struct rules regarding future changes is required.
-  1.  When a protocol command or reply is published, changes will not be made to those 
-      operations.
+  1.  When a protocol command or reply is published, changes (including behaviour) will not be made 
+      to those operations.
   2.  If new functionality is required, new commands (and possibly replies) are required.  
       Do not make changes (or even expand) existing commands and replies.  Do not add new 
       replies to an existing command.
@@ -47,12 +47,12 @@ All integers are to be transmitted using network-byte-order.
 All strings are transmitted with a 4-byte int which indicates the length of the string, followed by
 the string data itself.  Strings are not null-terminated.
 
-All communications begin with an 12-byte header.
+All communications begin with a 12-byte header.
    ---------------------------------------------------------------------------------
    |   Short Int   | 2 bytes |  Command (or Reply) Identifier                      |
    |   Short Int   | 2 bytes |  Command being replied to (0 if not a reply)        |
    |   Integer     | 4 bytes |  User specified ID                                  |
-   |   Integer     | 4 bytes |  Length of the data following this header           |
+   |   Integer     | 4 bytes |  Length of the data following this header (if any)  |
    ---------------------------------------------------------------------------------
 
 All commands require a reply.  A reply takes the same format as a command, and has the same
@@ -80,7 +80,11 @@ The commands (and replies, indicated by *) are:
 * 305   cant_accept_bucket
 * 310   accepting_bucket
   320   control_bucket
-  330   control_bucket_complete
+* 330   control_bucket_complete
+  340   finalise_migration
+* 345   migration_complete
+* 346   migration_failed
+  350   release_bucket
   1000  lock
   1010  unlock
   2000  set_int
@@ -579,7 +583,9 @@ Payload:
 -----------------------------------------------------------------------
 control_bucket(320)
 
-Used by a node that has migrated a bucket to another server.  When all the data has been migrated, this command will tell the other node that all data is migrated, and it is now either a primary or a backup, and the alternate node is X.
+Used by a node that is switching control with the other node.  The level indicates what the target 
+should be after this completes.  So if level is 0, then the target must currently be level 1.  If 
+the level is 1, then the target must currently be level 0.
 
 Type of message:
   Command
@@ -588,13 +594,13 @@ Payload:
   integer - mask
   integer - hash (bucket)
   integer - level
-  string  - alternate data node (source or backup depending on level)
 
 
 -----------------------------------------------------------------------
 control_bucket_complete (330)
 
-Indicates that the process of transferring control of a bucket (either primary or secondary) has completed.
+Indicates that the process of transferring control of a bucket (either primary or secondary) has 
+completed.
 
 Type of message:
   Reply
@@ -606,7 +612,9 @@ Payload:
 -----------------------------------------------------------------------
 control_bucket_failed (335)
 
-The process for completing the control of a bucket failed.  This could be due to invalid data, or a bucket split within the cluster.  THe originating server should clear out the data involved in the migration and allow loadlevels to initiate the process again.
+The process for completing the control of a bucket failed.  This could be due to invalid data, or a 
+bucket split within the cluster.  THe originating server should clear out the data involved in the 
+migration and allow loadlevels to initiate the process again.
 
 Type of message:
   Reply
@@ -616,7 +624,52 @@ Payload:
   integer - hash (bucket)
   
 
+-----------------------------------------------------------------------
+finalise_migration (340)
+
+Used by a node that has migrated a bucket to another server.  When all the data has been migrated, 
+this command will tell the other node that all data is migrated, and it is now either a primary or a 
+backup, and the alternate node is X.
+
+Type of message:
+  Command
+
+Payload:
+  integer - mask
+  integer - hash (bucket)
+  integer - level
+  string  - alternate data node (source or backup depending on level)
+
+
+
+-----------------------------------------------------------------------
+migration_complete (345)
+
+Indicates that the process of transferring control of a bucket (either primary or secondary) has completed.
+
+Type of message:
+  Reply
+
+Payload:
+  integer - mask
+  integer - hash (bucket)
+
   
+-----------------------------------------------------------------------
+migration_failed (346)
+
+The process for completing the migration of a bucket failed.  This could be due to invalid data, or 
+a bucket split within the cluster.  THe originating server should clear out the data involved in the 
+migration and allow loadlevels to initiate the process again.
+
+Type of message:
+  Reply
+
+Payload:
+  integer - mask
+  integer - hash (bucket)
+  
+
 
 -----------------------------------------------------------------------
 release_bucket (350)

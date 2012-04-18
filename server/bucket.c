@@ -16,6 +16,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+// the mask is used to determine which bucket a hash belongs to.
+unsigned int _mask = 0;
+
 
 // the list of buckets that this server is handling.  '_mask' indicates how many entries in the 
 // array there is, but the ones that are not handled by this server, will have a NULL entry.
@@ -148,7 +151,6 @@ bucket_t * bucket_new(hash_t hash)
 	assert(data_in_transit() == 0);
 	assert(bucket->oldbucket_event == NULL);
 	assert(bucket->transfer_mode_special == 0);
-	assert(bucket->switching == 0);
 			
 	bucket->data = data_new(hash);
 	
@@ -536,8 +538,7 @@ static void bucket_dump(bucket_t *bucket)
 	assert(mode);
 	assert(altmode);
 	assert(altnode);
-	stat_dumpstr("    Bucket:0x%08X, Mode:%s, %s Node:%s", 
-				 bucket->hash, mode, altmode, altnode);
+	stat_dumpstr("    Bucket:0x%08X, Mode:%s, %s Node:%s", bucket->hash, mode, altmode, altnode);
 	
 	assert(bucket->data);
 //	data_dump(bucket->data);
@@ -598,3 +599,20 @@ void hashmasks_dump(void)
 	stat_dumpstr(NULL);
 }
 
+
+// if the buckets are moving from primary to secondary, or the other way round, then the hashmasks 
+// need to be switched to match it.
+void hashmask_switch(hash_t hash) 
+{
+	char *tmp;
+	
+	assert(_hashmasks);
+	assert(hash >= 0 && hash <= _mask);
+	assert(_hashmasks[hash]);
+	assert(_hashmasks[hash]->primary);
+	assert(_hashmasks[hash]->secondary);
+	
+	tmp = _hashmasks[hash]->primary;
+	_hashmasks[hash]->primary = _hashmasks[hash]->secondary;
+	_hashmasks[hash]->secondary = tmp;
+}

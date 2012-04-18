@@ -20,6 +20,9 @@
 #define CMD_CONTROL_BUCKET				 320
 #define REPLY_CONTROL_BUCKET_COMPLETE    330
 #define REPLY_CONTROL_BUCKET_FAILED      335
+#define CMD_FINALISE_MIGRATION           340
+#define REPLY_MIGRATION_ACK              345
+#define REPLY_MIGRATION_FAIL             346
 #define CMD_SET_INT						 2000
 #define CMD_SET_STR						 2020
 #define CMD_GET_INT						 2100

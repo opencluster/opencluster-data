@@ -9,6 +9,7 @@
 #include "item.h"
 #include "logging.h"
 #include "push.h"
+#include "seconds.h"
 #include "stats.h"
 
 #include <assert.h>
@@ -489,7 +490,7 @@ gboolean migrate_hash_fn(gpointer p_key, gpointer p_value, void *p_data)
 		assert(_migrate_sync > 0);
 		assert(map->migrate >= 0);
 		
-		logger(LOG_DEBUG, "migrate: found hash: %08X, migrate=%d", *key, map->migrate);
+// 		logger(LOG_DEBUG, "migrate: found hash: %08X, migrate=%d", *key, map->migrate);
 	
 		assert(map->migrate <= _migrate_sync);
 		assert(map->migrate_name <= _migrate_sync);

@@ -45,7 +45,6 @@ static int attempt_switch(client_t *client)
 {
 	bucket_t *bucket = NULL;
 	int i;
-	char *tmps;
 	
 	// go through all the buckets.
 	for (i=0; i<=_mask && bucket == NULL; i++) {
@@ -62,15 +61,15 @@ static int attempt_switch(client_t *client)
 					// yes it is, we can promote this bucket.
 					bucket = _buckets[i];
 					
-					printf("[%u] Attempting to promote bucket #%X on '%s'\n",
-					   _seconds, bucket->hash, ((node_t*)client->node)->name); 
+					logger(LOG_INFO, "Attempting to promote bucket #%X on '%s'",
+					   bucket->hash, ((node_t*)client->node)->name); 
 
 					assert(bucket->transfer_client == NULL);
 					bucket->transfer_client = client;
 					
-					assert(bucket->switching == 0);
-					bucket->switching = 1;
-				
+					assert(_bucket_transfer == 0);
+					_bucket_transfer = 1;
+					
 					// we found a bucket we can promote, so we send out the command to start it.
 					push_control_bucket(client, bucket, bucket->level);
 				}
@@ -202,11 +201,13 @@ static void process_loadlevels(client_t *client, header_t *header, void *ptr)
 		// before contemplating promoting any buckets, we need to make sure it wont destabilize us.
 		if ((_primary_buckets-1 >= _secondary_buckets+1) && (backups > primary)) {
 			logger(LOG_DEBUG, "Attempting to switch with '%s'", ((node_t*)client->node)->name); 
-			if (attempt_switch(client) == 0) {
+			if (attempt_switch(client) == 1) {
 				// we started a promotion process, so we dont need to continue.
+				assert(_bucket_transfer == 1);
 				assert(payload_length() == 0);
 				return;
 			}
+			assert(_bucket_transfer == 0);
 		}
 				
 		// we havent sent anything yet, so now we need to check to see if we have any buckets 
@@ -215,6 +216,7 @@ static void process_loadlevels(client_t *client, header_t *header, void *ptr)
 		assert(bucket == NULL);
 		if (buckets_nobackup_count() > 0 && (primary+backups < _mask+1)) {
 			bucket = find_nobackup_bucket();
+			assert(_bucket_transfer == 0);
 		}
 	
 		if (bucket == NULL) {
@@ -282,7 +284,7 @@ static void finalize_migration(client_t *client, bucket_t *bucket)
 		// we are sending a nobackup bucket.
 		
 		// send a message to the client telling them that they are now a backup node for the bucket.
-		push_control_bucket(client, bucket, 1);
+		push_finalise_migration(client, bucket, 1);
 	}
 	else if (bucket->level == 0 && bucket->backup_node) {
 		// we are sending a primary bucket.  
@@ -395,10 +397,88 @@ static void process_accept_bucket(client_t *client, header_t *header, void *ptr)
 
 
 
+static void process_control_bucket_complete(client_t *client, header_t *header, void *ptr)
+{
+	char *next;
+	hash_t mask;
+	hash_t hash;
+	bucket_t *bucket;
+	
+	assert(client && header && ptr);
+	assert(client->node);
+	
+	next = ptr;
+
+	// need to get the data out of the payload.
+	mask = data_int(&next);
+	hash = data_int(&next);
+	
+	// get the bucket.
+	assert(_buckets);
+	assert(mask == _mask);
+	assert(hash >= 0 && hash <= mask);
+	bucket = _buckets[hash];
+	assert(bucket);
+	assert(bucket->hash == hash);
+
+	assert(bucket->transfer_client == client);
+	bucket->transfer_client = NULL;
+	
+	logger(LOG_INFO, "Bucket switching complete: %X", hash);
+
+	// do we need to let other nodes that the transfer is complete?
+
+	// we are switching a bucket.  So if we are currently primary, then we need to switch to 
+	// secondary, and vice-versa.
+	
+	if (bucket->level == 0) {
+		bucket->level = 1;
+		_primary_buckets --;
+		_secondary_buckets ++;
+		
+		assert(bucket->backup_node);
+		assert(bucket->target_node == NULL);
+		bucket->target_node = bucket->backup_node;
+		bucket->backup_node = NULL;
+		
+		assert(_primary_buckets >= 0);
+		assert(_secondary_buckets > 0);
+	}
+	else {
+		assert(bucket->level == 1);
+		bucket->level = 0;
+		_primary_buckets ++;
+		_secondary_buckets --;
+
+		assert(bucket->backup_node == NULL);
+		assert(bucket->target_node);
+		bucket->backup_node = bucket->target_node;
+		bucket->target_node = NULL;
+		
+		assert(_primary_buckets > 0);
+		assert(_secondary_buckets >= 0);
+	}
+	
+	// since we are switching, need to swap the hashmask entries around.
+	hashmask_switch(hash);
+	
+	// Tell all our clients that the hashmasks are changing.
+	push_hashmask_update(bucket);
+	
+	assert(_bucket_transfer == 1);
+	_bucket_transfer = 0;
+
+	// now that this migration is complete, we need to ask for loadlevels again.
+	push_loadlevels(client);
+}
+
+
+
+
 /* 
  * The other node now has control of the bucket, so we can clean it up and remove it completely..
  */
-static void process_control_bucket_complete(client_t *client, header_t *header, void *ptr)
+static void process_migration_ack(client_t *client, header_t *header, void *ptr)
 {
 	char *next;
 	hash_t mask;
@@ -431,52 +511,25 @@ static void process_control_bucket_complete(client_t *client, header_t *header, 
 
 	// if we transferred a backup node, or we transferred a primary that already has a backup node, 
 	// then we dont need this copy of the bucket anymore, so we can delete it.
-	if (bucket->switching == 0) {
-		// we are not switching, but migrating a bucket.
-		if (bucket->level == 0 && bucket->backup_node == NULL) {
-			assert(client->node);
-			bucket->backup_node = client->node;
-			assert(_nobackup_buckets > 0);
-			_nobackup_buckets --;
-			assert(_nobackup_buckets >= 0);
-		}
-		else {
-			if (bucket->level == 0) {
-				_primary_buckets --;
-			}
-			else {
-				assert(bucket->level == 1);
-				_secondary_buckets --;
-			}
-			
-			bucket_destroy(bucket);
-			bucket = NULL;
-		}
+
+	if (bucket->level == 0 && bucket->backup_node == NULL) {
+		assert(client->node);
+		bucket->backup_node = client->node;
+		assert(_nobackup_buckets > 0);
+		_nobackup_buckets --;
+		assert(_nobackup_buckets >= 0);
 	}
 	else {
-		
-		// we are switching a bucket.  So if we are currently primary, then we need to switch to 
-		// secondary, and vice-versa.
-		
-		assert(bucket->switching == 1);
-		
 		if (bucket->level == 0) {
-			bucket->level = 1;
 			_primary_buckets --;
-			_secondary_buckets ++;
-			
-			assert(_primary_buckets >= 0);
-			assert(_secondary_buckets > 0);
 		}
 		else {
 			assert(bucket->level == 1);
-			bucket->level = 0;
-			_primary_buckets ++;
 			_secondary_buckets --;
-
-			assert(_primary_buckets > 0);
-			assert(_secondary_buckets >= 0);
 		}
+		
+		bucket_destroy(bucket);
+		bucket = NULL;
 	}
 	
 	assert(_bucket_transfer == 1);
@@ -485,6 +538,10 @@ static void process_control_bucket_complete(client_t *client, header_t *header, 
 	// now that this migration is complete, we need to ask for loadlevels again.
 	push_loadlevels(client);
 }
+
+
+
+
 
 
 
@@ -592,6 +649,7 @@ void process_init(void)
 	client_add_cmd(REPLY_LOADLEVELS, process_loadlevels);
 	client_add_cmd(REPLY_ACCEPTING_BUCKET, process_accept_bucket);
 	client_add_cmd(REPLY_CONTROL_BUCKET_COMPLETE, process_control_bucket_complete);
+	client_add_cmd(REPLY_MIGRATION_ACK, process_migration_ack);
 	client_add_cmd(REPLY_UNKNOWN, process_unknown);
 
 }

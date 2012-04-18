@@ -13,11 +13,10 @@
 	extern int _daemonize;
 	extern const char *_username;
 	extern const char *_pid_file;
-	extern unsigned int _seconds;
-	extern unsigned int _mask;			// ocd.c
-	extern int _primary_buckets;		// bucket.c
-	extern int _secondary_buckets;		// bucket.c
-	extern int _bucket_transfer;		// bucket.c
+// 	extern unsigned int _mask;			// ocd.c
+// 	extern int _primary_buckets;		// bucket.c
+// 	extern int _secondary_buckets;		// bucket.c
+// 	extern int _bucket_transfer;		// bucket.c
 
 	
 #endif

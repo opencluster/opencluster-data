@@ -7,6 +7,7 @@
 #include "payload.h"
 #include "protocol.h"
 #include "push.h"
+#include "seconds.h"
 #include "server.h"
 
 #include <assert.h>
@@ -59,7 +60,6 @@ void push_hashmask_update(bucket_t *bucket)
 			if (_clients[i]) {
 				if (_clients[i]->handle >= 0) {
 					// we have a client, that seems to be connected.
-
 					logger(LOG_DEBUG, "sending HASHMASK: (%08X/%08X)", _mask, bucket->hash);
 					client_send_message(_clients[i], NULL, CMD_HASHMASK, payload_length(), payload_ptr());
 				}
@@ -92,7 +92,7 @@ void push_hashmasks(client_t *client)
 			
 			// we have the bucket, and we are the 'primary for it'
 			assert(_buckets[i]->data);
-			assert(_buckets[i]->target_node == NULL);
+			assert((_buckets[i]->level == 0 && _buckets[i]->target_node == NULL) || (_buckets[i]->level > 0 && _buckets[i]->backup_node == NULL));
 
 			assert(payload_length() == 0);
 			payload_int(_mask);					// mask
@@ -220,6 +220,30 @@ void push_control_bucket(client_t *client, bucket_t *bucket, int level)
 	payload_int(bucket->hash);
 	payload_int(level);
 	
+	logger(LOG_DEBUG, "CONTROL_BUCKET(bucket:%X)", bucket->hash);
+	
+	assert(payload_length() > 0);
+	client_send_message(client, NULL, CMD_CONTROL_BUCKET, payload_length(), payload_ptr());
+	payload_clear();
+}
+
+
+// push a command to the client telling it that it is now a controller for this particular bucket.
+void push_finalise_migration(client_t *client, bucket_t *bucket, int level)
+{
+	assert(client);
+	assert(bucket);
+	assert(level == 0 || level == 1);
+	assert(bucket->transfer_client == client);
+	assert(_mask != 0);
+	assert(bucket->hash >= 0 && bucket->hash <= _mask);
+	
+	assert(payload_length() == 0);
+	payload_int(_mask);
+	payload_int(bucket->hash);
+	payload_int(level);
+	
+	
 	// if we are sending a primary bucket, then there must be a backup node somewhere. If we are 
 	// sending a backup node, then there could be a source node elsewhere (moving a bucket), or we 
 	// are the source (bucket had no backup).
@@ -247,11 +271,11 @@ void push_control_bucket(client_t *client, bucket_t *bucket, int level)
 		payload_string(_interface);
 	}
 
-	logger(LOG_DEBUG, "CONTROL_BUCKET(bucket:%X): Interface:'%s', length=%d, payload=%d", 
-		   bucket->hash, _interface, (int)strlen(_interface), payload_length());
+	logger(LOG_DEBUG, "FINALISE_MIGRATION(bucket:%X): Interface:'%s'", 
+		   bucket->hash, _interface);
 	
 	assert(payload_length() > 0);
-	client_send_message(client, NULL, CMD_CONTROL_BUCKET, payload_length(), payload_ptr());
+	client_send_message(client, NULL, CMD_FINALISE_MIGRATION, payload_length(), payload_ptr());
 	payload_clear();
 }
 

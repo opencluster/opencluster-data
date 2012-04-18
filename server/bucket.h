@@ -36,8 +36,6 @@ typedef struct {
 	// client we are transferring this bucket to.  if this is not null, then a transfer is in progress.
 	client_t *transfer_client;
 	int transfer_mode_special;
-	int switching;
-
 	
 	struct event *shutdown_event;
 	struct event *transfer_event;
@@ -47,7 +45,6 @@ typedef struct {
 	// lookup on an item is made, and it is found in one of these trees, it is removed and put in 
 	// the proper tree so active items should get moved pretty quickly.
 	struct event *oldbucket_event;
-
 
 } bucket_t;
 
@@ -82,6 +79,8 @@ void bucket_destroy(bucket_t *bucket);
 void buckets_dump(void);
 void hashmasks_dump(void);
 
+void hashmask_switch(hash_t hash);
+
 
 #ifndef __BUCKET_C
 	extern bucket_t ** _buckets;
@@ -90,7 +89,8 @@ void hashmasks_dump(void);
 	extern int _secondary_buckets;
 	extern hashmask_t ** _hashmasks;
 	extern int _nobackup_buckets;
-
+	extern unsigned int _mask;
+	extern int _bucket_transfer;
 #endif
 
 
