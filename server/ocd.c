@@ -327,6 +327,7 @@ static void parse_params(int argc, char **argv)
 				assert(_logfile_max == 0);
 				_logfile_max = atoi(optarg);
 				assert(_logfile_max >= 0);
+				break;
 				
 			default:
 				fprintf(stderr, "Illegal argument \"%c\"\n", c);

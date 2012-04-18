@@ -111,10 +111,12 @@ static void log_handler(int fd, short int flags, void *arg)
 
 	if ((_fp == NULL) || (_outbuf_len + _written) > _maxfilesize) {
 		log_nextfile();
+		_written = 0;
 	}
 
 	if (_fp) {
 		fwrite(_outbuf, _outbuf_len, 1, _fp);
+		_written += _outbuf_len;
 		_outbuf_len = 0;
 		
 		fflush(_fp);
@@ -169,6 +171,7 @@ void log_init(const char *logfile, short int loglevel, int maxfilesize)
 		
 		// open up the logfile.
 		log_nextfile();
+		assert(_written == 0);
 
 		// create the USR1 and USR2 signal listeners.
 		assert(_evbase);
@@ -311,10 +314,12 @@ void logger(short int level, const char *format, ...)
 
 		if ((_fp == NULL) || (_outbuf_len + _written) > _maxfilesize) {
 			log_nextfile();
+			_written = 0;
 		}
 
 		if (_fp) {
 			fwrite(_outbuf, _outbuf_len, 1, _fp);
+			_written += _outbuf_len;
 			_outbuf_len = 0;
 			
 			fflush(_fp);
