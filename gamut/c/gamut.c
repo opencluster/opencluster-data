@@ -81,7 +81,7 @@ int main(int argc, char **argv)
 		sec = g_timer_elapsed(timer, &msec);
 		printf("Timing of 6000 sets. %lf\n", sec);
 		
- 		sleep(30);
+ 		sleep(1);
 		
 		printf("Disconnecting from the cluster,\n");
 		cluster_disconnect(cluster);		
