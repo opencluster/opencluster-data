@@ -19,6 +19,12 @@ shutdown
 shutdown-migrate
 	When a node is being shutdown, it needs to send the buckets to another node.
 
+goodbye
+	When a client or node sends the 'goodbye' command, the server needs to send a reply and close 
+	the connection properly.  Current tests are showing the client is still staying connected and 
+	the goodbye command is not being processed properly because it keeps getting logged, but the 
+	client doesn't disconnect.
+
 data-logging
 	A special node can connect to the cluster that logs all the updates that occur.  It logs the 
 	output to a series of files.  It can also be used to re-inject that logged data into a cluster.
