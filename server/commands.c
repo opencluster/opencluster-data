@@ -943,12 +943,13 @@ static void cmd_sync_int(client_t *client, header_t *header, char *payload)
 	// store the value into the trees.  If a value already exists, it will get released and this one 
 	// will replace it, so control of this value is given to the tree structure.
 	// NOTE: value is controlled by the tree after this function call.
-	// NOTE: name is controlled by the tree after this function call.
+	// NOTE: name is controlled by the tree after this function call (if it is supplied).
 	result = buckets_store_value(map_hash, key_hash, NULL, 0, expires, value);
 	value = NULL;
 	
 	// send the ACK reply.
 	if (result == 0) {
+		
 		assert(payload_length() == 0);
 		payload_int(map_hash);
 		payload_int(key_hash);

@@ -306,12 +306,12 @@ void push_sync_item(client_t *client, item_t *item)
 	if (item->value->type == VALUE_INT) {
 		cmd = CMD_SYNC_INT;
 		payload_int(item->value->data.i);
-		logger(LOG_DEBUG, "sending MIGRATE_INT: (%08X:%08X, %d)", item->map_key, item->item_key, item->value->data.i);
+		logger(LOG_DEBUG, "sending SYNC_INT: (%08X:%08X, %d)", item->map_key, item->item_key, item->value->data.i);
 	}
 	else if (item->value->type == VALUE_STRING) {
 		cmd = CMD_SYNC_STRING;
 		payload_data(item->value->data.s.length, item->value->data.s.data);
-		logger(LOG_DEBUG, "sending MIGRATE_STRING: (%08X:%08X, '%s')", item->map_key, item->item_key, item->value->data.s.data);
+		logger(LOG_DEBUG, "sending SYNC_STRING: (%08X:%08X, '%s')", item->map_key, item->item_key, item->value->data.s.data);
 	}
 	else {
 		assert(0);
