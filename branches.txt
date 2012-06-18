@@ -1,8 +1,9 @@
 This file provides some information about active branches in the repository.
 
-backup-push
-	The nodes in the cluster are supposed to push changes to the backup nodes.  
-	Make sure this is working.
+
+utils
+	To help with testing the cluster, we can write some command line tools that get/set data from the 
+	cluster.  These should be designed to be used from shell scripts.
 
 serverinfo
 	When new nodes connect to existing servers, they need to let their connected clients know about it.
