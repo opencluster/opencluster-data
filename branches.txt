@@ -1,6 +1,19 @@
 This file provides some information about active branches in the repository.
 
 
+client-shutdown
+	The C client is not shutting down properly when more than one node connection has been 
+	established.  This is seen when one node is started, gamut is run, another node is started, wait 
+	for migration to complete, another gamut is run.
+
+	Also, if a client is connection but not closing, and it drops the connecton, and assert is fired 
+	on the server.  This needs to be dealt with.
+
+client-connect
+	When a client connects to a server, it is not handling it properly when the server tells the client 
+	about another node in the cluster.  The client needs to connect to all the server nodes, and 
+	maintain the connection.
+
 utils
 	To help with testing the cluster, we can write some command line tools that get/set data from the 
 	cluster.  These should be designed to be used from shell scripts.
@@ -36,11 +49,6 @@ savefile
 	that can then be used to inject the data back in when the cluster is restarted.   The file-save 
 	option would be present from start, but it will only write to the file if it is the last one in 
 	the cluster.   The daemon can inject the data into the cluster on startup.
-
-client-shutdown
-	The C client is not shutting down properly when more than one node connection has been 
-	established.  This is seen when one node is started, gamut is run, another node is started, wait 
-	for migration to complete, another gamut is run.
 
 client-maps
 	The C client does not handle maps properly (or at all), so it needs to be able to use maps.

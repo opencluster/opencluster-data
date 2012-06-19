@@ -145,6 +145,8 @@ cluster_t * cluster_init(void)
 	cluster->mask = 0;			// a mask of zero, indicates that hashmasks havent been loaded.
 	cluster->hashmasks = NULL;
 	
+	cluster->disconnecting = 0;
+	
 	return(cluster);
 }
 
@@ -194,7 +196,9 @@ void cluster_free(cluster_t *cluster)
 		cluster->msg_count --;
 		msg = cluster->messages[cluster->msg_count];
 		assert(msg);
+
 		
+//		printf("msg[%d], command=%d\n", msg->id, msg->out.command);
 		assert(msg->available > 0);
 		assert(msg->id == cluster->msg_count);
 
@@ -963,7 +967,7 @@ static int send_request(cluster_t *cluster, server_t *server, message_t *msg, in
 	assert(server);
 	
 	// if we are not connected to this server, then we need to connect.
-	if (server->handle < 0) {
+	if (server->handle < 0 ) {
 		if (server_connect(cluster, server) != 0) {
 			return(-1);
 		}
@@ -1278,18 +1282,24 @@ void server_disconnect(cluster_t *cluster, server_t *server)
 		}
 	}
 	
-	// send a GOODBYE command  first.
-	msg = message_new(cluster, CMD_GOODBYE);
 			
-	// send the request and receive the reply.
-	if (send_request(cluster, server, msg, WAIT_FOR_REPLY) != 0) {
-		assert(0); // what?
+	// if we are connected to the server, send the GOODBYE request and receive the reply.
+	if (server->handle >= 0) {
+		// send a GOODBYE command  first.
+		msg = message_new(cluster, CMD_GOODBYE);
+		assert(msg);
+		
+		if (send_request(cluster, server, msg, WAIT_FOR_REPLY) != 0) {
+			assert(0); // what?
+		}
+		
+		message_return(msg);
+		
+		// close the connection.
+		assert(server->handle > 0);
+		close(server->handle);
+		server->handle = -1;
 	}
-	
-	// close the connection.
-	assert(server->handle > 0);
-	close(server->handle);
-	server->handle = -1;
 }
 
 void cluster_disconnect(cluster_t *cluster)
@@ -1299,7 +1309,10 @@ void cluster_disconnect(cluster_t *cluster)
 
 	assert(cluster->servers);
 	assert(cluster->server_count > 0);
-
+	
+	assert(cluster->disconnecting == 0);
+	cluster->disconnecting = 1;
+	
 	for (try=0; try < cluster->server_count; try++) {
 	
 		server = cluster->servers[try];
@@ -1467,7 +1480,6 @@ int cluster_setint(cluster_t *cluster, const char *name, const int value, const 
 
 	// now we've got a reply, we free the message, because there is no 
 	assert(msg->in.result == CMD_ACK);
-	
 	
 	message_return(msg);
 	

@@ -87,7 +87,7 @@ client_t * client_new(void)
 	client = calloc(1, sizeof(client_t));
 	assert(client);
 	
-	client->handle = -1;
+	client->handle = INVALID_HANDLE;
 	
 	client->read_event = NULL;
 	client->write_event = NULL;
@@ -185,7 +185,7 @@ void client_free(client_t *client)
 	if (client->node) {
 		node_detach_client(client->node);
 	}
-	
+
 	assert(client->out.length == 0);
 	assert(client->out.offset == 0);
 	if (client->out.buffer) {
@@ -212,10 +212,10 @@ void client_free(client_t *client)
 		client->write_event = NULL;
 	}
 	
-
 	assert(client->shutdown_event == NULL);
 
 	if (client->handle != INVALID_HANDLE) {
+		logger(LOG_DEBUG, "client_free: closing socket %d", client->handle);
 		EVUTIL_CLOSESOCKET(client->handle);
 		client->handle = INVALID_HANDLE;
 	}
@@ -260,7 +260,6 @@ void client_free(client_t *client)
 	free(client);
 	
 	assert(_client_count >= 0);
-	
 }
 
 

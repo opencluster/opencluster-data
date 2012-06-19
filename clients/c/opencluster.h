@@ -52,6 +52,7 @@ typedef struct {
 	int payload_max;
 	int payload_length;
 	
+	int disconnecting;
 	
 } cluster_t;
 
