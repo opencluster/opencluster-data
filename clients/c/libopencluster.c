@@ -1622,9 +1622,10 @@ int cluster_getint(cluster_t *cluster, const char *name, int *value)
 	server = hashmask->server;
 	
 	// make sure server is connected.  if not, then connect and wait for the initial handshaking.
-	if (server == NULL) {
+	while (server == NULL) {
 		// we are not connected to this server yet.  So we need to connect first.
-		assert(0);
+		cluster_connect(cluster);
+		server = hashmask->server;
 	}
 	
 	// build the message and send it off.
@@ -1689,9 +1690,10 @@ int cluster_getstr(cluster_t *cluster, const char *name, char **value, int *leng
 	server = hashmask->server;
 	
 	// make sure server is connected.  if not, then connect and wait for the initial handshaking.
-	if (server == NULL) {
+	while (server == NULL) {
 		// we are not connected to this server yet.  So we need to connect first.
-		assert(0);
+		cluster_connect(cluster);
+		server = hashmask->server;
 	}
 	
 	// build the message and send it off.
