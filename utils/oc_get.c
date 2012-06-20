@@ -28,11 +28,9 @@ static void usage(void) {
 		"  -i           Indicates expecting an integer.\n"
 		"  -n <node>    Cluster node to connect to.\n"
 		"  -h           print this help and exit\n\n"
-		"The -m, -k and -v options indicate strings.\n"
-		"The -M, -K and -V options indicate integers.\n\n"
+		"The -m and -k options indicate strings.\n"
+		"The -M and -K options indicate integers.\n\n"
 		"For example, this means that you can have a string map with an integer key, \n"
-		"and a string payload (using -m -K -v)\n\n"
-		"-v and -s both mean a string value, -V and -i both mean an integer value.\n"
 	);
 	return;
 }
