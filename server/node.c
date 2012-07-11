@@ -36,6 +36,8 @@ node_t * node_new(const char *name)
 {
 	node_t *node;
 	
+	assert(name);
+	
 	node = malloc(sizeof(node_t));
 	assert(node);
 	node->name = strdup(name);

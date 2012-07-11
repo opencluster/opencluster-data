@@ -71,6 +71,36 @@ void push_hashmask_update(bucket_t *bucket)
 }
 
 
+void push_all_newserver(char *name, client_t *source_client)
+{
+	int i;
+	
+	assert(name);
+
+	// create the payload now, because it will be the same for all the clients.
+	assert(payload_length() == 0);
+	payload_string(name);
+	
+	if (_clients) {
+		for (i=0; i<_client_count; i++) {
+			if (_clients[i]) {
+				// exclude the client we found this info from.
+				if (_clients[i] != source_client) {
+					if (_clients[i]->handle >= 0) {
+						// we have a client, that seems to be connected.
+						logger(LOG_DEBUG, "sending SERVERINFO to client %d: (%s)", _clients[i]->handle, name);
+						client_send_message(_clients[i], NULL, CMD_SERVERINFO, payload_length(), payload_ptr());
+					}
+				}
+			}
+		}
+	}
+	
+	payload_clear();
+}
+
+
+
 
 // send the hashmasks list to the client.
 void push_hashmasks(client_t *client)

@@ -1,12 +1,12 @@
 This file provides some information about active branches in the repository.
 
 
-utils
-	To help with testing the cluster, we can write some command line tools that get/set data from the 
-	cluster.  These should be designed to be used from shell scripts.
-
 serverinfo
 	When new nodes connect to existing servers, they need to let their connected clients know about it.
+
+emptykey
+	Just noticed that the server will throw an assert, if the client requests the value of a key 
+	that does not exist.
 
 shutdown
 	Better handling of the system shutdown.  When a Ctrl-C signal is received it should fire up 

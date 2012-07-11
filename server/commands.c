@@ -429,6 +429,10 @@ static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 		// need to send to the node, the list of hashmasks.
 		push_hashmasks(client);
 		
+		// this is a new server we didn't know about, so we need to send this info to our connected clients as well.
+		push_all_newserver(name, client);
+		
+		
 		logger(LOG_INFO, "Adding '%s' as a New Node.", name);
 	}
 	else {
@@ -483,6 +487,54 @@ static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 	free(name);
 	name=NULL;
 }
+
+
+
+static void cmd_serverinfo(client_t *client, header_t *header, char *payload)
+{
+	char *next;
+	char *name = NULL;
+	node_t *node = NULL;
+	
+	assert(client);
+	assert(header);
+	assert(payload);
+
+	next = payload;
+	
+	assert(client->node == NULL);
+	
+	// the only parameter is a string indicating the servers connection data.  
+	// Normally an IP and port.
+	name = data_string_copy(&next);
+	assert(name);
+
+	
+	// we have a server name.  We need to check it against out node list.  If it is there, then we 
+	// dont do anything.  If it is not there, then we need to add it.
+	node = node_find(name);
+	if (node == NULL) {
+		// the node was not found in the list.  We need to add it to the list,
+
+		node = node_new(name);
+		assert(node);
+		
+		// this is a new server we didn't know about, so we need to send this info to our connected clients as well.
+		push_all_newserver(name, client);
+		
+		
+		logger(LOG_INFO, "Adding '%s' as a New Node.", name);
+	}
+
+	// send the ACK reply.
+	client_send_message(client, header, REPLY_ACK, 0, NULL);
+	
+	free(name);
+	name=NULL;
+}
+
+
+
 
 
 
@@ -1026,6 +1078,7 @@ void cmd_init(void)
 	client_add_cmd(CMD_HELLO, cmd_hello);
 	client_add_cmd(CMD_GOODBYE, cmd_goodbye);
 	client_add_cmd(CMD_SERVERHELLO, cmd_serverhello);
+	client_add_cmd(CMD_SERVERINFO, cmd_serverinfo);
 }
 
 

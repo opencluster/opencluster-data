@@ -20,6 +20,7 @@ void push_control_bucket(client_t *client, bucket_t *bucket, int level);
 void push_sync_item(client_t *client, item_t *item);
 void push_sync_name(client_t *client, hash_t key, char *name, int int_key);
 void push_finalise_migration(client_t *client, bucket_t *bucket, int level);
+void push_all_newserver(char *name, client_t *source_client);
 
 
 #endif
