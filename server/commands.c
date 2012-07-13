@@ -55,19 +55,20 @@ static void cmd_get_int(client_t *client, header_t *header, char *payload)
 			assert(0);
 		}
 		else {
-			// build the reply.
+			// we have the data, build the reply.
 			assert(payload_length() == 0);
 			payload_int(map_hash);
 			payload_int(key_hash);
 			payload_int(value->data.i);
+
+			assert(payload_length() > 0);
+			client_send_message(client, header, REPLY_DATA_INT, payload_length(), payload_ptr());
+			payload_clear();
 		}
-		
-		assert(payload_length() > 0);
-		client_send_message(client, header, REPLY_DATA_INT, payload_length(), payload_ptr());
-		payload_clear();
 	}
 	else {
-		assert(0);
+		// the data they are looking for is not here.
+		client_send_message(client, header, REPLY_FAIL, 0, NULL);
 	}
 	
 	assert(payload_length() == 0);
@@ -101,20 +102,20 @@ static void cmd_get_str(client_t *client, header_t *header, char *payload)
 			assert(0);
 		}
 		else {
-		
 			// build the reply.
 			assert(payload_length() == 0);
 			payload_int(map_hash);
 			payload_int(key_hash);
 			payload_data(value->data.s.length, value->data.s.data);
+			
+			assert(payload_length() > 0);
+			client_send_message(client, header, REPLY_DATA_STR, payload_length(), payload_ptr());
+			payload_clear();
 		}
-		
-		assert(payload_length() > 0);
-		client_send_message(client, header, REPLY_DATA_STR, payload_length(), payload_ptr());
-		payload_clear();
 	}
 	else {
-		assert(0);
+		// the data they are looking for is not here.
+		client_send_message(client, header, REPLY_FAIL, 0, NULL);
 	}
 
 	assert(payload_length() == 0);

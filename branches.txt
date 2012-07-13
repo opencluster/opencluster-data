@@ -1,13 +1,6 @@
 This file provides some information about active branches in the repository.
 
 
-serverinfo
-	When new nodes connect to existing servers, they need to let their connected clients know about it.
-
-emptykey
-	Just noticed that the server will throw an assert, if the client requests the value of a key 
-	that does not exist.
-
 shutdown
 	Better handling of the system shutdown.  When a Ctrl-C signal is received it should fire up 
 	events to shutdown all the components, mark a variable that the stats can monitor.  When the 
@@ -49,3 +42,8 @@ Reconnecting Nodes
 	If a node is known, but it connects, the server is failing because it is adding the node name to 
 	the list again.  This is incorrect.  It needs to look at the list to see if the node is already 
 	in there.  If it is, it doesnt need to be added again.
+
+client-timeout
+	When performing options, the client should be able to be set with a general timeout... then, if 
+	connecting takes longer than that time, then it stops connecting and the function returns.  We 
+	should probably set different timeouts, like a connect timeout and a wait_for_data timeout.

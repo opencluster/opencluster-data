@@ -1622,6 +1622,7 @@ int cluster_getint(cluster_t *cluster, const char *name, int *value)
 	server = hashmask->server;
 	
 	// make sure server is connected.  if not, then connect and wait for the initial handshaking.
+	// TODO: we should make some general timeout, if we dont connect within a certain time, then exit the function.
 	while (server == NULL) {
 		// we are not connected to this server yet.  So we need to connect first.
 		cluster_connect(cluster);
@@ -1642,19 +1643,20 @@ int cluster_getint(cluster_t *cluster, const char *name, int *value)
 	}
 
 	// now we've got a reply, we free the message, because there is no 
-// 	printf("msg result == %d\n", msg->in.result);
-	assert(msg->in.result == CMD_DATA_INT);
+	if (msg->in.result != CMD_DATA_INT) {
+		// the data was not at this server, so we return a fail result.
+		res = -1;
+	}
+	else {
+		msg_getint(msg, &map_hash);
+		msg_getint(msg, &key_hash);
+		msg_getint(msg, value);
+		assert(key_hash == name_hash);
+		assert(res == 0);
+	}
 
-	msg_getint(msg, &map_hash);
-	msg_getint(msg, &key_hash);
-	msg_getint(msg, value);
-
-// printf("---- map_hash:%d, key_hash:%d, name_hash:%d, value:%d\n", map_hash, key_hash, name_hash, *value);
-	
-	assert(key_hash == name_hash);
-	
 	message_return(msg);
-	
+
 	return(res);
 }
 
@@ -1710,23 +1712,26 @@ int cluster_getstr(cluster_t *cluster, const char *name, char **value, int *leng
 	}
 
 	// now we've got a reply, we free the message, because there is no 
-// 	printf("msg result == %d\n", msg->in.result);
-	assert(msg->in.result == CMD_DATA_STR);
+	if(msg->in.result != CMD_DATA_STR) {
+		// the data was not here, so we return a false.
+		res = -1;
+		*value = NULL;
+	}
+	else {
+		msg_getint(msg, &map_hash);
+		msg_getint(msg, &key_hash);
+		msg_getstr(msg, &str, &str_len);
+		
+		assert(str);
+		assert(str_len > 0);
+		
+		*value = str;
+		*length = str_len;
 
-	msg_getint(msg, &map_hash);
-	msg_getint(msg, &key_hash);
-	msg_getstr(msg, &str, &str_len);
-	
-	assert(str);
-	assert(str_len > 0);
-	
-	*value = str;
-	*length = str_len;
+		assert(key_hash == name_hash);
+		assert(res == 0);
+	}
 
-// printf("---- map_hash:%d, key_hash:%d, name_hash:%d, value:%d\n", map_hash, key_hash, name_hash, *value);
-	
-	assert(key_hash == name_hash);
-	
 	message_return(msg);
 	
 	return(res);

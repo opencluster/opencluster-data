@@ -4,6 +4,7 @@
 
 // commands and replies
 #define REPLY_ACK						 1
+#define REPLY_FAIL						 2
 #define REPLY_UNKNOWN					 9
 #define CMD_HELLO						 10
 #define CMD_SHUTTINGDOWN				 15

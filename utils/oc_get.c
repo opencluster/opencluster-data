@@ -152,17 +152,28 @@ int main(int argc, char **argv)
 
 			data = 0;
  			result = cluster_getint(cluster, _key_s, &data);
- 			assert(result == 0);
-			printf ("%d\n", data);
+ 			if (result == 0) {
+				printf ("%d\n", data);
+			}
+			else {
+				fprintf(stderr, "Not found\n");
+				assert(result < 0);
+			}
 		}
 		else if (_key_s && _integer == 0) {
 			result = cluster_getstr(cluster, _key_s, &str, &str_len);
-			assert(result == 0);
-			assert(str);
-			assert(str_len > 0);
-			printf("%s\n", str);
-			free(str);
-			str = NULL;
+			if (result == 0) {
+				assert(str);
+				assert(str_len > 0);
+				printf("%s\n", str);
+				free(str);
+				str = NULL;
+			}
+			else {
+				fprintf(stderr, "Not found\n");
+				assert(result < 0);
+				assert(str == NULL);
+			}
 		}
 		else {
 			// we need to code in the other options.
@@ -176,6 +187,6 @@ int main(int argc, char **argv)
 	// Shutting down
 	cluster_free(cluster);
 	
-	return(0);
+	return(result);
 }
 
