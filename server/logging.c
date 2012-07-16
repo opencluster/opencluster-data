@@ -34,6 +34,7 @@ short int _loglevel = 0;
 int _maxfilesize = 0;
 int _written = 0;
 FILE *_fp = NULL;
+int _verbose = 0;
 
 char * _outbuf = NULL;
 int    _outbuf_len = 0;

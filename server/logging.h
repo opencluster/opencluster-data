@@ -25,6 +25,9 @@ short int log_getlevel(void);
 
 void logger(short int level, const char *format, ...);
 
+extern int _verbose;
+
+
 
 #endif
 
