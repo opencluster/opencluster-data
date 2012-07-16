@@ -25,7 +25,7 @@ OBJS=\
 	logging.o \
 	node.o \
 	payload.o process.o push.o \
-	seconds.o server.o settle.o stats.o \
+	seconds.o server.o settle.o stats.o shutdown.o\
 	timeout.o \
 	value.o \
 	ocd.o
@@ -52,6 +52,7 @@ H_COMMANDS=commands.h
 H_PAYLOAD=payload.h
 H_TIMEOUT=timeout.h
 H_SETTLE=settle.h
+H_SHUTDOWN=shutdown.h
 
 # set the header includes here, because we need to keep them in sync over the release/debug versions.
 INC_BUCKET_DATA=\
@@ -177,6 +178,16 @@ INC_SETTLE= \
 	$(H_TIMEOUT) \
 	$(H_LOGGING)
 
+INC_SHUTDOWN= \
+	$(H_SHUTDOWN) \
+	$(H_TIMEOUT) \
+	$(H_LOGGING) \
+	$(H_BUCKET) \
+	$(H_SERVER) \
+	$(H_SECONDS) \
+	$(H_STATS) \
+	$(H_GLOBALS)
+
 INC_STATS= \
 	$(H_STATS) \
 	event-compat.h \
@@ -237,6 +248,9 @@ settle.o: settle.c $(INC_SETTLE)
 
 server.o: server.c $(INC_SERVER)
 	gcc `pkg-config --cflags glib-2.0` -c -o $@ server.c $(DEBUG_ARGS) $(ARGS)
+
+shutdown.o: shutdown.c $(INC_SHUTDOWN)
+	gcc `pkg-config --cflags glib-2.0` -c -o $@ shutdown.c $(DEBUG_ARGS) $(ARGS)
 
 stats.o: stats.c $(INC_STATS)
 	gcc `pkg-config --cflags glib-2.0` -c -o $@ stats.c $(DEBUG_ARGS) $(ARGS)
