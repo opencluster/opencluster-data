@@ -65,55 +65,61 @@ static void shutdown_handler(evutil_socket_t fd, short what, void *arg)
 		}
 	}
 	
-	
-	// setup a shutdown event for all the nodes.
-	for (i=0; i<_node_count; i++) {
-		if (_nodes[i]) {
-			waiting++;
-			node_shutdown(_nodes[i]);
-		}	
-	}
-	
-	assert(_node_count >= 0);
-	if (_node_count > 0) {
-		while (_nodes[_node_count - 1] == NULL) {
-			_node_count --;
-	}	}
-	
-	if (_node_count == 0) {
-		if (_nodes) {
-			free(_nodes);
-			_nodes = NULL;
-		}
-	}
-	else {
-		assert(waiting > 0);
-	}
 
-	// need to send a message to each node telling them that we are shutting down.
-	for (i=0; i<_client_count; i++) {
-		if (_clients[i]) {
-			waiting ++;
-			client_shutdown(_clients[i]);
-		}
-	}
-	
-	assert(_client_count >= 0);
-	if (_client_count > 0) {
-		while (_clients[_client_count - 1] == NULL) {
-			_client_count --;
-	}	}
-	
-	if (_client_count == 0) {
-		if (_clients) {
-			free(_clients);
-			_clients = NULL;
-		}
-	}
-	else {
+	// if we still have control of buckets, then we cannot shutdown our connections to the nodes.
+	if (_primary_buckets > 0 || _secondary_buckets > 0) {
 		assert(waiting > 0);
 	}
+	else {
 	
+		// setup a shutdown event for all the nodes.
+		for (i=0; i<_node_count; i++) {
+			if (_nodes[i]) {
+				waiting++;
+				node_shutdown(_nodes[i]);
+			}	
+		}
+		
+		assert(_node_count >= 0);
+		if (_node_count > 0) {
+			while (_nodes[_node_count - 1] == NULL) {
+				_node_count --;
+		}	}
+		
+		if (_node_count == 0) {
+			if (_nodes) {
+				free(_nodes);
+				_nodes = NULL;
+			}
+		}
+		else {
+			assert(waiting > 0);
+		}
+
+		// need to send a message to each client telling them that we are shutting down.
+		for (i=0; i<_client_count; i++) {
+			if (_clients[i]) {
+				waiting ++;
+				client_shutdown(_clients[i]);
+			}
+		}
+		
+		assert(_client_count >= 0);
+		if (_client_count > 0) {
+			while (_clients[_client_count - 1] == NULL) {
+				_client_count --;
+		}	}
+		
+		if (_client_count == 0) {
+			if (_clients) {
+				free(_clients);
+				_clients = NULL;
+			}
+		}
+		else {
+			assert(waiting > 0);
+		}
+	}	
 	
 
 	// shutdown the server, if we have one.
