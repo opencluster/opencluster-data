@@ -161,7 +161,7 @@ bucket_t * bucket_new(hash_t hash)
 
 // delete the contents of the bucket.  Note, that the bucket becomes empty, but the bucket itself is 
 // not destroyed.
-void bucket_destroy(bucket_t *bucket)
+void bucket_destroy_contents(bucket_t *bucket)
 {
 	assert(bucket);
 	
@@ -387,7 +387,7 @@ static void bucket_shutdown_handler(evutil_socket_t fd, short what, void *arg)
 		// we are done with the bucket.
 	
 		assert(bucket->transfer_client == NULL);
-		bucket_destroy(bucket);
+		bucket_destroy_contents(bucket);
 		push_hashmask_update(bucket);
 				
 		event_free(bucket->shutdown_event);

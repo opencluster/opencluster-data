@@ -528,7 +528,7 @@ static void process_migration_ack(client_t *client, header_t *header, void *ptr)
 			_secondary_buckets --;
 		}
 		
-		bucket_destroy(bucket);
+		bucket_destroy_contents(bucket);
 		bucket = NULL;
 	}
 	

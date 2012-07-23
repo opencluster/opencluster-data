@@ -73,7 +73,7 @@ bucket_t * bucket_new(hash_t hash);
 void bucket_shutdown(bucket_t *bucket);
 
 int buckets_nobackup_count(void);
-void bucket_destroy(bucket_t *bucket);
+void bucket_destroy_contents(bucket_t *bucket);
 
 
 void buckets_dump(void);
