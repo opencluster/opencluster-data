@@ -334,6 +334,24 @@ int buckets_nobackup_count(void)
 }
 
 
+// check the integrity of the empty bucket, and then free the memory it uses.
+static void bucket_free(bucket_t *bucket)
+{
+	assert(bucket);
+	assert(bucket->level < 0);
+	assert(bucket->data == NULL);
+	assert(bucket->target_node == NULL);
+	assert(bucket->backup_node == NULL);
+	assert(bucket->logging_node == NULL);
+	assert(bucket->transfer_client == NULL);
+	assert(bucket->transfer_mode_special == 0);
+	assert(bucket->shutdown_event == NULL);
+	assert(bucket->transfer_event == NULL);
+	assert(bucket->oldbucket_event == NULL);
+	
+	free(bucket);
+}
+
 
 
 static void bucket_shutdown_handler(evutil_socket_t fd, short what, void *arg) 
@@ -390,12 +408,14 @@ static void bucket_shutdown_handler(evutil_socket_t fd, short what, void *arg)
 		bucket_destroy_contents(bucket);
 		push_hashmask_update(bucket);
 				
+		assert(bucket->shutdown_event);
 		event_free(bucket->shutdown_event);
 		bucket->shutdown_event = NULL;
 
 		assert(_buckets[bucket->hash] == bucket);
 		_buckets[bucket->hash] = NULL;
-		free(bucket);
+		
+		bucket_free(bucket);
 		bucket = NULL;
 	}
 	else {
