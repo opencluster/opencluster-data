@@ -13,6 +13,12 @@ shutdown
 shutdown-migrate
 	When a node is being shutdown, it needs to send the buckets to another node.
 
+	Create a tool that will connect to the cluster as a client, set a certain number of entries in 
+	the cluster, and then continuously read those values back from the cluster to make sure that it 
+	will always get back the data it expected.   When that tool has started, start cycling the 
+	cluster nodes randomly to ensure that no matter what, the data is always consistant.   Let it 
+	run for hours.
+
 goodbye
 	When a client or node sends the 'goodbye' command, the server needs to send a reply and close 
 	the connection properly.  Current tests are showing the client is still staying connected and 

@@ -127,7 +127,8 @@ INC_OCD= \
 	$(H_STATS) \
 	$(H_SETTLE) \
 	$(H_PAYLOAD) \
-	$(H_LOGGING)
+	$(H_LOGGING) \
+	$(H_SHUTDOWN)
 
 INC_PAYLOAD=$(H_PAYLOAD)
 

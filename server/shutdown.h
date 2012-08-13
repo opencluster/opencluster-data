@@ -3,6 +3,8 @@
 #define __SHUTDOWN_H
 
 
+void shutdown_start(void);
+
 
 #endif
 

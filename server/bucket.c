@@ -151,6 +151,7 @@ bucket_t * bucket_new(hash_t hash)
 	assert(data_in_transit() == 0);
 	assert(bucket->oldbucket_event == NULL);
 	assert(bucket->transfer_mode_special == 0);
+	assert(bucket->promoting == NOT_PROMOTING);
 			
 	bucket->data = data_new(hash);
 	
@@ -384,6 +385,9 @@ static void bucket_shutdown_handler(evutil_socket_t fd, short what, void *arg)
 			if (bucket->backup_node && bucket->backup_node->client) {
 				push_promote(bucket->backup_node->client, bucket->hash);
 
+				assert(bucket->promoting == NOT_PROMOTING);
+				bucket->promoting = PROMOTING;
+				
 				done ++;
 			}
 			else {

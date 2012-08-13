@@ -19,6 +19,7 @@
 #include "seconds.h"
 #include "server.h"
 #include "settle.h"
+#include "shutdown.h"
 #include "stats.h"
 #include "timeout.h"
 

@@ -45,6 +45,13 @@ typedef struct {
 	// lookup on an item is made, and it is found in one of these trees, it is removed and put in 
 	// the proper tree so active items should get moved pretty quickly.
 	struct event *oldbucket_event;
+	
+	// indicate that the bucket is attempting to promote a bucket on another node.  We keep the 
+	// bucket until it is confirmed that the other node has promoted.
+	enum {
+		NOT_PROMOTING=0,
+		PROMOTING=1
+	} promoting;
 
 } bucket_t;
 

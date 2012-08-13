@@ -16,8 +16,6 @@
 
 
 
-
-
 // This event is started when the system is shutting down, and monitors the events that are left to 
 // finish up.  When everything is stopped, it stops the final events that have been ticking over 
 // (like the seconds and stats events), which will allow the event-loop to exit.
@@ -49,11 +47,6 @@ static void shutdown_handler(evutil_socket_t fd, short what, void *arg)
 	assert(what & EV_TIMEOUT);
 	assert(arg == NULL);
 
-#ifndef NDEBUG
-	if (_verbose) printf("SHUTDOWN handler\n");
-#endif
-
-	
 	// start a timeout event for each bucket, to attempt to send it to other nodes.
 	if (_buckets) {
 		assert(_mask > 0);
@@ -64,7 +57,6 @@ static void shutdown_handler(evutil_socket_t fd, short what, void *arg)
 			}
 		}
 	}
-	
 
 	// if we still have control of buckets, then we cannot shutdown our connections to the nodes.
 	if (_primary_buckets > 0 || _secondary_buckets > 0) {
@@ -121,13 +113,12 @@ static void shutdown_handler(evutil_socket_t fd, short what, void *arg)
 		}
 	}	
 	
-
 	// shutdown the server, if we have one.
 	server_shutdown();
 	
-	
 	if (waiting > 0) {
-		if (_verbose) printf("WAITING FOR SHUTDOWN.  nodes=%d, clients=%d, buckets=%d\n", _node_count, _client_count, _primary_buckets + _secondary_buckets);
+		logger(LOG_INFO, "WAITING FOR SHUTDOWN.  nodes=%d, clients=%d, buckets=%d\n", 
+			   _node_count, _client_count, _primary_buckets + _secondary_buckets);
 		evtimer_add(_shutdown_event, &_timeout_shutdown);
 	}
 	else {
@@ -139,11 +130,12 @@ static void shutdown_handler(evutil_socket_t fd, short what, void *arg)
 
 
 
+// start the shutdown event.  This timeout event will just keep ticking over 
+// until the _shutdown value is back down to 0, then it will stop resetting 
+// the event, and the loop can exit.... therefore shutting down the service 
+// completely.
 void shutdown_start(void)
 {
-	// start the shutdown event.  This timeout event will just keep ticking over until the _shutdown 
-	// value is back down to 0, then it will stop resetting the event, and the loop can exit.... 
-	// therefore shutting down the service completely.
 	assert(_shutdown_event == NULL);
 	_shutdown_event = evtimer_new(_evbase, shutdown_handler, NULL);
 	assert(_shutdown_event);
