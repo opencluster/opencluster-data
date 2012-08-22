@@ -70,7 +70,7 @@ value_t * buckets_get_value(int map_hash, int key_hash)
 	// calculate the bucket that this item belongs in.
 	bucket_index = _mask & key_hash;
 	assert(bucket_index >= 0);
-	assert(bucket_index < _mask);
+	assert(bucket_index <= _mask);
 	bucket = _buckets[bucket_index];
 
 	// if we have a record for this bucket, then we are either a primary or a backup for it.
@@ -391,7 +391,6 @@ static void bucket_shutdown_handler(evutil_socket_t fd, short what, void *arg)
 				done ++;
 			}
 			else {
-			
 				// at this point, we are the primary and there is no backup.  There are other nodes 
 				// connected, so we need to try and transfer this bucket to another node.
 				assert(0);
