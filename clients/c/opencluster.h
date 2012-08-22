@@ -63,6 +63,7 @@ void cluster_free(cluster_t *cluster);
 void cluster_addserver(cluster_t *cluster, const char *host);
 int cluster_connect(cluster_t *cluster);
 void cluster_disconnect(cluster_t *cluster);
+int cluster_servercount(cluster_t *cluster);
 
 void cluster_pending(cluster_t *cluster, int blocking);
 

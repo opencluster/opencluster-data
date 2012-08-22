@@ -1737,3 +1737,28 @@ int cluster_getstr(cluster_t *cluster, const char *name, char **value, int *leng
 	return(res);
 }
 
+
+// Return the number of active servers in the cluster.
+int cluster_servercount(cluster_t *cluster)
+{
+	int count = 0;
+	int i;
+	server_t *server;
+	
+	assert(cluster);
+	assert(cluster->server_count >= 0);
+	
+	for (i=0; i<cluster->server_count; i++) {
+		assert(cluster->servers);
+		if (cluster->servers[i]) {
+			server = cluster->servers[i];
+			if (server->active > 0) {
+				count ++;
+			}
+		}
+	}
+	
+	return(count);
+}
+
+
