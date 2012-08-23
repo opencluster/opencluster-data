@@ -171,6 +171,8 @@ void bucket_destroy_contents(bucket_t *bucket)
 
 	if (bucket->data) {
 		data_destroy(bucket->data, bucket->hash);
+		data_free(bucket->data);
+		bucket->data = NULL;
 	}
 	
 	assert(bucket->data == NULL);
