@@ -1,14 +1,9 @@
 This file provides some information about active branches in the repository.
 
-
 shutdown
-	Better handling of the system shutdown.  When a Ctrl-C signal is received it should fire up 
-	events to shutdown all the components, mark a variable that the stats can monitor.  When the 
-	active number of clients and nodes drops to zero, then the stats event will stop also, which 
-	should be the last event, and the system should shutdown.  We dont need a particular shutdown 
-	event to fire more than once.  Once the shutdown is triggered, everything should start shutting 
-	down and manage themselves doing it.  Need to be careful about dropping node connections that we 
-	need to send buckets away.
+	The system is not currently shutting down properly, because it is not releasing the buckets 
+	correctly.  Goal for this branch is to have a completely orderly shutdown when only one node 
+	has been started and then stopped.  With and without data being pumped into it.
 
 shutdown-migrate
 	When a node is being shutdown, it needs to send the buckets to another node.
