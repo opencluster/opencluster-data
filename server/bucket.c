@@ -105,7 +105,7 @@ int buckets_store_value(int map_hash, int key_hash, char *name, int name_int, in
 	bucket_t *bucket;
 	client_t *backup_client;
 
-		// calculate the bucket that this item belongs in.
+	// calculate the bucket that this item belongs in.
 	bucket_index = _mask & key_hash;
 	assert(bucket_index >= 0);
 	assert(bucket_index <= _mask);
@@ -126,6 +126,7 @@ int buckets_store_value(int map_hash, int key_hash, char *name, int name_int, in
 		return(0);
 	}
 	else {
+		assert(0);
 		return(-1);
 	}
 }

@@ -43,9 +43,7 @@ static void cmd_get_int(client_t *client, header_t *header, char *payload)
 	map_hash = data_int(&next);
 	key_hash = data_int(&next);
 	
-	
-	logger(LOG_INFO, "CMD: get (integer)");
-
+	logger(LOG_INFO, "CMD: get (integer) [%X/%X]", map_hash, key_hash);
 	value = buckets_get_value(map_hash, key_hash);
 	
 	// send the ACK reply.
@@ -67,6 +65,7 @@ static void cmd_get_int(client_t *client, header_t *header, char *payload)
 		}
 	}
 	else {
+		logger(LOG_DEBUG, "CMD: get (integer) FAILED [%u/%u]", map_hash, key_hash);
 		// the data they are looking for is not here.
 		client_send_message(client, header, REPLY_FAIL, 0, NULL);
 	}
@@ -342,7 +341,7 @@ static void cmd_set_int(client_t *client, header_t *header, char *payload)
 	memcpy(name, str, name_len);
 	name[name_len] = 0;
 	
-	logger(LOG_INFO, "CMD: set (integer): [%d/%d]'%s'=%d", map_hash, key_hash, name, value->data.i);
+	logger(LOG_DEBUG, "CMD: set (integer): [%X/%X]'%s'=%d", map_hash, key_hash, name, value->data.i);
 
 	// eventually we will add the ability to wait until the data has been competely distributed 
 	// before returning an ack.

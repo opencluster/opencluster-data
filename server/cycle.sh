@@ -34,7 +34,7 @@ make debug || (echo "Build Failed"; exit 1)
 
 BASE_PORT=13600
 NODES=0
-
+LOG_SETTINGS=-vvvvvv
 function logfile () {
   printf "/tmp/cycle-logs-%04d-" $1
 }
@@ -46,7 +46,7 @@ function logfile () {
 
 echo "Starting Initial server Node" 
 
-./ocd.debug -g $(logfile $NODES) &
+./ocd.debug -g $(logfile $NODES) $LOG_SETTINGS &
 NODE[$NODES]=$!
 NODES=$[NODES+1]
 
