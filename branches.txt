@@ -1,5 +1,17 @@
 This file provides some information about active branches in the repository.
 
+64bit
+	Most computers that are sold these days are 32-bit, and therefore our clustering solution will
+	need to also be 32-bit or it will be unable to compete.  This branch is to modify the protocol 
+	to use 64-bit numbers instead of 32-bit numbers where it would make sence.
+
+hash-check
+	Add to the protocol so that a client can locally hash a string, and also send that string to 
+	the server and receive a hash back so that it can compare that its algorithm is working the 
+	same as the server.  Even though the server does not actually need to generate hashes at all.  
+	It will be a way to make sure that different clients and languages generate the hashes 
+	consistantly.
+
 shutdown
 	The system is not currently shutting down properly, because it is not releasing the buckets 
 	correctly.  Goal for this branch is to have a completely orderly shutdown when only one node 
