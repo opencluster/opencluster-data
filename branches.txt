@@ -1,9 +1,10 @@
 This file provides some information about active branches in the repository.
 
-64bit
-	Most computers that are sold these days are 32-bit, and therefore our clustering solution will
-	need to also be 32-bit or it will be unable to compete.  This branch is to modify the protocol 
-	to use 64-bit numbers instead of 32-bit numbers where it would make sence.
+
+node-sync
+	There is currently an issue with sync'ing to a backup node.  Keeping track of backup nodes
+	seems to be broken.  Need to make sure that multiple nodes can communicate well in the
+	cluster.
 
 hash-check
 	Add to the protocol so that a client can locally hash a string, and also send that string to 
