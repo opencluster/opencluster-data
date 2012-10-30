@@ -51,7 +51,7 @@ void data_in_transit_dec(void)
 
 static gint key_compare_fn(gconstpointer a, gconstpointer b)
 {
-	const register unsigned int *aa, *bb;
+	const register hash_t *aa, *bb;
 	
 	aa = a;
 	bb = b;
@@ -239,7 +239,7 @@ static maplist_t * find_maplist(hash_t key_hash, bucket_data_t *data)
 
 	while (current) {
 		
-		logger(LOG_DEBUG, "find_maplist: Looking for %08X in container %08X/%08X", key_hash, current->mask, current->hashmask);
+		logger(LOG_DEBUG, "find_maplist: Looking for %#llx in container %#llx/%#llx", key_hash, current->mask, current->hashmask);
 		
 		list = g_tree_lookup(current->tree, &key_hash);
 		if (list == NULL) {
@@ -270,7 +270,7 @@ static maplist_t * find_maplist(hash_t key_hash, bucket_data_t *data)
 
 
 
-value_t * data_get_value(int map_hash, int key_hash, bucket_data_t *ddata) 
+value_t * data_get_value(hash_t map_hash, hash_t key_hash, bucket_data_t *ddata) 
 {
 	maplist_t *list;
 	item_t *item;
@@ -279,12 +279,12 @@ value_t * data_get_value(int map_hash, int key_hash, bucket_data_t *ddata)
 	assert(ddata);
 	assert(ddata->tree);
 
-	logger(LOG_DEBUG, "data_get_value: Looking up [%08X/%08X].", map_hash, key_hash);
+	logger(LOG_DEBUG, "data_get_value: Looking up [%#llx/%#llx].", map_hash, key_hash);
 	
 	list = find_maplist(key_hash, ddata);
 	if (list) {
 
-		logger(LOG_DEBUG, "data_get_value: key found. [%08X/%08X].", map_hash, key_hash);
+		logger(LOG_DEBUG, "data_get_value: key found. [%#llx/%#llx].", map_hash, key_hash);
 		
 		// search the list of maps for a match.
 		assert(list->mapstree);
@@ -293,7 +293,7 @@ value_t * data_get_value(int map_hash, int key_hash, bucket_data_t *ddata)
 			// item is found, return with the data.
 			assert(item->value);
 
-			logger(LOG_DEBUG, "data_get_value: key and map found. [%08X/%08X].", map_hash, key_hash);
+			logger(LOG_DEBUG, "data_get_value: key and map found. [%#llx/%#llx].", map_hash, key_hash);
 			
 			if (item->expires > 0 && item->expires < _seconds) {
 				// item has expired.   We need to remove it from the map list.
@@ -336,7 +336,7 @@ static maplist_t * list_new(hash_t key_hash)
 // NOTE: value is controlled by the tree after this function call.
 // NOTE: name is controlled by the tree after this function call.
 void data_set_value(
-	int map_hash, int key_hash, bucket_data_t *ddata, char *name, int name_int, 
+	hash_t map_hash, hash_t key_hash, bucket_data_t *ddata, char *name, long long name_int, 
 	value_t *value, int expires, client_t *backup_client) 
 {
 	maplist_t *list;
@@ -356,15 +356,16 @@ void data_set_value(
 	list = find_maplist(key_hash, ddata);
 	if (list == NULL) {
 
-		logger(LOG_DEBUG, "data_set_value: key %08X not found.  Creating new one.", key_hash);
+		logger(LOG_DEBUG, "data_set_value: key %#llx not found.  Creating new one.", key_hash);
 		
 		list = list_new(key_hash);
 		g_tree_insert(ddata->tree, &list->item_key, list);
 
 		// this item didn't exist, so if we are doing a sync, we also need to let the 
-		// backup_node know about the name of this item.
+		// backup node know about the name of this item.
 		if (backup_client) {
-			push_sync_name(backup_client, key_hash, name, name_int);
+			if (name) { push_sync_name_str(backup_client, key_hash, name); }
+			else { push_sync_name_int(backup_client, key_hash, name_int); }
 		}
 
 		assert(list->name == NULL);
@@ -378,7 +379,7 @@ void data_set_value(
 		// so no need to waste time doing a lookup when we know it wont be in there.  That is why we 
 		// have a slightly convoluted logic structure here.
 		
-		logger(LOG_DEBUG, "data_set_value: key %08X found.", key_hash);
+		logger(LOG_DEBUG, "data_set_value: key %#llx found.", key_hash);
 		
 		// Now we need to look at the maps to see if the complete entry is here.
 		assert(list->mapstree);
@@ -386,7 +387,7 @@ void data_set_value(
 		if (item) {
 			// the item was found, so now we need to update the value with the one we have.
 
-			logger(LOG_DEBUG, "data_set_value: item [%08X/%08X] found, updating value.", map_hash, key_hash);
+			logger(LOG_DEBUG, "data_set_value: item [%#llx/%#llx] found, updating value.", map_hash, key_hash);
 			
 			assert(item->value);
 			value_move(item->value, value);
@@ -407,7 +408,7 @@ void data_set_value(
 
 	if (item == NULL) {
 
-		logger(LOG_DEBUG, "data_set_value: item [%08X/%08X] NOT found, creating a new one.", map_hash, key_hash);
+		logger(LOG_DEBUG, "data_set_value: item [%#llx/%#llx] NOT found, creating a new one.", map_hash, key_hash);
 		
 		// item was not found, so create a new one.
 		item = calloc(1, sizeof(item_t));
@@ -450,14 +451,14 @@ gboolean migrate_map_fn(gpointer p_key, gpointer p_value, void *p_data)
 	assert(data->items_count >= 0);
 	
 // 	if (_verbose > 4) 
-// 		printf("migrate: map found, %08X\n", *key);
+// 		printf("migrate: map found, %#llx\n", *key);
 		
 	item = p_value;
 	assert(_migrate_sync > 0);
 	assert(item->migrate <= _migrate_sync);
 	if (item->migrate < _migrate_sync) {
 		
-		logger(LOG_DEBUG, "migrate: map %08X ready to migrate.  Sending now.", *key);
+		logger(LOG_DEBUG, "migrate: map %#llx ready to migrate.  Sending now.", *key);
 		
 		push_sync_item(data->client, item);
 		_in_transit ++;
@@ -506,14 +507,19 @@ gboolean migrate_hash_fn(gpointer p_key, gpointer p_value, void *p_data)
 		assert(_migrate_sync > 0);
 		assert(map->migrate >= 0);
 		
-// 		logger(LOG_DEBUG, "migrate: found hash: %08X, migrate=%d", *key, map->migrate);
+// 		logger(LOG_DEBUG, "migrate: found hash: %#llx, migrate=%d", *key, map->migrate);
 	
 		assert(map->migrate <= _migrate_sync);
 		assert(map->migrate_name <= _migrate_sync);
 		
 		// if we havent supplied the 'name' of this hash to the receiving server, then we need to send it.
 		if (map->migrate_name < _migrate_sync) {
-			push_sync_name(data->client, map->item_key, map->name, map->int_key);
+			if (map->name) {
+				push_sync_name_str(data->client, map->item_key, map->name);
+			}
+			else {
+				push_sync_name_int(data->client, map->item_key, map->int_key);
+			}
 			map->migrate_name = _migrate_sync;
 		}
 		
@@ -521,7 +527,7 @@ gboolean migrate_hash_fn(gpointer p_key, gpointer p_value, void *p_data)
 			// found one.
 			// now we need to search the inner tree
 			
-			logger(LOG_DEBUG, "migrate: hash %08X is ready to migrate.", *key);
+			logger(LOG_DEBUG, "migrate: hash %#llx is ready to migrate.", *key);
 			
 			g_tree_foreach(map->mapstree, migrate_map_fn, data);
 			
@@ -532,7 +538,7 @@ gboolean migrate_hash_fn(gpointer p_key, gpointer p_value, void *p_data)
 				map->migrate = _migrate_sync;
 				
 				logger(LOG_DEBUG,
-						"migrate: hash %08X seems to have all its maps migrated, "
+						"migrate: hash %#llx seems to have all its maps migrated, "
 						"so we mark the hash as complete.",
 						*key
   						);
@@ -579,12 +585,12 @@ int data_migrate_items(client_t *client, bucket_data_t *data, hash_t hashmask, i
 	trav.search_hash = hashmask;
 	current = data;
 
-	logger(LOG_DEBUG, "About to search the data for hashmask:%08X/%08X, limit:%d", 
+	logger(LOG_DEBUG, "About to search the data for hashmask:%#llx/%#llx, limit:%d", 
 			   _mask, hashmask, limit);
 	
 	while (current && trav.items_count < limit) {
 
-		logger(LOG_DEBUG, "Searching container: %08X/%08X", 
+		logger(LOG_DEBUG, "Searching container: %#llx/%#llx", 
 				   current->mask, current->hashmask);
 		
 		assert(current->tree);
@@ -609,14 +615,13 @@ int data_migrate_items(client_t *client, bucket_data_t *data, hash_t hashmask, i
 
 
 
-void data_set_name(hash_t key_hash, bucket_data_t *data, char *name, int name_int)
+void data_set_name_str(hash_t key_hash, bucket_data_t *data, char *name)
 {
 	maplist_t *list;
 	
 	assert(data);
 	assert(data->tree);
-	
-	assert((name && name_int == 0) || name == NULL);
+	assert(name);
 	
 	// first we are going to store the value in the primary 'bucket_data'.  If it exists, we will 
 	// update the value in there.  If it doesn't exist we will add it, and when we've done that, 
@@ -633,21 +638,42 @@ void data_set_name(hash_t key_hash, bucket_data_t *data, char *name, int name_in
 	assert(list);
 	
 	// now that we've got a maplist created for this hash, we need to add this map (item) to it.
-	if (name) {
-		if (list->name) { 
-			free(list->name); 
-		}
-		list->name = name;
-		list->int_key = 0;
-		name = NULL;
+	if (list->name) { 
+		free(list->name); 
 	}
-	else {
-		assert(list->name == NULL);
-		list->int_key = name_int;
-	}
+	list->name = name;
+	list->int_key = 0;
+	name = NULL;
 
 	assert(name == NULL);
 }
+
+
+void data_set_name_int(hash_t key_hash, bucket_data_t *data, long long name_int)
+{
+	maplist_t *list;
+	
+	assert(data);
+	assert(data->tree);
+	
+	// first we are going to store the value in the primary 'bucket_data'.  If it exists, we will 
+	// update the value in there.  If it doesn't exist we will add it, and when we've done that, 
+	// then we will go through the rest of the chain to find this same entry, if it exists, then 
+	
+	list = find_maplist(key_hash, data);
+	if (list == NULL) {
+		// that hash was not found anywhere in the chain, so we need to create an entry for it.
+
+		list = list_new(key_hash);
+		g_tree_insert(data->tree, &list->item_key, list);
+	}
+
+	assert(list);
+	
+	assert(list->name == NULL);
+	list->int_key = name_int;
+}
+
 
 
 // not really much we need to do about this, because we marked the data beforehand, but for debug purposes, we will check it out.

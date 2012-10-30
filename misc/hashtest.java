@@ -8,8 +8,8 @@ public class hashtest
 
 	private static final int LIMIT = 1000000;
 
-	private static final int kFNVOffset = (int) 2166136261l;
-	private static final int kFNVPrime = 16777619;
+	private static final long kFNVOffset = 14695981039346656037l;
+	private static final long kFNVPrime = 1099511628211;
 
     private static List<Long> times = new ArrayList<Long>();
 
@@ -32,7 +32,7 @@ public class hashtest
 
     }
 
-	public static int fnvHashCode(final String str) {
+	public static long fnvHashCode(final String str) {
 
         long startTimeNanos = System.nanoTime();
 
@@ -54,18 +54,18 @@ public class hashtest
 
 	public static void main(String args[])
 	{
-		String str = "something";
-		int hash = 0;
+		String str = "charlie";
+		long hash = 0;
 
 		System.out.println("Performing "+LIMIT+" hashes.");
 
         long startTime = System.currentTimeMillis();
 		for (int i=0; i < LIMIT; i++) {
-			hash = fnvHashCode(str + i);
+			hash = fnvHashCode(str);
 		}
         long endTime = System.currentTimeMillis();
         long elapsedTime = endTime-startTime;
-		System.out.println("[STR + I as key] Hash:" + hash + " " + (elapsedTime));
+		System.out.println("[STR as key] Hash:" + hash + " " + (elapsedTime));
 
         generateStatsOutput(elapsedTime);
 

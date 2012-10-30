@@ -51,8 +51,8 @@ void push_hashmask_update(bucket_t *bucket)
 
 	// create the payload now, because it will be the same for all the clients.
 	assert(payload_length() == 0);
-	payload_int(_mask);					// mask
-	payload_int(bucket->hash);			// hash
+	payload_long(_mask);					// mask
+	payload_long(bucket->hash);			// hash
 	payload_int(bucket->level);			// instance
 	
 	if (_clients) {
@@ -60,7 +60,7 @@ void push_hashmask_update(bucket_t *bucket)
 			if (_clients[i]) {
 				if (_clients[i]->handle >= 0) {
 					// we have a client, that seems to be connected.
-					logger(LOG_DEBUG, "sending HASHMASK: (%08X/%08X)", _mask, bucket->hash);
+					logger(LOG_DEBUG, "sending HASHMASK: (%#llx/%#llx)", _mask, bucket->hash);
 					client_send_message(_clients[i], NULL, CMD_HASHMASK, payload_length(), payload_ptr());
 				}
 			}
@@ -125,8 +125,8 @@ void push_hashmasks(client_t *client)
 			assert((_buckets[i]->level == 0 && _buckets[i]->target_node == NULL) || (_buckets[i]->level > 0 && _buckets[i]->backup_node == NULL));
 
 			assert(payload_length() == 0);
-			payload_int(_mask);					// mask
-			payload_int(i);						// hash
+			payload_long(_mask);					// mask
+			payload_long(i);						// hash
 			payload_int(_buckets[i]->level);	// instance
 
 			client_send_message(client, NULL, CMD_HASHMASK, payload_length(), payload_ptr());
@@ -213,10 +213,10 @@ void push_accept_bucket(client_t *client, hash_t key)
 	assert(client->handle > 0);
 	
 	assert(payload_length() == 0);
-	payload_int(_mask);
-	payload_int(key);
+	payload_long(_mask);
+	payload_long(key);
 	
-	logger(LOG_DEBUG, "sending ACCEPT_BUCKET: (%08X/%08X)", _mask, key);
+	logger(LOG_DEBUG, "sending ACCEPT_BUCKET: (%#llx/%#llx)", _mask, key);
 	
 	client_send_message(client, NULL, CMD_ACCEPT_BUCKET, payload_length(), payload_ptr());
 	payload_clear();
@@ -246,11 +246,11 @@ void push_control_bucket(client_t *client, bucket_t *bucket, int level)
 	assert(bucket->hash >= 0 && bucket->hash <= _mask);
 	
 	assert(payload_length() == 0);
-	payload_int(_mask);
-	payload_int(bucket->hash);
+	payload_long(_mask);
+	payload_long(bucket->hash);
 	payload_int(level);
 	
-	logger(LOG_DEBUG, "CONTROL_BUCKET(bucket:%X)", bucket->hash);
+	logger(LOG_DEBUG, "CONTROL_BUCKET(bucket:%#llx)", bucket->hash);
 	
 	assert(payload_length() > 0);
 	client_send_message(client, NULL, CMD_CONTROL_BUCKET, payload_length(), payload_ptr());
@@ -269,8 +269,8 @@ void push_finalise_migration(client_t *client, bucket_t *bucket, int level)
 	assert(bucket->hash >= 0 && bucket->hash <= _mask);
 	
 	assert(payload_length() == 0);
-	payload_int(_mask);
-	payload_int(bucket->hash);
+	payload_long(_mask);
+	payload_long(bucket->hash);
 	payload_int(level);
 	
 	
@@ -301,7 +301,7 @@ void push_finalise_migration(client_t *client, bucket_t *bucket, int level)
 		payload_string(_interface);
 	}
 
-	logger(LOG_DEBUG, "FINALISE_MIGRATION(bucket:%X): Interface:'%s'", 
+	logger(LOG_DEBUG, "FINALISE_MIGRATION(bucket:%#llx): Interface:'%s'", 
 		   bucket->hash, _interface);
 	
 	assert(payload_length() > 0);
@@ -323,8 +323,8 @@ void push_sync_item(client_t *client, item_t *item)
 	assert(item->value);
 	
 	assert(payload_length() == 0);
-	payload_int(item->map_key);
-	payload_int(item->item_key);
+	payload_long(item->map_key);
+	payload_long(item->item_key);
 	
 	if (item->expires == 0) {
 		payload_int(0);
@@ -335,13 +335,13 @@ void push_sync_item(client_t *client, item_t *item)
 	
 	if (item->value->type == VALUE_INT) {
 		cmd = CMD_SYNC_INT;
-		payload_int(item->value->data.i);
-		logger(LOG_DEBUG, "sending SYNC_INT: (%08X:%08X, %d)", item->map_key, item->item_key, item->value->data.i);
+		payload_long(item->value->data.i);
+		logger(LOG_DEBUG, "sending SYNC_INT: (%#llx:%#llx, %ld)", item->map_key, item->item_key, item->value->data.i);
 	}
 	else if (item->value->type == VALUE_STRING) {
 		cmd = CMD_SYNC_STRING;
 		payload_data(item->value->data.s.length, item->value->data.s.data);
-		logger(LOG_DEBUG, "sending SYNC_STRING: (%08X:%08X, '%s')", item->map_key, item->item_key, item->value->data.s.data);
+		logger(LOG_DEBUG, "sending SYNC_STRING: (%#llx:%#llx, '%s')", item->map_key, item->item_key, item->value->data.s.data);
 	}
 	else {
 		assert(0);
@@ -355,32 +355,33 @@ void push_sync_item(client_t *client, item_t *item)
 
 
 
-void push_sync_name(client_t *client, hash_t key, char *name, int int_key)
+void push_sync_name_str(client_t *client, hash_t key, char *name)
 {
-	int cmd = 0;
-	
 	assert(client);
 	assert(client->handle > 0);
-	assert((name && int_key == 0) || (name == NULL));
+	assert(name);
 	
 	assert(payload_length() == 0);
-	payload_int(key);
-	
-	if (name) {
-		payload_string(name);
-		cmd = CMD_SYNC_NAME;
-		logger(LOG_DEBUG, "sending SYNC_NAME: (%08X:'%s')", key, name);
-	}
-	else {
-		payload_int(int_key);
-		cmd = CMD_SYNC_NAME_INT;
-		logger(LOG_DEBUG, "sending SYNC_NAME_INT: (%08X:%d)", key, int_key);
-	}
-	
-	assert(cmd > 0);
-	client_send_message(client, NULL, cmd, payload_length(), payload_ptr());
+	payload_long(key);
+	payload_string(name);
+	logger(LOG_DEBUG, "sending SYNC_NAME: (%#llx:'%s')", key, name);
+	client_send_message(client, NULL, CMD_SYNC_NAME, payload_length(), payload_ptr());
 	payload_clear();
-
 }
+
+
+void push_sync_name_int(client_t *client, hash_t key, long long int_key)
+{
+	assert(client);
+	assert(client->handle > 0);
+	
+	assert(payload_length() == 0);
+	payload_long(key);
+	payload_long(int_key);
+	logger(LOG_DEBUG, "sending SYNC_NAME_INT: (%#llx:%ld)", key, int_key);
+	client_send_message(client, NULL, CMD_SYNC_NAME_INT, payload_length(), payload_ptr());
+	payload_clear();
+}
+
 
 

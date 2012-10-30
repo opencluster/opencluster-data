@@ -30,8 +30,8 @@ extern hashmask_t ** _hashmasks;
 static void cmd_get_int(client_t *client, header_t *header, char *payload)
 {
 	char *next;
-	int map_hash;
-	int key_hash;
+	hash_t map_hash;
+	hash_t key_hash;
 	value_t *value;
 	
 	assert(client);
@@ -40,10 +40,10 @@ static void cmd_get_int(client_t *client, header_t *header, char *payload)
 
 	next = payload;
 	
-	map_hash = data_int(&next);
-	key_hash = data_int(&next);
+	map_hash = data_long(&next);
+	key_hash = data_long(&next);
 	
-	logger(LOG_INFO, "CMD: get (integer) [%X/%X]", map_hash, key_hash);
+	logger(LOG_INFO, "CMD: get (integer) [%#llx/%#llx]", map_hash, key_hash);
 	value = buckets_get_value(map_hash, key_hash);
 	
 	// send the ACK reply.
@@ -55,8 +55,8 @@ static void cmd_get_int(client_t *client, header_t *header, char *payload)
 		else {
 			// we have the data, build the reply.
 			assert(payload_length() == 0);
-			payload_int(map_hash);
-			payload_int(key_hash);
+			payload_long(map_hash);
+			payload_long(key_hash);
 			payload_int(value->data.i);
 
 			assert(payload_length() > 0);
@@ -65,7 +65,7 @@ static void cmd_get_int(client_t *client, header_t *header, char *payload)
 		}
 	}
 	else {
-		logger(LOG_DEBUG, "CMD: get (integer) FAILED [%u/%u]", map_hash, key_hash);
+		logger(LOG_DEBUG, "CMD: get (integer) FAILED [%#llx/%#llx]", map_hash, key_hash);
 		// the data they are looking for is not here.
 		client_send_message(client, header, REPLY_FAIL, 0, NULL);
 	}
@@ -79,8 +79,8 @@ static void cmd_get_int(client_t *client, header_t *header, char *payload)
 static void cmd_get_str(client_t *client, header_t *header, char *payload)
 {
 	char *next;
-	int map_hash;
-	int key_hash;
+	hash_t map_hash;
+	hash_t key_hash;
 	value_t *value;
 	
 	assert(client);
@@ -89,8 +89,8 @@ static void cmd_get_str(client_t *client, header_t *header, char *payload)
 
 	next = payload;
 	
-	map_hash = data_int(&next);
-	key_hash = data_int(&next);
+	map_hash = data_long(&next);
+	key_hash = data_long(&next);
 	
 	value = buckets_get_value(map_hash, key_hash);
 	
@@ -103,8 +103,8 @@ static void cmd_get_str(client_t *client, header_t *header, char *payload)
 		else {
 			// build the reply.
 			assert(payload_length() == 0);
-			payload_int(map_hash);
-			payload_int(key_hash);
+			payload_long(map_hash);
+			payload_long(key_hash);
 			payload_data(value->data.s.length, value->data.s.data);
 			
 			assert(payload_length() > 0);
@@ -126,10 +126,9 @@ static void cmd_get_str(client_t *client, header_t *header, char *payload)
 static void cmd_set_str(client_t *client, header_t *header, char *payload)
 {
 	char *next;
-	int map_hash;
-	int key_hash;
+	hash_t map_hash;
+	hash_t key_hash;
 	int expires;
-	int fullwait;
 	value_t *value;
 	char *str;
 	char *name;
@@ -147,10 +146,9 @@ static void cmd_set_str(client_t *client, header_t *header, char *payload)
 	
 	next = payload;
 	
-	map_hash = data_int(&next);
-	key_hash = data_int(&next);
+	map_hash = data_long(&next);
+	key_hash = data_long(&next);
 	expires = data_int(&next);
-	fullwait = data_int(&next);
 
 	str = data_string(&next, &name_len);
 	assert(str && name_len > 0);
@@ -165,10 +163,6 @@ static void cmd_set_str(client_t *client, header_t *header, char *payload)
 	value->data.s.data[str_len] = 0;
 	value->data.s.length = str_len;
 	
-	// eventually we will add the ability to wait until the data has been competely distributed 
-	// before returning an ack.
-	assert(fullwait == 0);
-
 	// store the value into the trees.  If a value already exists, it will get released and this one 
 	// will replace it, so control of this value is given to the tree structure.
 	// NOTE: value is controlled by the tree after this function call.
@@ -231,16 +225,16 @@ static void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
 
 	next = payload;
 	
-	mask = data_int(&next);
-	key_hash = data_int(&next);
+	mask = data_long(&next);
+	key_hash = data_long(&next);
 	
-	logger(LOG_INFO, "CMD: accept bucket (%08X/%08X)", mask, key_hash);
+	logger(LOG_INFO, "CMD: accept bucket (%#llx/%#llx)", mask, key_hash);
 
 	assert(payload_length() == 0);
 
 	// regardless of the reply, the payload will be the same.
-	payload_int(mask);
-	payload_int(key_hash);
+	payload_long(mask);
+	payload_long(key_hash);
 
 	if (_bucket_transfer != 0) {
 		//  we are currently transferring another bucket, therefore we cannot accept another one.
@@ -307,10 +301,9 @@ static void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
 static void cmd_set_int(client_t *client, header_t *header, char *payload)
 {
 	char *next;
-	int map_hash;
-	int key_hash;
+	hash_t map_hash;
+	hash_t key_hash;
 	int expires;
-	int fullwait;
 	value_t *value;
 	char *str;
 	char *name;
@@ -327,10 +320,9 @@ static void cmd_set_int(client_t *client, header_t *header, char *payload)
 	
 	next = payload;
 	
-	map_hash = data_int(&next);
-	key_hash = data_int(&next);
+	map_hash = data_long(&next);
+	key_hash = data_long(&next);
 	expires = data_int(&next);
-	fullwait = data_int(&next);
 	str = data_string(&next, &name_len);
 	value->type = VALUE_INT;
 	value->data.i = data_int(&next);
@@ -341,11 +333,8 @@ static void cmd_set_int(client_t *client, header_t *header, char *payload)
 	memcpy(name, str, name_len);
 	name[name_len] = 0;
 	
-	logger(LOG_DEBUG, "CMD: set (integer): [%X/%X]'%s'=%d", map_hash, key_hash, name, value->data.i);
+	logger(LOG_DEBUG, "CMD: set (integer): [%#llx/%#llx]'%s'=%d", map_hash, key_hash, name, value->data.i);
 
-	// eventually we will add the ability to wait until the data has been competely distributed 
-	// before returning an ack.
-	assert(fullwait == 0);
 
 	// store the value into the trees.  If a value already exists, it will get released and this one 
 	// will replace it, so control of this value is given to the tree structure.
@@ -560,8 +549,8 @@ static void cmd_hashmask(client_t *client, header_t *header, char *payload)
 
 	// get the data out of the payload.
 	next = payload;
-	mask = data_int(&next);
-	hash = data_int(&next);
+	mask = data_long(&next);
+	hash = data_long(&next);
 	level = data_int(&next);
 
 	// check integrity of the data provided.
@@ -571,7 +560,7 @@ static void cmd_hashmask(client_t *client, header_t *header, char *payload)
 	
 	// check that the mask is the same as our existing mask... 
 
-	logger(LOG_DEBUG, "debug: cmd_hashmask.  orig mask:%X, new mask:%X", _mask, mask);
+	logger(LOG_DEBUG, "debug: cmd_hashmask.  orig mask:%#llx, new mask:%#llx", _mask, mask);
 	
 	if (mask < _mask) {
 		// if the mask supplied is LESS than the mask we use, then when we read in the data, we need 
@@ -605,7 +594,7 @@ static void cmd_hashmask(client_t *client, header_t *header, char *payload)
 		if (_hashmasks[hash]->primary) { free(_hashmasks[hash]->primary); }
 		_hashmasks[hash]->primary = strdup(node->name);
 		
-		logger(LOG_DEBUG, "Setting HASHMASK: Primary [%08X] = '%s'",
+		logger(LOG_DEBUG, "Setting HASHMASK: Primary [%#llx] = '%s'",
 			hash, _hashmasks[hash]->primary
 		);
 	}
@@ -615,7 +604,7 @@ static void cmd_hashmask(client_t *client, header_t *header, char *payload)
 		if (_hashmasks[hash]->secondary) { free(_hashmasks[hash]->secondary); }
 		_hashmasks[hash]->secondary = strdup(node->name);
 
-		logger(LOG_DEBUG, "Setting HASHMASK: Secondary [%08X] = '%s'",
+		logger(LOG_DEBUG, "Setting HASHMASK: Secondary [%#llx] = '%s'",
 			hash, _hashmasks[hash]->primary
 		);
 	}
@@ -647,16 +636,16 @@ static void cmd_control_bucket(client_t *client, header_t *header, char *payload
 	assert(payload);
 
 	next = payload;
-	mask = data_int(&next);
-	key_hash = data_int(&next);
+	mask = data_long(&next);
+	key_hash = data_long(&next);
 	level = data_int(&next);
 	
-	logger(LOG_INFO, "CMD: bucket control (%08X/%08X), level:%d", mask, key_hash, level);
+	logger(LOG_INFO, "CMD: bucket control (%#llx/%#llx), level:%d", mask, key_hash, level);
 
 	// regardless of the reply, the payload will be the same.
 	assert(payload_length() == 0);
-	payload_int(mask);
-	payload_int(key_hash);
+	payload_long(mask);
+	payload_long(key_hash);
 
 	// make sure that the masks are the same.
 	if (mask != _mask) {
@@ -750,7 +739,6 @@ static void cmd_finalise_migration(client_t *client, header_t *header, char *pay
 	char *remote_host = NULL;
 	int reply = 0;
 	bucket_t *bucket = NULL;
-	node_t *node;
 	
 	assert(client);
 	assert(header);
@@ -758,17 +746,17 @@ static void cmd_finalise_migration(client_t *client, header_t *header, char *pay
 
 	next = payload;
 	
-	mask        = data_int(&next);
-	key_hash    = data_int(&next);
+	mask        = data_long(&next);
+	key_hash    = data_long(&next);
 	level       = data_int(&next);
 	remote_host = data_string_copy(&next);
 	
-	logger(LOG_INFO, "CMD: finalise migration (%08X/%08X), level:%d, remote:'%s'", mask, key_hash, level, remote_host);
+	logger(LOG_INFO, "CMD: finalise migration (%#llx/%#llx), level:%d, remote:'%s'", mask, key_hash, level, remote_host);
 
 	// regardless of the reply, the payload will be the same.
 	assert(payload_length() == 0);
-	payload_int(mask);
-	payload_int(key_hash);
+	payload_long(mask);
+	payload_long(key_hash);
 
 	// make sure that the masks are the same.
 	if (mask != _mask) {
@@ -793,15 +781,12 @@ static void cmd_finalise_migration(client_t *client, header_t *header, char *pay
 		bucket = _buckets[key_hash];
 		assert(bucket);
 		assert(bucket->hash == key_hash);
-
 		assert(bucket->transfer_client == client);
 		assert(bucket->level < 0);
 		assert(bucket->target_node == NULL);
 		assert(bucket->backup_node == NULL);
-		
 		assert(data_in_transit() == 0);
 		assert(bucket->transfer_event == NULL);
-		
 		assert(_bucket_transfer == 1);
 		
 		// mark the bucket as ready for action.
@@ -903,8 +888,8 @@ static void cmd_hello(client_t *client, header_t *header)
 static void cmd_sync_string(client_t *client, header_t *header, char *payload)
 {
 	char *next;
-	int map_hash;
-	int key_hash;
+	hash_t map_hash;
+	hash_t key_hash;
 	int expires;
 	value_t *value;
 	char *str;
@@ -921,8 +906,8 @@ static void cmd_sync_string(client_t *client, header_t *header, char *payload)
 	
 	next = payload;
 	
-	map_hash = data_int(&next);
-	key_hash = data_int(&next);
+	map_hash = data_long(&next);
+	key_hash = data_long(&next);
 	expires = data_int(&next);
 	
 	assert(_hashmasks);
@@ -949,8 +934,8 @@ static void cmd_sync_string(client_t *client, header_t *header, char *payload)
 	// send the ACK reply.
 	if (result == 0) {
 		assert(payload_length() == 0);
-		payload_int(map_hash);
-		payload_int(key_hash);
+		payload_long(map_hash);
+		payload_long(key_hash);
 		client_send_message(client, header, REPLY_SYNC_ACK, payload_length(), payload_ptr());
 		payload_clear();
 	}
@@ -969,8 +954,8 @@ static void cmd_sync_string(client_t *client, header_t *header, char *payload)
 static void cmd_sync_int(client_t *client, header_t *header, char *payload)
 {
 	char *next;
-	int map_hash;
-	int key_hash;
+	hash_t map_hash;
+	hash_t key_hash;
 	int expires;
 	value_t *value;
 	int result;
@@ -985,8 +970,8 @@ static void cmd_sync_int(client_t *client, header_t *header, char *payload)
 	
 	next = payload;
 	
-	map_hash = data_int(&next);
-	key_hash = data_int(&next);
+	map_hash = data_long(&next);
+	key_hash = data_long(&next);
 	expires = data_int(&next);
 	
 	value->data.i = data_int(&next);
@@ -1034,14 +1019,14 @@ static void cmd_sync_name(client_t *client, header_t *header, char *payload)
 	
 	next = payload;
 	
-	key_hash = data_int(&next);
+	key_hash = data_long(&next);
 	name = data_string_copy(&next);
 	assert(name);
 	
-	logger(LOG_DEBUG, "Received: CMD_SYNC_NAME: %08X='%s'", key_hash, name);
+	logger(LOG_DEBUG, "Received: CMD_SYNC_NAME: %#llx='%s'", key_hash, name);
 	
 	// NOTE: name is controlled by the tree after this function call.
-	result = buckets_store_name(key_hash, name, 0);
+	result = buckets_store_name_str(key_hash, name);
 	name = NULL;
 	
 	// send the ACK reply.

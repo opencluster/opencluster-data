@@ -70,11 +70,12 @@ typedef struct {
 
 
 
-value_t * buckets_get_value(int map_hash, int key_hash);
-int buckets_store_value(int map_hash, int key_hash, char *name, int name_int, int expires, value_t *value);
-void buckets_split_mask(int mask);
+value_t * buckets_get_value(hash_t map_hash, hash_t key_hash);
+int buckets_store_value(hash_t map_hash, hash_t key_hash, char *name, long long name_int, int expires, value_t *value);
+void buckets_split_mask(hash_t mask);
 void buckets_init(void);
-int buckets_store_name(hash_t key_hash, char *name, int int_key);
+int buckets_store_name_int(hash_t key_hash, long long int_key);
+int buckets_store_name_str(hash_t key_hash, char *name);
 
 bucket_t * bucket_new(hash_t hash);
 void bucket_shutdown(bucket_t *bucket);
@@ -96,7 +97,7 @@ void hashmask_switch(hash_t hash);
 	extern int _secondary_buckets;
 	extern hashmask_t ** _hashmasks;
 	extern int _nobackup_buckets;
-	extern unsigned int _mask;
+	extern hash_t _mask;
 	extern int _bucket_transfer;
 #endif
 

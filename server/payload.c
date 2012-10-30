@@ -49,22 +49,52 @@ void payload_int(int value)
 
 	assert(_payload_max >= 0 && _payload_length >= 0);
 	assert(_payload_length <= _payload_max);
+	assert(DEFAULT_BUFSIZE > sizeof(value));
 	
 	avail = _payload_max - _payload_length;
-	if (avail < sizeof(int)) {
+	if (avail < sizeof(value)) {
 		_payload = realloc(_payload, _payload_max + DEFAULT_BUFSIZE);
 		assert(_payload);
 		_payload_max += DEFAULT_BUFSIZE;
 	}
 	
 	ptr = ((void*) _payload + _payload_length);
-	ptr[0] = htonl(value);
+	ptr[0] = htobe32(value);
 	
 	_payload_length += sizeof(int);
 	
 	assert(_payload);
 	assert(_payload_length <= _payload_max);
 }
+
+
+
+void payload_long(long long value)
+{
+	int avail;
+	long long *ptr;
+
+	assert(_payload_max >= 0 && _payload_length >= 0);
+	assert(_payload_length <= _payload_max);
+	assert(DEFAULT_BUFSIZE > sizeof(value));
+	assert(sizeof(value) == 8);
+	
+	avail = _payload_max - _payload_length;
+	if (avail < sizeof(value)) {
+		_payload = realloc(_payload, _payload_max + DEFAULT_BUFSIZE);
+		assert(_payload);
+		_payload_max += DEFAULT_BUFSIZE;
+	}
+	
+	ptr = ((void*) _payload + _payload_length);
+	ptr[0] = htobe64(value);
+	
+	_payload_length += sizeof(value);
+	
+	assert(_payload);
+	assert(_payload_length <= _payload_max);
+}
+
 
 
 
@@ -86,7 +116,7 @@ void payload_data(int length, void *data)
 
 	// add the length of the string first.
 	ptr = ((void*) _payload + _payload_length);
-	ptr[0] = htonl(length);
+	ptr[0] = htobe32(length);
 
 	if (length > 0) {
 		memcpy(_payload + _payload_length + sizeof(int), data, length);

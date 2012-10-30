@@ -9,13 +9,13 @@ rm /tmp/b-logs*;
 make debug || (echo "Build Failed"; exit 1)
 
 echo "Starting Node-A" 
-./ocd.debug -g /tmp/a-logs- &
+./ocd.debug -vvvvvv -g /tmp/a-logs- &
 PID_NODE_A=$!
 
 sleep 6
 
 echo "Starting Node-B" 
-./ocd.debug -l 127.0.0.1:13601 -n 127.0.0.1:13600 -g /tmp/b-logs- &
+./ocd.debug -vvvvvv -l 127.0.0.1:13601 -n 127.0.0.1:13600 -g /tmp/b-logs- &
 PID_NODE_B=$!
 
 sleep 1

@@ -18,7 +18,8 @@ void push_accept_bucket(client_t *client, hash_t key);
 void push_promote(client_t *client, hash_t hash);
 void push_control_bucket(client_t *client, bucket_t *bucket, int level);
 void push_sync_item(client_t *client, item_t *item);
-void push_sync_name(client_t *client, hash_t key, char *name, int int_key);
+void push_sync_name_str(client_t *client, hash_t key, char *name);
+void push_sync_name_int(client_t *client, hash_t key, long long int_key);
 void push_finalise_migration(client_t *client, bucket_t *bucket, int level);
 void push_all_newserver(char *name, client_t *source_client);
 

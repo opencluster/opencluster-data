@@ -19,6 +19,7 @@
 
 #include <assert.h>
 #include <ctype.h>
+#include <endian.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -170,7 +171,10 @@ void client_accept(client_t *client, evutil_socket_t handle, struct sockaddr *ad
 }
 
 
-//-----------------------------------------------------------------------------
+
+
+
+//--------------------------------------------------------------------------------------------------
 // Free the resources used by the client object.
 void client_free(client_t *client)
 {
@@ -236,7 +240,7 @@ void client_free(client_t *client)
 				resize ++;
 	}	}	}
 	
-	logger(LOG_INFO, "found:%d, client_count:%d", found, _client_count);
+	logger(LOG_DEBUG, "found:%d, client_count:%d", found, _client_count);
 	
 	assert(found == 1);
 	
@@ -281,6 +285,7 @@ static int process_data(client_t *client)
 	assert(sizeof(char) == 1);
 	assert(sizeof(short int) == 2);
 	assert(sizeof(int) == 4);
+	assert(sizeof(long long) == 8);
 	
 	assert(client);
 	assert(client->handle > 0);
@@ -290,8 +295,8 @@ static int process_data(client_t *client)
 		assert(client->in.buffer);
 		assert((client->in.length + client->in.offset) <= client->in.max);
 		
-		// if we dont have 10 characters, then we dont have enough to build a message.  Messages are at
-		// least that.
+		// if we dont have 10 characters, then we dont have enough to build a message.  Messages are 
+		// at least that.
 		if (client->in.length < HEADER_SIZE) {
 			// we didn't have enough, even for the header, so we are stopping.
             logger(LOG_DEBUG, "[process_data] There wasn't enough data to build anything so not processing the buffer. in.length=%d", client->in.length);
@@ -299,17 +304,18 @@ static int process_data(client_t *client)
 		}
 		else {
 			
-			// keeping in mind the offset, get the 4 params, and determine what we need to do with them.
+			// keeping in mind the offset, get the 4 params, and determine what we need to do with 
+			// them.
 			
-			// *** performance tuning.  We should only parse the header once.  It should be saved in the client object and only done once.
+			// *** performance tuning.  We should only parse the header once.  It should be saved in 
+			//     the client object and only done once.
 			
 			raw = (void *) (client->in.buffer + client->in.offset);
 
-			header.command = ntohs(raw->command);
-			header.repcmd = ntohs(raw->repcmd);
-			header.userid = ntohl(raw->userid);
-			header.length = ntohl(raw->length);
-			
+			header.command = be16toh(raw->command);
+			header.repcmd  = be16toh(raw->repcmd);
+			header.userid  = be32toh(raw->userid);
+			header.length  = be32toh(raw->length);
 			
 			logger(LOG_DEBUG, "New telegram: Command=%d, repcmd=%d, userid=%d, length=%d, buffer_length=%d", 
 					header.command, header.repcmd, 
@@ -339,16 +345,12 @@ static int process_data(client_t *client)
 					#ifndef NDEBUG
 					assert(0);
 					#endif							
-					
-					
 				}
 				else {
-					
 					assert(_commands[header.command]);
 					func = _commands[header.command];
 					(*func)(client, &header, ptr);
 				}
-				
 				
 				// need to adjust the details of the incoming buffer.
 				client->in.length -= (header.length + HEADER_SIZE);
@@ -416,7 +418,6 @@ static void log_data(int handle, char *tag, unsigned char *data, int length)
 		
 		// now we display the plain text.
 		assert(start >= 0);
-		assert(start < i);
 		for (col=0; col<16; col++) {
 			if (start < length) {
 				if (isprint(data[start])) {
@@ -489,10 +490,9 @@ static void read_handler(int fd, short int flags, void *arg)
 		assert((client->in.length + client->in.offset) <= client->in.max);
 		avail = client->in.max - client->in.length - client->in.offset;
 		if (avail < DEFAULT_BUFSIZE) {
-			/* we want to increase buffer size, so we'll add another DEFAULT_BUFSIZE to the 
-			max.  This should keep it in multiples of DEFAULT_BUFSIZE, regardless of how 
-			much is available for each read.
-			*/
+			// we want to increase buffer size, so we'll add another DEFAULT_BUFSIZE to the max.  
+			// This should keep it in multiples of DEFAULT_BUFSIZE, regardless of how much is 
+			// available for each read.
 			
 			client->in.buffer = realloc(client->in.buffer, client->in.max + DEFAULT_BUFSIZE);
 			client->in.max += DEFAULT_BUFSIZE;
@@ -556,21 +556,20 @@ void client_send_message(client_t *client, header_t *header, short command, int 
 	assert(sizeof(raw_header_t) == HEADER_SIZE);
 
 	// build the raw header.
-	raw.command = htons(command);
+	raw.command = htobe16(command);
 	if (header) {
-		raw.repcmd = htons(header->command);
-		raw.userid = htonl(header->userid);
+		raw.repcmd = htobe16(header->command);
+		raw.userid = htobe32(header->userid);
 	}
 	else {
 		// this is a command, not a reply, so we need to give it a new unique id.
 		assert(client->nextid >= 0);
 		raw.repcmd = 0;
-		raw.userid = htonl(client->nextid);
+		raw.userid = htobe32(client->nextid);
 		client->nextid++;
 		if (client->nextid < 0) client->nextid = 0;
 	}
-	raw.length = htonl(length);
-	
+	raw.length = htobe32(length);
 	
 	// make sure the clients out_buffer is big enough for the message.
 	while (client->out.max < client->out.length + client->out.offset + sizeof(raw_header_t) + length) {
@@ -679,7 +678,10 @@ static void write_handler(int fd, short int flags, void *arg)
 
 
 
-// This function will return a pointer to the internal data.  It will also update the length variable to indicate the length of the string.  It will increase the 'next' to point to the next potential field in the payload.  If there is no more data in the payload, you will need to check that yourself
+// This function will return a pointer to the internal data.  It will also 
+// update the length variable to indicate the length of the string.  It will 
+// increase the 'next' to point to the next potential field in the payload.  
+// If there is no more data in the payload, you will need to check that yourself
 char * data_string(char **data, int *length)
 {
 	char *str;
@@ -689,12 +691,9 @@ char * data_string(char **data, int *length)
 	assert(*data);
 	assert(length);
 	
-	
 	ptr = (void*) *data;
-	*length = ntohl(ptr[0]);
-
+	*length = be32toh(ptr[0]);
 	str = *data + sizeof(int);
-
 	*data += (sizeof(int) + *length);
 
 	return(str);
@@ -737,12 +736,37 @@ int data_int(char **data)
 	assert(*data);
 	
 	ptr = (void*) *data;
-	value = ntohl(ptr[0]);
+	value = be32toh(ptr[0]);
 
 	*data += sizeof(int);
 	
 	return(value);
 }
+
+
+
+
+// This function will return a pointer to the internal data.  It will also update the length 
+// variable to indicate the length of the string.  It will increase the 'next' to point to the next 
+// potential field in the payload.  If there is no more data in the payload, you will need to check 
+// that yourself
+long long data_long(char **data)
+{
+	long long *ptr;
+	long long value;
+	
+	assert(data);
+	assert(*data);
+	assert(sizeof(long long) == 8);
+	
+	ptr = (void*) *data;
+	value = be64toh(ptr[0]);
+
+	*data += sizeof(long long);
+	
+	return(value);
+}
+
 
 
 

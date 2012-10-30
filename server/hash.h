@@ -2,7 +2,7 @@
 #define __HASH_H
 
 
-typedef int hash_t;
+typedef long long unsigned int hash_t;
 
 
 #endif

@@ -91,4 +91,29 @@ ACCESSING DATA IN THE SERVER
 
 
 
+64-BIT USAGE
+
+	Originally the OpenCluster was designed over 32-bit integers.  Which meant that the hash-keys 
+	were 32-bits, and the primary integer type was 32-bits.  However, it quickly became apparent 
+	that 32-bit would be a very limiting factor in the clustered caching market.   Most computers 
+	manufactured these days use 64-bit processors, so a 32-bit solution would seem out of date.
+
+	32-bit integers are still used for some fields where applicable, but the primary numerical 
+	storage unit will be a 64-bit integer rather than a 32-bit one.   If the client interface 
+	wants to use 32-bits only, it will still need to transmit and receive 64-bit values.  What it 
+	does with those values are its own business.
+
+
+VARIABLE LENGTH STRINGS IN THE PROTOCOL
+
+	When creating the binary protocol used to communicate between servers and clients, we've 
+	intentionally put all variable length fields at the end of the structure.  This may be a 
+	little confusing as related elements might not be next to each other, however, it gives the 
+	opportunity to improve the parsing speed by reading in fixed location data into a structure 
+	and then parsed.   
+
+
+
+
+
 

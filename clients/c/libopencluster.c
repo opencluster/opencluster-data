@@ -6,6 +6,7 @@
 
 #include <arpa/inet.h>
 #include <assert.h>
+#include <endian.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <stdio.h>
@@ -21,10 +22,9 @@
 
 #define DEFAULT_BUFFER_SIZE   1024
 
+#define WAIT_FOR_REPLY 1
 
 
-#define WAIT_FOR_REPLY  0
-#define DONT_WAIT       1
 
 #define CMD_ACK         1
 #define CMD_HELLO       10
@@ -42,10 +42,10 @@
 // data received over the network.
 #pragma pack(push,1)
 typedef struct {
-	short command;
-	short repcmd;
-	int userid;
-	int length;
+	uint16_t command;
+	uint16_t repcmd;
+	uint32_t userid;
+	uint32_t length;
 } raw_header_t;
 #pragma pack(pop)
 
@@ -81,8 +81,9 @@ typedef struct {
 
 } message_t;
 
-typedef unsigned int hash_t;
 
+typedef uint64_t hash_t;
+typedef uint64_t mask_t;
 
 
 // information about a server we know about.
@@ -135,9 +136,11 @@ cluster_t * cluster_init(void)
 	cluster->servers = NULL;
 	cluster->server_count = 0;
 
+	assert(DEFAULT_BUFFER_SIZE > 0);
 	cluster->payload = malloc(DEFAULT_BUFFER_SIZE);
 	cluster->payload_max = DEFAULT_BUFFER_SIZE;
 	cluster->payload_length = 0;
+	assert(cluster->payload);
 	
 	cluster->msg_count = 0;
 	cluster->messages = NULL;
@@ -301,6 +304,7 @@ void cluster_addserver(cluster_t *cluster, const char *host)
 	}
 	else {
 		server->port = atoi(next);
+		assert(server->port > 0);
 		server->host = strdup(first);
 	}
 	
@@ -401,8 +405,8 @@ static void server_closed(cluster_t *cluster, server_t *server)
 
 // When creating the header, we dont actually know the 'length' of the payload, so we will adjust 
 // that as we add data to it.   This payload will be used mostly just for returning ACK and NACK 
-// replies to teh server.
-static void payload_header(cluster_t *cluster, short command, short repcmd, int userid)
+// replies to the server.
+static void payload_header(cluster_t *cluster, uint16_t command, uint16_t repcmd, uint32_t userid)
 {
 	raw_header_t *raw;
 	
@@ -415,9 +419,9 @@ static void payload_header(cluster_t *cluster, short command, short repcmd, int 
 	assert(cluster->payload_max >= sizeof(raw_header_t));
 	
 	raw = cluster->payload;
-	raw->command = htons(command);
-	raw->repcmd = htons(repcmd);
-	raw->userid = htonl(userid);
+	raw->command = htobe16(command);
+	raw->repcmd = htobe16(repcmd);
+	raw->userid = htobe32(userid);
 	raw->length = 0;
 	
 	cluster->payload_length = sizeof(raw_header_t);
@@ -430,8 +434,11 @@ static void payload_header(cluster_t *cluster, short command, short repcmd, int 
 static void payload_int(cluster_t *cluster, int value)
 {
 	int avail;
-	int *ptr;
+	int32_t *ptr;
 	raw_header_t *raw;
+	
+	// sanity check, making sure the integer type is the same as the 32-bit integer we will be pushing.
+	assert(sizeof(int32_t) == sizeof(int));
 	
 	assert(cluster);
 	assert(cluster->payload_length >= sizeof(raw_header_t));
@@ -444,14 +451,14 @@ static void payload_int(cluster_t *cluster, int value)
 	}
 	
 	ptr = ((void*) cluster->payload + cluster->payload_length);
-	ptr[0] = htonl(value);
+	ptr[0] = htobe32(value);
 	
-	cluster->payload_length += sizeof(int);
+	cluster->payload_length += sizeof(int32_t);
 
 	// update the length in the header.
 	assert(cluster->payload_length > sizeof(raw_header_t));
 	raw = cluster->payload;
-	raw->length = htonl(cluster->payload_length - sizeof(raw_header_t));
+	raw->length = htobe32(cluster->payload_length - sizeof(raw_header_t));
 	
 	assert(cluster->payload);
 	assert(cluster->payload_length <= cluster->payload_max);
@@ -477,7 +484,7 @@ static void payload_data(cluster_t *cluster, int length, void *data)
 
 	// add the length of the string first.
 	ptr = ((void*) cluster->payload + cluster->payload_length);
-	ptr[0] = htonl(length);
+	ptr[0] = htobe32(length);
 	
 	memcpy(cluster->payload + cluster->payload_length + sizeof(int), data, length);
 	
@@ -486,7 +493,7 @@ static void payload_data(cluster_t *cluster, int length, void *data)
 	// update the length in the header.
 	assert(cluster->payload_length > sizeof(raw_header_t));
 	raw = cluster->payload;
-	raw->length = htonl(cluster->payload_length - sizeof(raw_header_t));
+	raw->length = htobe32(cluster->payload_length - sizeof(raw_header_t));
 
 	assert(cluster->payload);
 	assert(cluster->payload_length <= cluster->payload_max);
@@ -571,6 +578,44 @@ static void * data_int(void *data, int *value)
 }
 
 
+static void * data_hash(void *data, uint64_t *value)
+{
+	void *next;
+	uint64_t *raw;
+	
+	assert(data);
+	assert(value);
+	
+	assert(sizeof(uint64_t) == 8);
+	
+	raw = data;
+	value[0] = be64toh(raw[0]);
+	next = data + sizeof(uint64_t);
+	
+	return(next);
+}
+
+
+
+static void * data_long(void *data, int64_t *value)
+{
+	void *next;
+	int64_t *raw;
+	
+	assert(data);
+	assert(value);
+	
+	assert(sizeof(int64_t) == 8);
+	
+	raw = data;
+	value[0] = be64toh(raw[0]);
+	next = data + sizeof(int64_t);
+	
+	return(next);
+}
+
+
+
 
 static void * data_string(void *data, int *length, char **ptr)
 {
@@ -601,6 +646,7 @@ static void process_serverinfo(cluster_t *cluster, server_t *server, int userid,
 	assert(cluster);
 	assert(server);
 	assert(length >= 4);
+	assert(data);
 
 	next = data;
 	next = data_string(next, &slen, &sinfo);
@@ -630,17 +676,17 @@ static void process_serverinfo(cluster_t *cluster, server_t *server, int userid,
 // NOTE: We may be starting off with an empty hashmasks lists.  If this is the first time we've 
 //       received some hashmasks.  To implement this easily, if we dont already have hashmasks, we 
 //       may need to create one that has a dummy entry in it.
-static void split_mask(cluster_t *cluster, int mask) 
+static void split_mask(cluster_t *cluster, mask_t mask) 
 {
 	hashmask_t **newlist = NULL;
 	hashmask_t **oldlist = NULL;
-	int i;
-	int index;
+	mask_t i;
+	mask_t index;
 	
 	assert(cluster);
 	assert(mask > cluster->mask);
 	
-// 	printf("Splitting bucket list: oldmask=%08X, newmask=%08X\n", cluster->mask, mask);
+ 	printf("Splitting bucket list: oldmask=%#llx, newmask=%#llx\n", cluster->mask, mask);
 	
 	oldlist = (hashmask_t **) cluster->hashmasks;
 	cluster->hashmasks = NULL;
@@ -659,8 +705,11 @@ static void split_mask(cluster_t *cluster, int mask)
 		oldlist[0]->backup = NULL;
 	}
 	
-	newlist = malloc(sizeof(hashmask_t *) * (mask+1));
-	assert(newlist);
+	assert(sizeof(hashmask_t *) > 0);
+	assert((mask+1) > 0);
+	newlist = calloc(mask+1, sizeof(hashmask_t *));
+	printf("** Newlist: %d, %#llx\n", (int) sizeof(hashmask_t *), (mask+1));
+	assert(newlist != NULL);
 	for (i=0; i<=mask; i++) {
 		
 		newlist[i] = malloc(sizeof(hashmask_t));
@@ -706,8 +755,8 @@ static void split_mask(cluster_t *cluster, int mask)
 static void process_hashmask(cluster_t *cluster, server_t *server, int userid, int length, void *data)
 {
 	char *next;
-	int mask;
-	int hash;
+	mask_t mask;
+	hash_t hash;
 	int level;
 	hashmask_t **hashmasks;
 	
@@ -717,17 +766,14 @@ static void process_hashmask(cluster_t *cluster, server_t *server, int userid, i
 
 	next = data;
 	
-	next = data_int(next, &mask);
+	next = data_hash(next, &mask);
 	assert(mask >= 0);
-
-	// is it possible to receive a mask of 0?
-	assert(mask > 0);
 	
 	if (mask > 0) {
 		
 		if (mask > cluster->mask) {
 			// this server is using a mask that is more fine tuned than the mask we've been using.  
-			// Therefore, we need to migrade to the new mask.
+			// Therefore, we need to migrate to the new mask.
 			split_mask(cluster, mask);
 		}
 		
@@ -735,7 +781,7 @@ static void process_hashmask(cluster_t *cluster, server_t *server, int userid, i
 		hashmasks = (hashmask_t **) cluster->hashmasks;
 		assert(hashmasks);
 		
-		next = data_int(next, &hash);
+		next = data_hash(next, &hash);
 		next = data_int(next, &level);
 			
 		assert(level >= 0 || level == -1);
@@ -1244,7 +1290,6 @@ int cluster_connect(cluster_t *cluster)
 	assert(cluster->server_count > 0);
 
 	for (try=0; try < cluster->server_count && connected == 0; try++) {
-	
 		server = cluster->servers[try];
 		assert(server);
 
@@ -1255,13 +1300,12 @@ int cluster_connect(cluster_t *cluster)
 	}
 	
 	return(connected);
-	
 }
 
 
 void server_disconnect(cluster_t *cluster, server_t *server)
 {
-	int i;
+	long long i;
 	hashmask_t *hashmask;
 	message_t *msg;
 	
@@ -1290,7 +1334,9 @@ void server_disconnect(cluster_t *cluster, server_t *server)
 		assert(msg);
 		
 		if (send_request(cluster, server, msg, WAIT_FOR_REPLY) != 0) {
-			assert(0); // what?
+			assert(0);
+			
+			// what?
 		}
 		
 		message_return(msg);
@@ -1322,43 +1368,73 @@ void cluster_disconnect(cluster_t *cluster)
 	}
 }
 
+#define FNV_BASE_LONG   14695981039346656037llu
+#define FNV_PRIME_LONG  1099511628211llu                      
+
 
 // FNV hash.  Public domain function converted from public domain Java version.
-unsigned int generate_hash_str(const char *str, const int length)
+// TODO: modify this to a macro to improve performance a little.
+hash_t generate_hash_str(const char *str, const int length)
 {
 	register int i;
-	register int hash = 2166136261l;
+	register hash_t hash = FNV_BASE_LONG;
 
 	for (i=0; i<length; i++)  {
-		hash ^= (int)str[i];
-		hash *= 16777619;
+		hash ^= (unsigned int)str[i];
+		hash *= FNV_PRIME_LONG;
 	}
 
 	return(hash);
 }
 
 
-unsigned int generate_hash_int(const int key)
+hash_t generate_hash_int(const int key)
 {
 	register int i;
-	register int hash = 2166136261l;
+	register hash_t hash = FNV_BASE_LONG;
 	union {
 		int nkey;
 		char str[sizeof(int)];
 	} match;
+
 	
 	assert(sizeof(key) == 4);
 	assert(sizeof(match) == sizeof(key));
 	
-	match.nkey = ntohl(key);
+	match.nkey = htobe32(key);
 
 	for (i=0; i<sizeof(key); i++)  {
-		hash ^= (int)match.str[i];
-		hash *= 16777619;
+		hash ^= (unsigned int)match.str[i];
+		hash *= FNV_PRIME_LONG;
 	}
 
 	return(hash);
 }
+
+
+hash_t generate_hash_long(const long long key)
+{
+	register int i;
+	register hash_t hash = FNV_BASE_LONG;
+	union {
+		long long nkey;
+		char str[sizeof(long long)];
+	} match;
+
+	assert(sizeof(key) == 8);
+	assert(sizeof(match) == sizeof(key));
+	
+	match.nkey = htobe64(key);
+
+	for (i=0; i<sizeof(key); i++)  {
+		hash ^= (unsigned int)match.str[i];
+		hash *= FNV_PRIME_LONG;
+	}
+
+	return(hash);
+}
+
+
 
 static void msg_setint(message_t *msg, const int value) 
 {
@@ -1384,6 +1460,32 @@ static void msg_setint(message_t *msg, const int value)
 	header = msg->out.data;
 	header->length = htonl(msg->out.length - sizeof(raw_header_t));
 }
+
+static void msg_setlong(message_t *msg, const uint64_t value) 
+{
+	raw_header_t *header;
+	uint64_t *ptr;
+	
+	assert(msg);
+	
+	// make sure there is enough space in the buffer.
+	if ((msg->out.length + sizeof(value)) > msg->out.max) {
+		msg->out.data = realloc(msg->out.data, msg->out.max + DEFAULT_BUFFER_SIZE);
+		msg->out.max += DEFAULT_BUFFER_SIZE;
+	}
+
+	ptr = ((void*)msg->out.data + msg->out.length);
+	ptr[0] = htobe64(value);
+	msg->out.length += sizeof(value);
+	
+	// add the msg details to the outgoing payload buffer.
+	assert(msg->out.max >= sizeof(raw_header_t));
+	assert(msg->out.data);
+	
+	header = msg->out.data;
+	header->length = htobe32(msg->out.length - sizeof(raw_header_t));
+}
+
 
 
 static void msg_setstr(message_t *msg, const char *str) 
@@ -1427,7 +1529,7 @@ static void msg_setstr(message_t *msg, const char *str)
 int cluster_setint(cluster_t *cluster, const char *name, const int value, const int expires)
 {
 	int res = 0;
-	int name_hash;
+	hash_t name_hash;
 	int mask_index;
 	server_t *server;
 	hashmask_t *hashmask;
@@ -1464,12 +1566,11 @@ int cluster_setint(cluster_t *cluster, const char *name, const int value, const 
 	// build the message and send it off.
 	msg = message_new(cluster, CMD_SET_INT);
 	assert(msg);
-	msg_setint(msg, 0); 		// integer - map hash (0 for non-map items)
-	msg_setint(msg, name_hash);	// integer - key hash
-	msg_setint(msg, expires);	// integer - expires (in seconds from now, 0 means it never expires)
-	msg_setint(msg, 0);			// integer - full wait (0 indicates dont wait for sync to backup servers, 1 indicates to wait).
-	msg_setstr(msg, name);		// string  - name
-	msg_setint(msg, value);		// integer - value (to be stored).
+	msg_setlong(msg, 0); 			// integer - map hash (0 for non-map items)
+	msg_setlong(msg, name_hash);	// integer - key hash
+	msg_setint(msg, expires);		// integer - expires (in seconds from now, 0 means it never expires)
+	msg_setstr(msg, name);			// string  - name
+	msg_setint(msg, value);			// integer - value (to be stored).
 
 	send_request(cluster, server, msg, WAIT_FOR_REPLY);
 	
@@ -1491,7 +1592,7 @@ int cluster_setint(cluster_t *cluster, const char *name, const int value, const 
 int cluster_setstr(cluster_t *cluster, const char *name, const char *value, const int expires)
 {
 	int res = 0;
-	int name_hash;
+	hash_t name_hash;
 	int mask_index;
 	server_t *server;
 	hashmask_t *hashmask;
@@ -1526,12 +1627,11 @@ int cluster_setstr(cluster_t *cluster, const char *name, const char *value, cons
 	// build the message and send it off.
 	msg = message_new(cluster, CMD_SET_STR);
 	assert(msg);
-	msg_setint(msg, 0); 		// integer - map hash (0 for non-map items)
-	msg_setint(msg, name_hash);	// integer - key hash
+	msg_setlong(msg, 0); 		// integer - map hash (0 for non-map items)
+	msg_setlong(msg, name_hash);	// integer - key hash
 	msg_setint(msg, expires);	// integer - expires (in seconds from now, 0 means it never expires)
-	msg_setint(msg, 0);			// integer - full wait (0 indicates dont wait for sync to backup servers, 1 indicates to wait).
 	msg_setstr(msg, name);		// string  - name
-	msg_setstr(msg, value);		// integer - value (to be stored).
+	msg_setstr(msg, value);		// integer - the string being stored.
 
 	send_request(cluster, server, msg, WAIT_FOR_REPLY);
 	
@@ -1542,7 +1642,6 @@ int cluster_setstr(cluster_t *cluster, const char *name, const char *value, cons
 
 	// now we've got a reply, we free the message, because there is no 
 	assert(msg->in.result == CMD_ACK);
-	
 	
 	message_return(msg);
 	
@@ -1564,6 +1663,23 @@ static void msg_getint(message_t *msg, int *value)
 
 	msg->in.offset += sizeof(int);
 }
+
+
+static void msg_getlong(message_t *msg, uint64_t *value)
+{
+	uint64_t *ptr;
+	
+	assert(msg);
+	assert(value);
+	assert(msg->in.offset >= 0);
+	
+	ptr = ((void*)(msg->in.payload) + msg->in.offset);
+	*value = be64toh(*ptr);
+
+	msg->in.offset += sizeof(uint64_t);
+}
+
+
 
 
 static void msg_getstr(message_t *msg, char **value, int *length)
@@ -1596,10 +1712,10 @@ static void msg_getstr(message_t *msg, char **value, int *length)
 int cluster_getint(cluster_t *cluster, const char *name, int *value)
 {
 	int res = 0;
-	int name_hash;
+	hash_t name_hash;
 	int mask_index;
-	int map_hash;
-	int key_hash;
+	hash_t map_hash;
+	hash_t key_hash;
 	server_t *server;
 	hashmask_t *hashmask;
 	message_t *msg;
@@ -1632,8 +1748,8 @@ int cluster_getint(cluster_t *cluster, const char *name, int *value)
 	// build the message and send it off.
 	msg = message_new(cluster, CMD_GET_INT);
 	assert(msg);
-	msg_setint(msg, 0); 		// integer - map hash (0 for non-map items)
-	msg_setint(msg, name_hash);	// integer - key hash
+	msg_setlong(msg, 0); 		// integer - map hash (0 for non-map items)
+	msg_setlong(msg, name_hash);	// integer - key hash
 
 	send_request(cluster, server, msg, WAIT_FOR_REPLY);
 	
@@ -1648,8 +1764,8 @@ int cluster_getint(cluster_t *cluster, const char *name, int *value)
 		res = -1;
 	}
 	else {
-		msg_getint(msg, &map_hash);
-		msg_getint(msg, &key_hash);
+		msg_getlong(msg, &map_hash);
+		msg_getlong(msg, &key_hash);
 		msg_getint(msg, value);
 		assert(key_hash == name_hash);
 		assert(res == 0);
@@ -1664,10 +1780,10 @@ int cluster_getint(cluster_t *cluster, const char *name, int *value)
 int cluster_getstr(cluster_t *cluster, const char *name, char **value, int *length)
 {
 	int res = 0;
-	int name_hash;
+	hash_t name_hash;
 	int mask_index;
-	int map_hash;
-	int key_hash;
+	hash_t map_hash;
+	hash_t key_hash;
 	server_t *server;
 	hashmask_t *hashmask;
 	message_t *msg;
@@ -1701,8 +1817,8 @@ int cluster_getstr(cluster_t *cluster, const char *name, char **value, int *leng
 	// build the message and send it off.
 	msg = message_new(cluster, CMD_GET_STR);
 	assert(msg);
-	msg_setint(msg, 0); 		// integer - map hash (0 for non-map items)
-	msg_setint(msg, name_hash);	// integer - key hash
+	msg_setlong(msg, 0); 			// integer - map hash (0 for non-map items)
+	msg_setlong(msg, name_hash);	// integer - key hash
 
 	send_request(cluster, server, msg, WAIT_FOR_REPLY);
 	
@@ -1718,8 +1834,8 @@ int cluster_getstr(cluster_t *cluster, const char *name, char **value, int *leng
 		*value = NULL;
 	}
 	else {
-		msg_getint(msg, &map_hash);
-		msg_getint(msg, &key_hash);
+		msg_getlong(msg, &map_hash);
+		msg_getlong(msg, &key_hash);
 		msg_getstr(msg, &str, &str_len);
 		
 		assert(str);
@@ -1728,6 +1844,8 @@ int cluster_getstr(cluster_t *cluster, const char *name, char **value, int *leng
 		*value = str;
 		*length = str_len;
 
+		printf("=== key_hash=%#llx, name_hash=%#llx\n", key_hash, name_hash);
+		
 		assert(key_hash == name_hash);
 		assert(res == 0);
 	}

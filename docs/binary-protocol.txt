@@ -437,8 +437,8 @@ Conditions of use:
   Sent from server to client.
 
 Payload:
-  integer - mask
-  integer - hash
+  long - mask
+  long - hash
   integer - instance count (-1 = not hosted, 0 = primary, 1 or more = backup).
 
 Replies:
@@ -509,8 +509,8 @@ Conditions of use:
   Sent from server to server.
   
 Payload:
-  integer - mask
-  integer - hash (bucket)
+  long - mask
+  long - hash (bucket)
 
 Replies:
   cant_accept_bucket(305)
@@ -538,8 +538,8 @@ Conditions of use:
   Sent from server to server.
   
 Payload:
-  integer - mask
-  integer - hash (bucket)
+  long - mask
+  long - hash (bucket)
 
 
 
@@ -564,8 +564,8 @@ Conditions of use:
   Sent from server to server.
   
 Payload:
-  integer - mask
-  integer - hash (bucket)
+  long - mask
+  long - hash (bucket)
 
 
 
@@ -591,8 +591,8 @@ Type of message:
   Command
 
 Payload:
-  integer - mask
-  integer - hash (bucket)
+  long - mask
+  long - hash (bucket)
   integer - level
 
 
@@ -606,8 +606,8 @@ Type of message:
   Reply
 
 Payload:
-  integer - mask
-  integer - hash (bucket)
+  long - mask
+  long - hash (bucket)
 
 -----------------------------------------------------------------------
 control_bucket_failed (335)
@@ -620,8 +620,8 @@ Type of message:
   Reply
 
 Payload:
-  integer - mask
-  integer - hash (bucket)
+  long - mask
+  long - hash (bucket)
   
 
 -----------------------------------------------------------------------
@@ -635,8 +635,8 @@ Type of message:
   Command
 
 Payload:
-  integer - mask
-  integer - hash (bucket)
+  long - mask
+  long - hash (bucket)
   integer - level
   string  - alternate data node (source or backup depending on level)
 
@@ -651,8 +651,8 @@ Type of message:
   Reply
 
 Payload:
-  integer - mask
-  integer - hash (bucket)
+  long - mask
+  long - hash (bucket)
 
   
 -----------------------------------------------------------------------
@@ -666,8 +666,8 @@ Type of message:
   Reply
 
 Payload:
-  integer - mask
-  integer - hash (bucket)
+  long - mask
+  long - hash (bucket)
   
 
 
@@ -680,8 +680,8 @@ Type of message:
   Command
 
 Payload:
-  integer - mask
-  integer - hash (bucket)
+  long - mask
+  long - hash (bucket)
 
 
 
@@ -691,8 +691,8 @@ promote_bucket(400)
 Used by the master of a bucket, to promote a backup copy to be the master.  
 
 Payload:
-  integer - mask
-  integer - hash (bucket)
+  long - mask
+  long - hash (bucket)
 
 -----------------------------------------------------------------------
 remove_bucket(420)
@@ -704,8 +704,8 @@ HASHMASK updates.
 erin@token.com.au
 
 Payload:
-  integer - mask
-  integer - hash (bucket)
+  long - mask
+  long - hash (bucket)
 
 
 -----------------------------------------------------------------------
@@ -714,12 +714,11 @@ set_int(2000)
 Set an integer (32-bit) key/value, overwriting if it exists.
 
 Payload:
-  integer - map hash (0 for non-map items)
-  integer - key hash
+  long    - map hash (0 for non-map items)
+  long    - key hash
   integer - expires (in seconds from now, 0 means it never expires)
-  integer - full wait (0 indicates dont wait for sync to backup servers, 1 indicates to wait).
+  long    - value (to be stored).
   string  - name
-  integer - value (to be stored).
 
 Replies:
   ack(1)
@@ -728,16 +727,15 @@ Replies:
 
 
 -----------------------------------------------------------------------
-  2010  set_long     set an long (64-bit) key/value, overwriting it it exists.
   2020  set_string   set a variable length string key/value.
 -----------------------------------------------------------------------
 get_int(2100)
 
-get a integer (32-bit) key/value pair.
+get an integer (64-bit) key/value pair.
 
 Payload:
-  integer - map hash (0 for non-map items)
-  integer - key hash
+  long - map hash (0 for non-map items)
+  long - key hash
 
 Replies:
   data_int(2105), return the integer data.
@@ -748,19 +746,17 @@ Replies:
 -----------------------------------------------------------------------
 data_int(2105)
 
-The integer result from a key lookup
+The integer (64-bit) result from a key lookup
 
 Reply.
 
 Payload:
-  integer - map hash (0 for non-map items)
-  integer - key hash
-  integer - value
+  long - map hash (0 for non-map items)
+  long - key hash
+  long - value
 
   
 
------------------------------------------------------------------------
-  2110  get_long     get a long (32-bit) key/value pair.
 -----------------------------------------------------------------------
   2120  get_string   get a variable length string key/value.
 -----------------------------------------------------------------------
@@ -773,10 +769,10 @@ sync_int(3000) [COMMAND]
 Migrate an integer (32-bit) key/value, overwriting if it exists.
 
 Payload:
-  integer - map hash (0 for non-map items)
-  integer - key hash
+  long - map hash (0 for non-map items)
+  long - key hash
   integer - expires (in seconds from now, 0 means it never expires)
-  integer - value (to be stored).
+  long - value (to be stored).
 
 Replies:
   sync_ack(3005)
@@ -789,8 +785,8 @@ sync_ack(3005) [REPLY]
 Acknowledge a sync operation, providing the information to indicate which sync operation was successful.
 
 Payload:
-  integer - map hash (0 for non-map items)
-  integer - key hash
+  long - map hash (0 for non-map items)
+  long - key hash
 
 -----------------------------------------------------------------------
 sync_fail(3006) [REPLY]
@@ -799,12 +795,10 @@ A sync operation failed.  This could be for any number of reasons.  Such as the 
 offline, or the buckets have been split and this bucket no longer is valid.
 
 Payload:
-  integer - map hash (0 for non-map items)
-  integer - key hash
+  long - map hash (0 for non-map items)
+  long - key hash
 
 
------------------------------------------------------------------------
-  3010  sync_long
 
 -----------------------------------------------------------------------
   3020  sync_string
@@ -812,8 +806,8 @@ Payload:
 Migrate an string key/value, overwriting if it exists.
 
 Payload:
-  integer - map hash (0 for non-map items)
-  integer - key hash
+  long - map hash (0 for non-map items)
+  long - key hash
   integer - expires (in seconds from now, 0 means it never expires)
   string - value (to be stored).
 
@@ -829,7 +823,7 @@ Each hash has a readable name associated with it, provided by the client.  We do
 it with every single update, but for new items we will need to provide it.
 
 Payload:
-  integer - key hash
+  long - key hash
   string  - name
 
 Replies:
@@ -844,8 +838,8 @@ Each hash has either a readable name or an integer associated with it, provided 
 dont need to include it with every single update, but for new items we will need to provide it.
 
 Payload:
-  integer - key hash
-  integer - user index
+  long - key hash
+  long - user index
 
 Replies:
   ack(1)
@@ -858,7 +852,7 @@ sync_name_ack(3105) [REPLY]
 Acknowledge a sync name operation, providing the information to indicate which sync operation was successful.
 
 Payload:
-  integer - key hash
+  long - key hash
 
 -----------------------------------------------------------------------
 sync_name_fail(3106) [REPLY]
@@ -867,7 +861,7 @@ A sync operation failed.  This could be for any number of reasons.  Such as the 
 offline, or the buckets have been split and this bucket no longer is valid.
 
 Payload:
-  integer - key hash
+  long - key hash
 
 
 

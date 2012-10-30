@@ -54,6 +54,7 @@ void client_init_commands(int max);
 // functions that are used to pull data out of the communication channel.  Since both 'commands' and 
 // 'process' needs to use this, we will put them in 'client' because they are both subsets of the client operation.
 int data_int(char **data);
+long long data_long(char **data);
 char * data_string_copy(char **data);
 char * data_string(char **data, int *length);
 

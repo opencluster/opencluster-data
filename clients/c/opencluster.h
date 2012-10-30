@@ -45,7 +45,7 @@ typedef struct {
 	int server_count;
 	void **servers;
 
-	unsigned int mask;
+	unsigned long long mask;
 	void **hashmasks;
 	
 	void *payload;

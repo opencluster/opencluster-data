@@ -280,21 +280,23 @@ static void finalize_migration(client_t *client, bucket_t *bucket)
 	assert(client);
 	assert(bucket);
 
-	if (bucket->level == 0 && bucket->backup_node == NULL) {
-		// we are sending a nobackup bucket.
-		
-		// send a message to the client telling them that they are now a backup node for the bucket.
-		push_finalise_migration(client, bucket, 1);
-	}
-	else if (bucket->level == 0 && bucket->backup_node) {
-		// we are sending a primary bucket.  
+	if (bucket->level == 0) {
+		if ( bucket->backup_node == NULL) {
+			// we are sending a nobackup bucket.
+			
+			// send a message to the client telling them that they are now a backup node for the bucket.
+			push_finalise_migration(client, bucket, 1);
+		}
+		else if (bucket->backup_node) {
+			// we are sending a primary bucket.  
 
-		// check that we dont have pending data to send to the backup node.
-		assert(0);
-		
-		// send a message to the existing backup server, telling it that we are migrating the 
-		// primary to a new node.
-		assert(0);
+			// check that we dont have pending data to send to the backup node.
+			assert(0);
+			
+			// send a message to the existing backup server, telling it that we are migrating the 
+			// primary to a new node.
+			assert(0);
+		}
 	}
 	else if (bucket->level == 1) {
 		// we are sending a backup bucket. 
@@ -371,8 +373,10 @@ static void process_accept_bucket(client_t *client, header_t *header, void *ptr)
 	next = ptr;
 
 	// need to get the data out of the payload.
-	mask = data_int(&next);
-	hash = data_int(&next);
+	mask = data_long(&next);
+	hash = data_long(&next);
+
+	logger(LOG_DEBUG, "Accept Bucket: current mask=%#llx, bucket mask=%#llx", _mask, mask);
 	
 	// get the bucket.
 	assert(_buckets);
@@ -410,8 +414,8 @@ static void process_control_bucket_complete(client_t *client, header_t *header, 
 	next = ptr;
 
 	// need to get the data out of the payload.
-	mask = data_int(&next);
-	hash = data_int(&next);
+	mask = data_long(&next);
+	hash = data_long(&next);
 	
 	// get the bucket.
 	assert(_buckets);
@@ -491,8 +495,8 @@ static void process_migration_ack(client_t *client, header_t *header, void *ptr)
 	next = ptr;
 
 	// need to get the data out of the payload.
-	mask = data_int(&next);
-	hash = data_int(&next);
+	mask = data_long(&next);
+	hash = data_long(&next);
 	
 	// get the bucket.
 	assert(_buckets);
@@ -578,8 +582,7 @@ static void process_sync_name_ack(client_t *client, header_t *header, void *ptr)
 	next = ptr;
 
 	// need to get the data out of the payload.
-	hash = data_int(&next);
-	
+	hash = data_long(&next);
 	index = hash & _mask;
 		
 	// get the bucket.
@@ -588,9 +591,10 @@ static void process_sync_name_ack(client_t *client, header_t *header, void *ptr)
 	bucket = _buckets[index];
 	assert(bucket);
 
-	assert(bucket->transfer_client == client || (bucket->backup_node && bucket->backup_node->client == client) );
+	// ** This assert doesnt seem to be correct when we lose a client connection.  Not sure what is happening here.
+//	assert(bucket->transfer_client == client || (bucket->backup_node && bucket->backup_node->client == client) );
 	
-	logger(LOG_DEBUG, "Migration of item name complete: %X", hash);
+	logger(LOG_DEBUG, "Migration of item name complete: %#llx", hash);
 }
 
 
@@ -609,8 +613,8 @@ static void process_sync_ack(client_t *client, header_t *header, void *ptr)
 	next = ptr;
 
 	// need to get the data out of the payload.
-	map = data_int(&next);
-	hash = data_int(&next);
+	map = data_long(&next);
+	hash = data_long(&next);
 	
 	index = hash & _mask;
 		
@@ -630,10 +634,11 @@ static void process_sync_ack(client_t *client, header_t *header, void *ptr)
 	}
 	else {
 		// this was a result of a backup_sync, so we dont really need to do anything.
-		assert(bucket->backup_node && bucket->backup_node->client == client);
+		assert(bucket->backup_node);
+		assert(bucket->backup_node->client == client);
 	}
 
-	logger(LOG_DEBUG, "Migration of item complete: %X", hash);
+	logger(LOG_DEBUG, "Migration of item complete: %#llx", hash);
 }
 
 

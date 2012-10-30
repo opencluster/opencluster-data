@@ -13,6 +13,7 @@ void payload_clear(void);
 void * payload_ptr(void);
 
 void payload_int(int value);
+void payload_long(long long value);
 void payload_string(const char *str);
 void payload_data(int length, void *data);
 

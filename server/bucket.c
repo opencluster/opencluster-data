@@ -17,7 +17,7 @@
 #include <string.h>
 
 // the mask is used to determine which bucket a hash belongs to.
-unsigned int _mask = 0;
+hash_t _mask = 0;
 
 
 // the list of buckets that this server is handling.  '_mask' indicates how many entries in the 
@@ -61,7 +61,7 @@ int _migrate_sync = 0;
 
 
 // get a value from whichever bucket is resposible.
-value_t * buckets_get_value(int map_hash, int key_hash) 
+value_t * buckets_get_value(hash_t map_hash, hash_t key_hash) 
 {
 	int bucket_index;
 	bucket_t *bucket;
@@ -99,7 +99,7 @@ value_t * buckets_get_value(int map_hash, int key_hash)
 // store the value in whatever bucket is resposible for the key_hash.
 // NOTE: value is controlled by the tree after this function call.
 // NOTE: name is controlled by the tree after this function call.
-int buckets_store_value(int map_hash, int key_hash, char *name, int name_int, int expires, value_t *value) 
+int buckets_store_value(hash_t map_hash, hash_t key_hash, char *name, long long name_int, int expires, value_t *value) 
 {
 	int bucket_index;
 	bucket_t *bucket;
@@ -111,14 +111,18 @@ int buckets_store_value(int map_hash, int key_hash, char *name, int name_int, in
 	assert(bucket_index <= _mask);
 	bucket = _buckets[bucket_index];
 
-	// if we have a record for this bucket, then we are (potentially) either a primary or a backup for it.
+	// if we have a record for this bucket, then we are (potentially) either a primary or a backup 
+	// for it.
 	if (bucket) {
 		assert(bucket->hash == bucket_index);
 		if (bucket->backup_node) {
+			// since we have a backup_node specified, then we must be the primary.
 			backup_client = bucket->backup_node->client;
 			assert(backup_client);
 		}
 		else {
+			// since we dont have a backup_node specified, then we are the backup and dont need to 
+			// send the data anywhere else.
 			backup_client = NULL;
 		}
 		
@@ -200,7 +204,7 @@ static void bucket_close(bucket_t *bucket)
 // NOTE: We may be starting off with an empty hashmasks lists.  If this is the first time we've 
 //       received some hashmasks.  To implement this easily, if we dont already have hashmasks, we 
 //       may need to create one that has a dummy entry in it.
-void buckets_split_mask(int mask) 
+void buckets_split_mask(hash_t mask) 
 {
 	hashmask_t **newlist = NULL;
 	hashmask_t **oldlist = NULL;
@@ -213,7 +217,7 @@ void buckets_split_mask(int mask)
 	
 	assert(mask > _mask);
 	
-	logger(LOG_INFO, "Splitting bucket list: oldmask=%08X, newmask=%08X", _mask, mask);
+	logger(LOG_INFO, "Splitting bucket list: oldmask=%#llx, newmask=%#llx", _mask, mask);
 	
 	// first grab a copy of the existing hashmasks as the 'oldlist'
 	oldlist = _hashmasks;
@@ -385,7 +389,8 @@ static void bucket_shutdown_handler(evutil_socket_t fd, short what, void *arg)
 			
 			// If the backup node is connected, then we will tell that node, that it has been 
 			// promoted to be primary for the bucket.
-			if (bucket->backup_node && bucket->backup_node->client) {
+			if (bucket->backup_node) {
+				assert(bucket->backup_node->client);
 				push_promote(bucket->backup_node->client, bucket->hash);
 
 				assert(bucket->promoting == NOT_PROMOTING);
@@ -439,7 +444,7 @@ void bucket_shutdown(bucket_t *bucket)
 	assert(bucket);
 	
 	if (bucket->shutdown_event == NULL) {
-		printf("Bucket shutdown initiated: %04X\n", bucket->hash);
+		printf("Bucket shutdown initiated: %#llx\n", bucket->hash);
 
 		assert(_evbase);
 		bucket->shutdown_event = evtimer_new(_evbase, bucket_shutdown_handler, bucket);
@@ -495,16 +500,15 @@ void buckets_init(void)
 
 // we've been given a 'name' for a hash-key item, and so we lookup the bucket that is responsible 
 // for that item.  the 'data' module will then find the data store within that handles that item.
-int buckets_store_name(hash_t key_hash, char *name, int int_key)
+int buckets_store_name_str(hash_t key_hash, char *name)
 {
-	int bucket_index;
+	hash_t bucket_index;
 	bucket_t *bucket;
 
-	assert((name == NULL) || (name && int_key == 0));
+	assert(name);
 
 	// calculate the bucket that this item belongs in.
 	bucket_index = _mask & key_hash;
-	assert(bucket_index >= 0);
 	assert(bucket_index <= _mask);
 	bucket = _buckets[bucket_index];
 
@@ -514,7 +518,7 @@ int buckets_store_name(hash_t key_hash, char *name, int int_key)
 		
 		// make sure that this server is 'primary' or 'secondary' for this bucket.
 		assert(bucket->data);
-		data_set_name(key_hash, bucket->data, name, int_key);
+		data_set_name_str(key_hash, bucket->data, name);
 		return(0);
 	}
 	else {
@@ -522,6 +526,35 @@ int buckets_store_name(hash_t key_hash, char *name, int int_key)
 		return(-1);
 	}
 }
+
+
+// we've been given a 'name' for a hash-key item, and so we lookup the bucket that is responsible 
+// for that item.  the 'data' module will then find the data store within that handles that item.
+int buckets_store_name_int(hash_t key_hash, long long int_key)
+{
+	hash_t bucket_index;
+	bucket_t *bucket;
+
+	// calculate the bucket that this item belongs in.
+	bucket_index = _mask & key_hash;
+	assert(bucket_index <= _mask);
+	bucket = _buckets[bucket_index];
+
+	// if we have a record for this bucket, then we are either a primary or a backup for it.
+	if (bucket) {
+		assert(bucket->hash == bucket_index);
+		
+		// make sure that this server is 'primary' or 'secondary' for this bucket.
+		assert(bucket->data);
+		data_set_name_int(key_hash, bucket->data, int_key);
+		return(0);
+	}
+	else {
+		// we dont have the bucket, we need to let the other node know that something has gone wrong.
+		return(-1);
+	}
+}
+
 
 
 
@@ -564,7 +597,7 @@ static void bucket_dump(bucket_t *bucket)
 	assert(mode);
 	assert(altmode);
 	assert(altnode);
-	stat_dumpstr("    Bucket:0x%08X, Mode:%s, %s Node:%s", bucket->hash, mode, altmode, altnode);
+	stat_dumpstr("    Bucket:%#llx, Mode:%s, %s Node:%s", bucket->hash, mode, altmode, altnode);
 	
 	assert(bucket->data);
 //	data_dump(bucket->data);
@@ -584,7 +617,7 @@ void buckets_dump(void)
 	int i;
 	
 	stat_dumpstr("BUCKETS");
-	stat_dumpstr("  Mask: 0x%08X", _mask);
+	stat_dumpstr("  Mask: %#llx", _mask);
 	stat_dumpstr("  Buckets without backups: %d", _nobackup_buckets);
 	stat_dumpstr("  Primary Buckets: %d", _primary_buckets);
 	stat_dumpstr("  Secondary Buckets: %d", _secondary_buckets);
@@ -604,7 +637,7 @@ void buckets_dump(void)
 
 void hashmasks_dump(void)
 {
-	int i;
+	hash_t i;
 
 // the list of hashmasks is to know which servers are responsible for which buckets.
 // this list of hashmasks will also replace the need to 'settle'.  Instead, a timed event will 
@@ -617,7 +650,7 @@ void hashmasks_dump(void)
 	for (i=0; i<=_mask; i++) {
 		assert(_hashmasks[i]);
 
-		stat_dumpstr("  Hashmask:0x%08X, Primary:'%s', Secondary:'%s'", i, 
+		stat_dumpstr("  Hashmask:%#llx, Primary:'%s', Secondary:'%s'", i, 
 					 _hashmasks[i]->primary ? _hashmasks[i]->primary : "",
 					 _hashmasks[i]->secondary ? _hashmasks[i]->secondary : "");
 	}
