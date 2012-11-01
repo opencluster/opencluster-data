@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <sys/time.h>
 #include <glib.h>
+#include <unistd.h>
 
 
 #define GET_LIMIT 40000

@@ -315,6 +315,7 @@ static void cmd_set_int(client_t *client, header_t *header, char *payload)
 	assert(payload);
 
 	// create a new value.
+	// ** PERF: get the 'value' objects from a pool to improve performance.
 	value = calloc(1, sizeof(value_t));
 	assert(value);
 	
