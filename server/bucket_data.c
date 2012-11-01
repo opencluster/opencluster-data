@@ -391,6 +391,8 @@ void data_set_value(
 			
 			assert(item->value);
 			value_move(item->value, value);
+			
+			// ** PERF: value objects should be put back in a pool to avoid having to alloc/free all the time.
 			free(value);
 			value = NULL;
 			
@@ -407,10 +409,10 @@ void data_set_value(
 	assert(list);
 
 	if (item == NULL) {
+		// item was not found, so create a new one.
 
 		logger(LOG_DEBUG, "data_set_value: item [%#llx/%#llx] NOT found, creating a new one.", map_hash, key_hash);
 		
-		// item was not found, so create a new one.
 		item = calloc(1, sizeof(item_t));
 		assert(item);
 
@@ -422,9 +424,14 @@ void data_set_value(
 		
 		g_tree_insert(list->mapstree, &item->map_key, item);
 		
-		if (backup_client) {
-			push_sync_item(backup_client, item);
-		}
+	}
+	
+	// by this point, we should have either found an existing item that matches, or created a new one.
+	assert(item);
+
+	// if we have a backup node connected, we need to send the item details to it.
+	if (backup_client) {
+		push_sync_item(backup_client, item);
 	}
 
 	assert(name == NULL);
@@ -450,27 +457,18 @@ gboolean migrate_map_fn(gpointer p_key, gpointer p_value, void *p_data)
 	assert(data->items_count < data->limit);
 	assert(data->items_count >= 0);
 	
-// 	if (_verbose > 4) 
-// 		printf("migrate: map found, %#llx\n", *key);
-		
 	item = p_value;
 	assert(_migrate_sync > 0);
 	assert(item->migrate <= _migrate_sync);
 	if (item->migrate < _migrate_sync) {
-		
 		logger(LOG_DEBUG, "migrate: map %#llx ready to migrate.  Sending now.", *key);
-		
 		push_sync_item(data->client, item);
 		_in_transit ++;
 		assert(_in_transit <= TRANSIT_MAX);
-		
 		data->items_count ++;
 		assert(data->items_count <= data->limit);
-		
 		item->migrate = _migrate_sync;
-		
 		logger(LOG_DEBUG, "migrate: items in list: %d", data->items_count);
-		
 	}
 	
 	if (data->items_count < data->limit) {
@@ -514,12 +512,8 @@ gboolean migrate_hash_fn(gpointer p_key, gpointer p_value, void *p_data)
 		
 		// if we havent supplied the 'name' of this hash to the receiving server, then we need to send it.
 		if (map->migrate_name < _migrate_sync) {
-			if (map->name) {
-				push_sync_name_str(data->client, map->item_key, map->name);
-			}
-			else {
-				push_sync_name_int(data->client, map->item_key, map->int_key);
-			}
+			if (map->name) { push_sync_name_str(data->client, map->item_key, map->name); }
+			else { push_sync_name_int(data->client, map->item_key, map->int_key); }
 			map->migrate_name = _migrate_sync;
 		}
 		
