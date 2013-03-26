@@ -406,7 +406,7 @@ static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 	assert(name);
 
 	
-	// we have a server name.  We need to check it against out node list.  If it is there, then we 
+	// we have a server name.  We need to check it against our node list.  If it is there, then we 
 	// dont do anything.  If it is not there, then we need to add it.
 	node = node_find(name);
 	if (node == NULL) {
@@ -419,9 +419,9 @@ static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 		// need to send to the node, the list of hashmasks.
 		push_hashmasks(client);
 		
-		// this is a new server we didn't know about, so we need to send this info to our connected clients as well.
+		// this is a new server we didn't know about, so we need to send this info to our connected 
+		// clients as well.
 		push_all_newserver(name, client);
-		
 		
 		logger(LOG_INFO, "Adding '%s' as a New Node.", name);
 	}
@@ -445,7 +445,8 @@ static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 					assert(node->client->handle > 0);
 					assert(node->wait_event == NULL);
 					
-					// this client is in the middle of connecting, and we've received a connection at the same time.
+					// this client is in the middle of connecting, and we've received a connection 
+					// at the same time.
 					assert(0);
 				}
 				else {

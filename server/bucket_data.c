@@ -670,7 +670,8 @@ void data_set_name_int(hash_t key_hash, bucket_data_t *data, long long name_int)
 
 
 
-// not really much we need to do about this, because we marked the data beforehand, but for debug purposes, we will check it out.
+// not really much we need to do about this, because we marked the data beforehand, but for debug 
+// purposes, we will check it out.
 void data_migrated(bucket_data_t *data, hash_t map_hash, hash_t key_hash)
 {
 #ifndef NDEBUG

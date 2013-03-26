@@ -1,3 +1,40 @@
 High performance clustering platform.
 
 
+branches.txt
+	This file is used to show the current work in progress and the planned branches.
+	Normally you dont include this information in a repository, but it was found to
+	be usefull.
+
+clients
+	The various client libraries used to access the cluster.   Includes C and Java 
+	implementations
+
+docs
+	Documentation, for either developing opencluster itself, or using it.
+
+gamut
+	Tool that is used to test all the functionality of a cluster.
+
+misc
+	Miscellaneous.
+
+README
+	this file
+
+server
+	The server code.  Written in C.
+
+utils
+	Various command line tools that can be used to control or manipulate the cluster.
+
+
+
+clients-java.iml
+docs.iml
+misc.iml
+opencluster.ipr
+server.iml
+	Misc files created by whatever tool Brian uses for Java development.
+
+

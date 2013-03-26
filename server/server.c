@@ -20,6 +20,7 @@ int _conncount = 0;
 // list of listening sockets (servers). 
 server_t *_server = NULL;
 
+// default interface.
 const char *_interface = "127.0.0.1:13600";
 
 int _maxconns = 1024;

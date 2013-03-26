@@ -61,7 +61,7 @@ static int attempt_switch(client_t *client)
 					// yes it is, we can promote this bucket.
 					bucket = _buckets[i];
 					
-					logger(LOG_INFO, "Attempting to promote bucket #%X on '%s'",
+					logger(LOG_INFO, "Attempting to promote bucket #%#llx on '%s'",
 					   bucket->hash, ((node_t*)client->node)->name); 
 
 					assert(bucket->transfer_client == NULL);
@@ -96,7 +96,7 @@ static bucket_t * find_nobackup_bucket(void)
 				if (_buckets[i]->backup_node == NULL) {
 					bucket = _buckets[i];
 
-					logger(LOG_INFO, "Attempting to migrate bucket #%X that has no backup copy.", bucket->hash); 
+					logger(LOG_INFO, "Attempting to migrate bucket #%#llx that has no backup copy.", bucket->hash); 
 					
 					
 					assert(bucket->hash == i);
@@ -183,6 +183,7 @@ static void process_loadlevels(client_t *client, header_t *header, void *ptr)
 	
 	assert(client->node);
 	
+	// point to the begining of the payload data.
 	next = ptr;
 
 	// need to get the data out of the payload.
@@ -254,7 +255,7 @@ static void process_loadlevels(client_t *client, header_t *header, void *ptr)
 			assert(bucket->hash >= 0);
 			assert(client->node);
 			assert(((node_t*)client->node)->name);
-			logger(LOG_DEBUG, "Migrating bucket #%X to '%s'", bucket->hash, ((node_t*)client->node)->name); 
+			logger(LOG_DEBUG, "Migrating bucket #%#llx to '%s'", bucket->hash, ((node_t*)client->node)->name); 
 	
 			assert(_bucket_transfer == 0);
 			_bucket_transfer = 1;
@@ -428,7 +429,7 @@ static void process_control_bucket_complete(client_t *client, header_t *header, 
 	assert(bucket->transfer_client == client);
 	bucket->transfer_client = NULL;
 	
-	logger(LOG_INFO, "Bucket switching complete: %X", hash);
+	logger(LOG_INFO, "Bucket switching complete: %#llx", hash);
 
 	// do we need to let other nodes that the transfer is complete?
 
@@ -492,9 +493,8 @@ static void process_migration_ack(client_t *client, header_t *header, void *ptr)
 	assert(client && header && ptr);
 	assert(client->node);
 	
-	next = ptr;
-
 	// need to get the data out of the payload.
+	next = ptr;		// the 'next' pointer gets moved to the next param each time.
 	mask = data_long(&next);
 	hash = data_long(&next);
 	
@@ -508,14 +508,13 @@ static void process_migration_ack(client_t *client, header_t *header, void *ptr)
 	assert(bucket->transfer_client == client);
 	bucket->transfer_client = NULL;
 	
-	logger(LOG_INFO, "Bucket migration complete: %X", hash);
+	logger(LOG_INFO, "Bucket migration complete: %#llx", hash);
 
 	// do we need to let other nodes that the transfer is complete?
 
 
 	// if we transferred a backup node, or we transferred a primary that already has a backup node, 
 	// then we dont need this copy of the bucket anymore, so we can delete it.
-
 	if (bucket->level == 0 && bucket->backup_node == NULL) {
 		assert(client->node);
 		bucket->backup_node = client->node;
@@ -592,7 +591,7 @@ static void process_sync_name_ack(client_t *client, header_t *header, void *ptr)
 	assert(bucket);
 
 	// ** This assert doesnt seem to be correct when we lose a client connection.  Not sure what is happening here.
-//	assert(bucket->transfer_client == client || (bucket->backup_node && bucket->backup_node->client == client) );
+	assert(bucket->transfer_client == client || (bucket->backup_node && bucket->backup_node->client == client) );
 	
 	logger(LOG_DEBUG, "Migration of item name complete: %#llx", hash);
 }
@@ -643,11 +642,9 @@ static void process_sync_ack(client_t *client, header_t *header, void *ptr)
 
 
 
+// Add the reply processor callbacks to the client list.
 void process_init(void) 
 {
-	
-	// add the reply processor callbacks to the client list.
-	
 	client_add_cmd(REPLY_ACK, process_ack);
 	client_add_cmd(REPLY_SYNC_NAME_ACK, process_sync_name_ack);
 	client_add_cmd(REPLY_SYNC_ACK, process_sync_ack);
@@ -656,5 +653,8 @@ void process_init(void)
 	client_add_cmd(REPLY_CONTROL_BUCKET_COMPLETE, process_control_bucket_complete);
 	client_add_cmd(REPLY_MIGRATION_ACK, process_migration_ack);
 	client_add_cmd(REPLY_UNKNOWN, process_unknown);
-
 }
+
+
+
+
