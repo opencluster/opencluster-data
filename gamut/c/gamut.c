@@ -80,7 +80,7 @@ int main(int argc, char **argv)
 		}
 		g_timer_stop(timer);
 		sec = g_timer_elapsed(timer, &msec);
-		printf("Timing of 6000 sets. %lf\n", sec);
+		printf("Timing of 6000 sets. %lf\nSets per second: %0.2lf\n", sec, 6000 / sec);
 		
  		sleep(1);
 		
