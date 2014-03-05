@@ -1,11 +1,13 @@
 This file provides some information about active branches in the repository.
 
 
+client-maps
+	The client library does not handle maps because it was originally written 
+	before maps were designed into the protocol.   
 
-node-sync
-	There is currently an issue with sync'ing to a backup node. Keeping 
-	track of backup nodes seems to be broken.  Need to make sure that 
-	multiple nodes can communicate well in the cluster.
+client-connectivity
+	The client library does not handle multiple servers correctly.   It also 
+	does not handle recovery of a server connection.
 
 node-start
 	When a node (server) is started but not given the address of another 
@@ -23,7 +25,8 @@ hash-check
 	compare that its algorithm is working the same as the server.  Even 
 	though the server does not actually need to generate hashes at all. It 
 	will be a way to make sure that different clients and languages generate 
-	the hashes consistantly.
+	the hashes consistantly.  The client should do this automatically as part 
+	of the connection process.
 
 shutdown
 	The system is not currently shutting down properly, because it is not 
