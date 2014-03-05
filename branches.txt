@@ -1,63 +1,85 @@
 This file provides some information about active branches in the repository.
 
 
+
 node-sync
-	There is currently an issue with sync'ing to a backup node.  Keeping track of backup nodes
-	seems to be broken.  Need to make sure that multiple nodes can communicate well in the
-	cluster.
+	There is currently an issue with sync'ing to a backup node. Keeping 
+	track of backup nodes seems to be broken.  Need to make sure that 
+	multiple nodes can communicate well in the cluster.
+
+node-start
+	When a node (server) is started but not given the address of another 
+	node to connect to, then it can assume that it is the first node in the 
+	cluster, and can begin creating the cluster straight away.   This is how 
+	admins can initiate the cluster. Start a single node without any node 
+	connection details, wait a few seconds, and then start up the other 
+	nodes.   If a node is given connection details, it will not start up a 
+	cluster unless given an option to specifically do so.  This makes the 
+	startup process a lot more predictable.
 
 hash-check
-	Add to the protocol so that a client can locally hash a string, and also send that string to 
-	the server and receive a hash back so that it can compare that its algorithm is working the 
-	same as the server.  Even though the server does not actually need to generate hashes at all.  
-	It will be a way to make sure that different clients and languages generate the hashes 
-	consistantly.
+	Add to the protocol so that a client can locally hash a string, and also 
+	send that string to the server and receive a hash back so that it can 
+	compare that its algorithm is working the same as the server.  Even 
+	though the server does not actually need to generate hashes at all. It 
+	will be a way to make sure that different clients and languages generate 
+	the hashes consistantly.
 
 shutdown
-	The system is not currently shutting down properly, because it is not releasing the buckets 
-	correctly.  Goal for this branch is to have a completely orderly shutdown when only one node 
-	has been started and then stopped.  With and without data being pumped into it.
+	The system is not currently shutting down properly, because it is not 
+	releasing the buckets correctly.  Goal for this branch is to have a 
+	completely orderly shutdown when only one node has been started and then 
+	stopped.  With and without data being pumped into it.
 
 shutdown-migrate
 	When a node is being shutdown, it needs to send the buckets to another node.
 
-	Create a tool that will connect to the cluster as a client, set a certain number of entries in 
-	the cluster, and then continuously read those values back from the cluster to make sure that it 
-	will always get back the data it expected.   When that tool has started, start cycling the 
-	cluster nodes randomly to ensure that no matter what, the data is always consistant.   Let it 
-	run for hours.
+	Create a tool that will connect to the cluster as a client, set a 
+	certain number of entries in the cluster, and then continuously read 
+	those values back from the cluster to make sure that it will always get 
+	back the data it expected.   When that tool has started, start cycling 
+	the cluster nodes randomly to ensure that no matter what, the data is 
+	always consistant. Let it run for hours.
 
 goodbye
-	When a client or node sends the 'goodbye' command, the server needs to send a reply and close 
-	the connection properly.  Current tests are showing the client is still staying connected and 
-	the goodbye command is not being processed properly because it keeps getting logged, but the 
+	When a client or node sends the 'goodbye' command, the server needs to 
+	send a reply and close the connection properly. Current tests are 
+	showing the client is still staying connected and the goodbye command is 
+	not being processed properly because it keeps getting logged, but the 
 	client doesn't disconnect.
 
 data-logging
-	A special node can connect to the cluster that logs all the updates that occur.  It logs the 
-	output to a series of files.  It can also be used to re-inject that logged data into a cluster.
+	A special node can connect to the cluster that logs all the updates that 
+	occur.  It logs the output to a series of files. It can also be used to 
+	re-inject that logged data into a cluster.
 
 savefile
-	when a node is shutting down, it will normally attempt to send the buckets it has to another
-	node in the cluster.  If there are no other nodes, the data should instead be saved to a file, 
-	that can then be used to inject the data back in when the cluster is restarted.   The file-save 
-	option would be present from start, but it will only write to the file if it is the last one in 
-	the cluster.   The daemon can inject the data into the cluster on startup.
+	when a node is shutting down, it will normally attempt to send the 
+	buckets it has to another node in the cluster.  If there are no other 
+	nodes, the data should instead be saved to a file, that can then be used 
+	to inject the data back in when the cluster is restarted.   The 
+	file-save option would be present from start, but it will only write to 
+	the file if it is the last one in the cluster.   The daemon can inject 
+	the data into the cluster on startup.
 
 client-maps
-	The C client does not handle maps properly (or at all), so it needs to be able to use maps.
+	The C client does not handle maps properly (or at all), so it needs to 
+	be able to use maps.
 
 client-disconnect
-	The C client is not handling things if it loses the connection to the server.  Now that we have 
-	implemented the GOODBYE command, we lose connection to the server when the server closes it.   
-	The client needs to be able to mark it as failed, and re-connect when needed.
+	The C client is not handling things if it loses the connection to the 
+	server.  Now that we have implemented the GOODBYE command, we lose 
+	connection to the server when the server closes it. The client needs to 
+	be able to mark it as failed, and re-connect when needed.
 
 Reconnecting Nodes
-	If a node is known, but it connects, the server is failing because it is adding the node name to 
-	the list again.  This is incorrect.  It needs to look at the list to see if the node is already 
-	in there.  If it is, it doesnt need to be added again.
+	If a node is known, but it connects, the server is failing because it is 
+	adding the node name to the list again.  This is incorrect.  It needs to 
+	look at the list to see if the node is already in there.  If it is, it 
+	doesnt need to be added again.
 
 client-timeout
-	When performing options, the client should be able to be set with a general timeout... then, if 
-	connecting takes longer than that time, then it stops connecting and the function returns.  We 
-	should probably set different timeouts, like a connect timeout and a wait_for_data timeout.
+	When performing options, the client should be able to be set with a 
+	general timeout... then, if connecting takes longer than that time, then 
+	it stops connecting and the function returns.  We should probably set 
+	different timeouts, like a connect timeout and a wait_for_data timeout.

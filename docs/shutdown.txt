@@ -2,7 +2,8 @@ When shutting down a node, it needs to go through its buckets and make sure they
 
 For each bucket, 
 
-	if the bucket is primary, then it needs to tell the secondary that it needs to become primary.  The bucket will then become a 
+	if the bucket is primary, then it needs to tell the secondary 
+	that it needs to become primary. The bucket will then become a 
 	secondary.
 
 	if the bucket is a secondary, then it needs to drop it, and tell the primary that it has dropped it.
@@ -13,6 +14,9 @@ For each bucket,
 
 
 
-NOTE: We could add a command line option that says "if we are the last node in the cluster, holding all the buckets, then we do not 
-	  shutdown".    This will try to ensure that the data is not lost.  THe other option is to actually save all the bucket data to disk if it is the last one in the cluster.
+NOTE: We could add a command line option that says "if we are the 
+	  last node in the cluster, holding all the buckets, then we do 
+	  not shutdown".    This will try to ensure that the data is not 
+	  lost.  The other option is to actually save all the bucket 
+	  data to disk if it is the last one in the cluster.
 

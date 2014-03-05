@@ -459,3 +459,11 @@ void nodes_dump(void)
 }
 
 
+char * node_getname(node_t *node)
+{
+	assert(node);
+	assert(node->name);
+	return(node->name);
+}
+
+

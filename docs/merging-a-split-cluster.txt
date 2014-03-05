@@ -1,26 +1,39 @@
 One tricky thing to handle, is merging a split cluster.
-Poeple will often create a cluster that spans multiple data centers. 
-If parts of the cluster gets cut off from the rest, but still running, then both parts recover and resume, assuming it is the main part 
-of the cluster.
 
-When the connections between data centers resume, then it can become tricky to ensure they join together cleanly.
+People will often create a cluster that spans multiple data centers. 
+If parts of the cluster gets cut off from the rest, but still 
+running, then both parts recover and resume, assuming it is the main 
+part of the cluster.
 
-This situation should be avoided at all costs, but needs to be handled anyway.
+When the connections between data centers resume, then it can become 
+tricky to ensure they join together cleanly.
 
-This situation can also occur when the cluster is shutdown, and the first two members of the cluster are started up at the same time.
-They each begin a new cluster, and then when they find each other, must merge the two clusters together.
+This situation should be avoided at all costs, but needs to be 
+handled anyway.
 
-When a server (say, Node1) starts up, it creates its initial buckets (hashmasks).  Then when Node2 connects, which has also created its 
+This situation can also occur when the cluster is shutdown, and the 
+first two members of the cluster are started up at the same time. 
+They each begin a new cluster, and then when they find each other, 
+must merge the two clusters together.
+
+When a server (say, Node1) starts up, it creates its initial buckets 
+(hashmasks).  Then when Node2 connects, which has also created its 
 initial buckets, they must merge their buckets.
 
-This is first noticed, because Node2 gets the hashmasks from Node1, and notices that Node1 is handling a hashmask that Node2 is 
-handling.  Since Node2 noticed this first, Node2 will offer to give up its buckets to Node1.  This is so that the connecting node is 
-the one that gives up its buckets.   Normally the connecting node is one that is just joining the cluster.
+This is first noticed, because Node2 gets the hashmasks from Node1, 
+and notices that Node1 is handling a hashmask that Node2 is 
+handling.  Since Node2 noticed this first, Node2 will offer to give 
+up its buckets to Node1.  This is so that the connecting node is the 
+one that gives up its buckets.   Normally the connecting node is one 
+that is just joining the cluster.
 
 Node2 will begin sending to Node1 all the data it has for that bucket.
 Node2 will remove that bucket from its hashmasks.
 Node2 will inform all its clients that Node1 is now the server for that hashmask.
 
-Is it feasible for all new servers to start up in this mode and then merge buckets?  Or is that a bit stupid?
-Yes, I think that a new server should attempt to connect to the other servers.  If it hasn't connected after... 5 seconds... then it 
-can create its own buckets.   If it then manages to connect, then it would have to merge them.
+Is it feasible for all new servers to start up in this mode and then 
+merge buckets?  Or is that a bit stupid? Yes, I think that a new 
+server should attempt to connect to the other servers.  If it hasn't 
+connected after... 5 seconds... then it can create its own 
+buckets.   If it then manages to connect, then it would have to 
+merge them.

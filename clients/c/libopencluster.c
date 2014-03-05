@@ -27,6 +27,7 @@
 
 
 #define CMD_ACK         1
+#define CMD_ELSEWHERE   4
 #define CMD_HELLO       10
 #define CMD_GOODBYE     20
 #define CMD_SERVER_INFO 100
@@ -116,16 +117,14 @@ typedef struct {
 
 //-----------------------------------------------------------------------------
 // function pre-declaration.
-int server_connect(cluster_t *cluster, server_t *server);
+static int server_connect(cluster_t *cluster, server_t *server);
 
 
 
 
 
 //-----------------------------------------------------------------------------
-// initialise the stash_t structure.  If a NULL is passed in, a new object is 
-// created for you, alternatively, you can pass in a pointer to an object you 
-// want to control.... normally just pass a NULL and let us take care of it.
+// Initialise a cluster object, and return it.
 cluster_t * cluster_init(void)
 {
 	cluster_t *cluster;
@@ -152,6 +151,23 @@ cluster_t * cluster_init(void)
 	
 	return(cluster);
 }
+
+
+void cluster_debug_on(cluster_t *cluster)
+{
+	assert(cluster);
+	assert(cluster->debug >> 1 == 0); // check that it is either a 1 or a zero.
+	cluster->debug = 1;
+}
+
+void cluster_debug_off(cluster_t *cluster) 
+{
+	assert(cluster);
+	assert(cluster->debug >> 1 == 0); // check that it is either a 1 or a zero.
+	cluster->debug = 0;
+}
+
+
 
 
 
@@ -686,7 +702,9 @@ static void split_mask(cluster_t *cluster, mask_t mask)
 	assert(cluster);
 	assert(mask > cluster->mask);
 	
- 	printf("Splitting bucket list: oldmask=%#llx, newmask=%#llx\n", cluster->mask, mask);
+	if (cluster->debug) { 
+		printf("Splitting bucket list: oldmask=%#llx, newmask=%#llx\n", (long long unsigned) cluster->mask, (long long unsigned) mask);
+	}
 	
 	oldlist = (hashmask_t **) cluster->hashmasks;
 	cluster->hashmasks = NULL;
@@ -708,7 +726,7 @@ static void split_mask(cluster_t *cluster, mask_t mask)
 	assert(sizeof(hashmask_t *) > 0);
 	assert((mask+1) > 0);
 	newlist = calloc(mask+1, sizeof(hashmask_t *));
-	printf("** Newlist: %d, %#llx\n", (int) sizeof(hashmask_t *), (mask+1));
+	if (cluster->debug) { printf("** Newlist: %d, %#llx\n", (int) sizeof(hashmask_t *), (long long unsigned) (mask+1)); }
 	assert(newlist != NULL);
 	for (i=0; i<=mask; i++) {
 		
@@ -726,7 +744,9 @@ static void split_mask(cluster_t *cluster, mask_t mask)
 		newlist[i]->server = oldlist[index]->server;
 		newlist[i]->backup = oldlist[index]->backup;
 		
-// 		printf("New Mask: %08X/%08X --> '%s:%d'\n", mask, i, newlist[i]->host, newlist[i]->port);
+		if (cluster->debug) {
+			printf("New Mask: %08X/%08X --> '%s:%d'\n", mask, i, newlist[i]->host, newlist[i]->port);
+		}
 	}
 
 	
@@ -765,7 +785,6 @@ static void process_hashmask(cluster_t *cluster, server_t *server, int userid, i
 	assert(length >= 4);
 
 	next = data;
-	
 	next = data_hash(next, &mask);
 	assert(mask >= 0);
 	
@@ -774,6 +793,7 @@ static void process_hashmask(cluster_t *cluster, server_t *server, int userid, i
 		if (mask > cluster->mask) {
 			// this server is using a mask that is more fine tuned than the mask we've been using.  
 			// Therefore, we need to migrate to the new mask.
+			if (cluster->debug) { printf("OpenCluster: The mask is spliting.  Current mask=%#llx, new mask=%#llx\n", (long long unsigned) cluster->mask, (long long unsigned) mask); }
 			split_mask(cluster, mask);
 		}
 		
@@ -832,7 +852,7 @@ static void process_hashmask(cluster_t *cluster, server_t *server, int userid, i
 
 
 
-// this function will ensure that there is not any pending data on the // incoming socket for the 
+// this function will ensure that there is not any pending data on the incoming socket for the 
 // server.  Since the server details are not exposed outside of the library, this is an internal 
 // function.   Developers will need to call cluster_pending which will process pending data on all 
 // the connected servers.
@@ -860,7 +880,7 @@ static void pending_server(cluster_t *cluster, server_t *server, int blocking)
 	
 	assert(server->in_length == 0);
 
-	// we have two loops because we need to 
+	// Outer loop that keeps looping until there are no messages that we are waiting to receive.
 	done = 0;
 	while (done == 0) {
 	
@@ -868,20 +888,22 @@ static void pending_server(cluster_t *cluster, server_t *server, int blocking)
 		assert(server->in_max > 0);
 		assert(server->in_length >= 0);
 
+		avail = server->in_max - server->in_length;
+		
 		// if we have less than a buffer size available, then we need to expand the size of the buffer.
-		if ((server->in_max - server->in_length) < DEFAULT_BUFFER_SIZE) {
+		if (avail < DEFAULT_BUFFER_SIZE) {
+			assert(DEFAULT_BUFFER_SIZE > 0);
 			server->in_max += DEFAULT_BUFFER_SIZE;
+			assert(server->in_max >= (server->in_length + DEFAULT_BUFFER_SIZE));  // will catch if we roll over.
 			server->in_buffer = realloc(server->in_buffer, server->in_max);
 			assert(server->in_buffer);
+			avail = server->in_max - server->in_length;
 		}
 		
-		
-		avail = server->in_max - server->in_length;
 		assert(avail > 0);
 		assert(offset >= 0);
 		
 // 		printf("recv: max=%d\n", avail);
-
 		
 		sent = recv(server->handle, server->in_buffer + offset + server->in_length, avail, 0);
 		if (sent <= 0) {
@@ -904,13 +926,16 @@ static void pending_server(cluster_t *cluster, server_t *server, int blocking)
 				}
 				else {
 					
+					// Offset is used, because this function will process all the pending messages, 
+					// loading them into a single buffer that increases in size as needed.  The 
+					// messages are not moved around the buffer unnecessarily.   We might need to 
+					// have care that the buffer does not get too large.   
 					void *ptr = server->in_buffer + offset;
 					
 					header = ptr;
 					length = ntohl(header->length);
 					
 					ptr += sizeof(raw_header_t);
-					
 					
 					if (length < 0) {
 						// if we get some obviously wrong data, we need to close the socket.
@@ -1012,6 +1037,8 @@ static int send_request(cluster_t *cluster, server_t *server, message_t *msg, in
 	assert(cluster);
 	assert(server);
 	
+	// ### Todo: It should only re-connect automatically if that option is set.   Sometimes if the connection is lost, it should just return fails.   Also, we may provide a callback function that can be called if the server connection is lost.   In those cases, the behavior at this point should be defined with config that was applied when the cluster client was initiated.
+
 	// if we are not connected to this server, then we need to connect.
 	if (server->handle < 0 ) {
 		if (server_connect(cluster, server) != 0) {
@@ -1049,10 +1076,9 @@ static int send_request(cluster_t *cluster, server_t *server, message_t *msg, in
 // 	printf("sent: %d\n", datasent);
 	
 	if (status == 0) {
-		// we lost connection during the send.  make sure we will return a NULL.
+		// we lost connection during the send.  make sure we will return a NULL.   Or, if a callback was specified, call that.
 		return(-1);
 	}
-	
 	
 	// if we are going to be waiting for the data....
 	if (wait_for_reply == WAIT_FOR_REPLY) {
@@ -1062,10 +1088,8 @@ static int send_request(cluster_t *cluster, server_t *server, message_t *msg, in
 		}
 	}
 	
-	
 	return(0);
 }
-
 
 
 
@@ -1101,6 +1125,7 @@ static message_t * message_new(cluster_t *cluster, short int command)
 
 	if (msg == NULL) {
 		cluster->messages = realloc(cluster->messages, sizeof(message_t *) * (cluster->msg_count + 1));
+		assert(cluster->messages);
 		msg = malloc(sizeof(message_t));
 		assert(msg);
 		cluster->messages[cluster->msg_count] = msg;
@@ -1145,7 +1170,6 @@ static message_t * message_new(cluster_t *cluster, short int command)
 }
 
 
-
 static void message_return(message_t *msg)
 {
 	assert(msg);
@@ -1167,7 +1191,7 @@ static void message_return(message_t *msg)
 
 
 
-int server_connect(cluster_t *cluster, server_t *server)
+static int server_connect(cluster_t *cluster, server_t *server)
 {
 	message_t *msg;
 	int res=-1;
@@ -1199,6 +1223,7 @@ int server_connect(cluster_t *cluster, server_t *server)
 			msg = message_new(cluster, CMD_HELLO);
 			
 			// send the request and receive the reply.
+			assert(msg->in.result == 0);
 			if (send_request(cluster, server, msg, WAIT_FOR_REPLY) != 0) {
 				// some error occured.  SHould handle this some how.
 				assert(0);
@@ -1303,7 +1328,7 @@ int cluster_connect(cluster_t *cluster)
 }
 
 
-void server_disconnect(cluster_t *cluster, server_t *server)
+static void server_disconnect(cluster_t *cluster, server_t *server)
 {
 	long long i;
 	hashmask_t *hashmask;
@@ -1333,6 +1358,7 @@ void server_disconnect(cluster_t *cluster, server_t *server)
 		msg = message_new(cluster, CMD_GOODBYE);
 		assert(msg);
 		
+		assert(msg->in.result == 0);
 		if (send_request(cluster, server, msg, WAIT_FOR_REPLY) != 0) {
 			assert(0);
 			
@@ -1374,7 +1400,7 @@ void cluster_disconnect(cluster_t *cluster)
 
 // FNV hash.  Public domain function converted from public domain Java version.
 // TODO: modify this to a macro to improve performance a little.
-hash_t generate_hash_str(const char *str, const int length)
+static hash_t generate_hash_str(const char *str, const int length)
 {
 	register int i;
 	register hash_t hash = FNV_BASE_LONG;
@@ -1388,7 +1414,7 @@ hash_t generate_hash_str(const char *str, const int length)
 }
 
 
-hash_t generate_hash_int(const int key)
+static hash_t generate_hash_int(const int key)
 {
 	register int i;
 	register hash_t hash = FNV_BASE_LONG;
@@ -1412,7 +1438,7 @@ hash_t generate_hash_int(const int key)
 }
 
 
-hash_t generate_hash_long(const long long key)
+static hash_t generate_hash_long(const long long key)
 {
 	register int i;
 	register hash_t hash = FNV_BASE_LONG;
@@ -1572,6 +1598,7 @@ int cluster_setint(cluster_t *cluster, const char *name, const int value, const 
 	msg_setstr(msg, name);			// string  - name
 	msg_setint(msg, value);			// integer - value (to be stored).
 
+	assert(msg->in.result == 0);
 	send_request(cluster, server, msg, WAIT_FOR_REPLY);
 	
 	// process pending data on server (blocking), until reply is received.
@@ -1633,6 +1660,7 @@ int cluster_setstr(cluster_t *cluster, const char *name, const char *value, cons
 	msg_setstr(msg, name);		// string  - name
 	msg_setstr(msg, value);		// integer - the string being stored.
 
+	assert(msg->in.result == 0);
 	send_request(cluster, server, msg, WAIT_FOR_REPLY);
 	
 	// process pending data on server (blocking), until reply is received.
@@ -1719,6 +1747,7 @@ int cluster_getint(cluster_t *cluster, const char *name, int *value)
 	server_t *server;
 	hashmask_t *hashmask;
 	message_t *msg;
+	int tries = 1;
 	
 	assert(cluster);
 	assert(name);
@@ -1734,41 +1763,71 @@ int cluster_getint(cluster_t *cluster, const char *name, int *value)
 	// get the server object from the index.
 	assert(cluster->hashmasks);
 	hashmask = cluster->hashmasks[mask_index];
-	assert(hashmask);
-	server = hashmask->server;
-	
-	// make sure server is connected.  if not, then connect and wait for the initial handshaking.
-	// TODO: we should make some general timeout, if we dont connect within a certain time, then exit the function.
-	while (server == NULL) {
-		// we are not connected to this server yet.  So we need to connect first.
-		cluster_connect(cluster);
-		server = hashmask->server;
-	}
+
 	
 	// build the message and send it off.
 	msg = message_new(cluster, CMD_GET_INT);
 	assert(msg);
-	msg_setlong(msg, 0); 		// integer - map hash (0 for non-map items)
+	msg_setlong(msg, 0); 			// integer - map hash (0 for non-map items)
 	msg_setlong(msg, name_hash);	// integer - key hash
-
-	send_request(cluster, server, msg, WAIT_FOR_REPLY);
 	
-	// process pending data on server (blocking), until reply is received.
-	while (msg->in.result == 0 && server->handle > 0) {
-		pending_server(cluster, server, OC_NON_BLOCKING);
-	}
+	assert(tries > 0);
+	while (tries > 0) {
+		tries--;
 
-	// now we've got a reply, we free the message, because there is no 
-	if (msg->in.result != CMD_DATA_INT) {
-		// the data was not at this server, so we return a fail result.
-		res = -1;
-	}
-	else {
-		msg_getlong(msg, &map_hash);
-		msg_getlong(msg, &key_hash);
-		msg_getint(msg, value);
-		assert(key_hash == name_hash);
-		assert(res == 0);
+		assert(hashmask);
+		server = hashmask->server;
+		
+		// make sure server is connected.  if not, then connect and wait for the initial handshaking.
+		// TODO: we should make some general timeout, if we dont connect within a certain time, then exit the function.
+		while (server == NULL) {
+			// we are not connected to this server yet.  So we need to connect first.
+			cluster_connect(cluster);
+			server = hashmask->server;
+		}
+		
+
+		assert(msg->in.result == 0);
+		send_request(cluster, server, msg, WAIT_FOR_REPLY);
+		
+		// process pending data on server (blocking), until reply is received.
+		while (msg->in.result == 0 && server->handle > 0) {
+			pending_server(cluster, server, OC_NON_BLOCKING);
+		}
+
+		// now we've got a reply, we free the message, because there is no 
+		if (msg->in.result == CMD_DATA_INT) {
+			msg_getlong(msg, &map_hash);
+			msg_getlong(msg, &key_hash);
+			msg_getint(msg, value);
+			assert(key_hash == name_hash);
+			assert(res == 0);
+		}
+		else {
+			if (msg->in.result == CMD_ELSEWHERE) {
+				
+				char *str;
+				int str_len;
+				msg_getstr(msg, &str, &str_len);
+				
+				
+				// we need to mark the bucket for this item as a different server.
+				// th
+				
+				printf("ELSEWHERE: %s\n", str);
+				
+				assert(tries == 0);
+				tries ++;
+				assert(tries > 0);
+			} else {
+			
+			
+				// the data was not at this server, so we return a fail result.
+				assert(tries == 0);
+				res = -1;
+			}
+		}
+
 	}
 
 	message_return(msg);
@@ -1789,6 +1848,7 @@ int cluster_getstr(cluster_t *cluster, const char *name, char **value, int *leng
 	message_t *msg;
 	char *str;
 	int str_len;
+	int tries = 1;
 	
 	assert(cluster);
 	assert(name);
@@ -1805,51 +1865,79 @@ int cluster_getstr(cluster_t *cluster, const char *name, char **value, int *leng
 	assert(cluster->hashmasks);
 	hashmask = cluster->hashmasks[mask_index];
 	assert(hashmask);
-	server = hashmask->server;
-	
-	// make sure server is connected.  if not, then connect and wait for the initial handshaking.
-	while (server == NULL) {
-		// we are not connected to this server yet.  So we need to connect first.
-		cluster_connect(cluster);
-		server = hashmask->server;
-	}
-	
+
 	// build the message and send it off.
 	msg = message_new(cluster, CMD_GET_STR);
 	assert(msg);
 	msg_setlong(msg, 0); 			// integer - map hash (0 for non-map items)
 	msg_setlong(msg, name_hash);	// integer - key hash
-
-	send_request(cluster, server, msg, WAIT_FOR_REPLY);
 	
-	// process pending data on server (blocking), until reply is received.
-	while (msg->in.result == 0 && server->handle > 0) {
-		pending_server(cluster, server, OC_NON_BLOCKING);
-	}
-
-	// now we've got a reply, we free the message, because there is no 
-	if(msg->in.result != CMD_DATA_STR) {
-		// the data was not here, so we return a false.
-		res = -1;
-		*value = NULL;
-	}
-	else {
-		msg_getlong(msg, &map_hash);
-		msg_getlong(msg, &key_hash);
-		msg_getstr(msg, &str, &str_len);
+	assert(tries > 0);
+	while (tries > 0) {
+		tries --;
+		assert(tries >= 0);
 		
-		assert(str);
-		assert(str_len > 0);
+		server = hashmask->server;
 		
-		*value = str;
-		*length = str_len;
+		// make sure server is connected.  if not, then connect and wait for the initial handshaking.
+		while (server == NULL) {
+			// we are not connected to this server yet.  So we need to connect first.
+			cluster_connect(cluster);
+			server = hashmask->server;
+		}
 
-		printf("=== key_hash=%#llx, name_hash=%#llx\n", key_hash, name_hash);
+		assert(msg->in.result == 0);
+		send_request(cluster, server, msg, WAIT_FOR_REPLY);
 		
-		assert(key_hash == name_hash);
-		assert(res == 0);
+		// process pending data on server (blocking), until reply is received.
+		while (msg->in.result == 0 && server->handle > 0) {
+			pending_server(cluster, server, OC_NON_BLOCKING);
+		}
+
+		// now we've got a reply, we free the message, because there is no 
+		if(msg->in.result != CMD_DATA_STR) {
+			msg_getlong(msg, &map_hash);
+			msg_getlong(msg, &key_hash);
+			msg_getstr(msg, &str, &str_len);
+			
+			assert(str);
+			assert(str_len > 0);
+			
+			*value = str;
+			*length = str_len;
+
+			printf("=== key_hash=%#llx, name_hash=%#llx\n", (long long unsigned) key_hash, (long long unsigned) name_hash);
+			
+			assert(key_hash == name_hash);
+			assert(res == 0);
+		}
+		else {
+			if (msg->in.result == CMD_ELSEWHERE) {
+				
+				char *str;
+				int str_len;
+				msg_getstr(msg, &str, &str_len);
+				
+				
+				// we need to mark the bucket for this item as a different server.
+				// th
+				
+				printf("ELSEWHERE: %s\n", str);
+				
+				assert(tries == 0);
+				tries ++;
+				assert(tries > 0);
+			} else {
+			
+			
+				// the data was not at this server, so we return a fail result.
+				assert(tries == 0);
+				res = -1;
+				*value = NULL;
+			}
+		}
 	}
-
+	
 	message_return(msg);
 	
 	return(res);

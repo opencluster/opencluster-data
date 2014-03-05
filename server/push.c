@@ -354,7 +354,6 @@ void push_sync_item(client_t *client, item_t *item)
 
 
 
-
 void push_sync_name_str(client_t *client, hash_t key, char *name)
 {
 	assert(client);
@@ -382,6 +381,82 @@ void push_sync_name_int(client_t *client, hash_t key, long long int_key)
 	client_send_message(client, NULL, CMD_SYNC_NAME_INT, payload_length(), payload_ptr());
 	payload_clear();
 }
+
+
+
+void push_migrate_item(client_t *client, item_t *item)
+{
+	int cmd = 0;
+	
+	assert(client);
+	assert(client->handle > 0);
+	
+	assert(item);
+	assert(item->value);
+	
+	assert(payload_length() == 0);
+	payload_long(item->map_key);
+	payload_long(item->item_key);
+	
+	if (item->expires == 0) {
+		payload_int(0);
+	}
+	else {
+		payload_int(item->expires - _seconds);
+	}
+	
+	if (item->value->type == VALUE_INT) {
+		cmd = CMD_MIGRATE_INT;
+		payload_long(item->value->data.i);
+		logger(LOG_DEBUG, "sending MIGRATE_INT: (%#llx:%#llx, %ld)", item->map_key, item->item_key, item->value->data.i);
+	}
+	else if (item->value->type == VALUE_STRING) {
+		cmd = CMD_MIGRATE_STRING;
+		payload_data(item->value->data.s.length, item->value->data.s.data);
+		logger(LOG_DEBUG, "sending MIGRATE_STRING: (%#llx:%#llx, '%s')", item->map_key, item->item_key, item->value->data.s.data);
+	}
+	else {
+		assert(0);
+	}
+	
+	assert(cmd > 0);
+	client_send_message(client, NULL, cmd, payload_length(), payload_ptr());
+	payload_clear();
+}
+
+
+
+
+
+
+void push_migrate_name_str(client_t *client, hash_t key, char *name)
+{
+	assert(client);
+	assert(client->handle > 0);
+	assert(name);
+	
+	assert(payload_length() == 0);
+	payload_long(key);
+	payload_string(name);
+	logger(LOG_DEBUG, "sending MIGRATE_NAME: (%#llx:'%s')", key, name);
+	client_send_message(client, NULL, CMD_MIGRATE_NAME, payload_length(), payload_ptr());
+	payload_clear();
+}
+
+
+void push_migrate_name_int(client_t *client, hash_t key, long long int_key)
+{
+	assert(client);
+	assert(client->handle > 0);
+	
+	assert(payload_length() == 0);
+	payload_long(key);
+	payload_long(int_key);
+	logger(LOG_DEBUG, "sending MIGRATE_NAME_INT: (%#llx:%ld)", key, int_key);
+	client_send_message(client, NULL, CMD_MIGRATE_NAME_INT, payload_length(), payload_ptr());
+	payload_clear();
+}
+
 
 
 

@@ -53,6 +53,7 @@ typedef struct {
 	int payload_length;
 	
 	int disconnecting;
+	short debug;
 	
 } cluster_t;
 
@@ -67,6 +68,8 @@ int cluster_servercount(cluster_t *cluster);
 
 void cluster_pending(cluster_t *cluster, int blocking);
 
+void cluster_debug_on(cluster_t *cluster);
+void cluster_debug_off(cluster_t *cluster);
 
 int cluster_setint(cluster_t *cluster, const char *name, const int value, const int expires);
 int cluster_getint(cluster_t *cluster, const char *name, int *value);

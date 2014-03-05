@@ -204,7 +204,7 @@ INC_VALUE=$(H_VALUE)
 
 
 ocd: heading $(OBJS)
-	gcc `pkg-config --libs glib-2.0` -o $(OUTPUT_FILE) $(OBJS) $(LIBS) $(DEBUG_LIBS) $(ARGS)
+	gcc -o $(OUTPUT_FILE) $(OBJS) $(LIBS) $(DEBUG_LIBS) $(ARGS) `pkg-config --libs glib-2.0` 
 
 heading: 
 	@echo "---------------------------------------------------------------------------------"
@@ -213,7 +213,7 @@ bucket.o: bucket.c $(INC_BUCKET)
 	gcc `pkg-config --cflags glib-2.0` -c -o $@ bucket.c $(DEBUG_ARGS) $(ARGS)
 
 bucket_data.o: bucket_data.c $(INC_BUCKET_DATA)
-	gcc `pkg-config --cflags glib-2.0` -c -o $@ bucket_data.c $(DEBUG_ARGS) $(ARGS)
+	gcc `pkg-config --libs glib-2.0` `pkg-config --cflags glib-2.0` -c -o $@ bucket_data.c $(DEBUG_ARGS) $(ARGS)
 
 client.o: client.c $(INC_CLIENT)
 	gcc `pkg-config --cflags glib-2.0` -c -o $@ client.c $(DEBUG_ARGS) $(ARGS)

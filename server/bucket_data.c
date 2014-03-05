@@ -351,7 +351,6 @@ void data_set_value(
 	// first we are going to store the value in the primary 'bucket_data'.  If it exists, we will 
 	// update the value in there.  If it doesn't exist we will add it, and when we've done that, 
 	// then we will go through the rest of the chain to find this same entry, if it exists, then 
-	
 	// search the btree in the bucket for this key.
 	list = find_maplist(key_hash, ddata);
 	if (list == NULL) {
@@ -423,7 +422,6 @@ void data_set_value(
 		item->migrate = 0;
 		
 		g_tree_insert(list->mapstree, &item->map_key, item);
-		
 	}
 	
 	// by this point, we should have either found an existing item that matches, or created a new one.
@@ -441,7 +439,7 @@ void data_set_value(
 
 
 // traverse function for g_tree_foreach search for hashs that have not been migrated.
-gboolean migrate_map_fn(gpointer p_key, gpointer p_value, void *p_data)
+static gboolean migrate_map_fn(gpointer p_key, gpointer p_value, void *p_data)
 {
 	trav_t *data = p_data;
 	hash_t *key = p_key;
@@ -462,7 +460,7 @@ gboolean migrate_map_fn(gpointer p_key, gpointer p_value, void *p_data)
 	assert(item->migrate <= _migrate_sync);
 	if (item->migrate < _migrate_sync) {
 		logger(LOG_DEBUG, "migrate: map %#llx ready to migrate.  Sending now.", *key);
-		push_sync_item(data->client, item);
+		push_migrate_item(data->client, item);
 		_in_transit ++;
 		assert(_in_transit <= TRANSIT_MAX);
 		data->items_count ++;
@@ -484,7 +482,7 @@ gboolean migrate_map_fn(gpointer p_key, gpointer p_value, void *p_data)
 
 
 // traverse function for g_tree_foreach search for hashs that have not been migrated.
-gboolean migrate_hash_fn(gpointer p_key, gpointer p_value, void *p_data)
+static gboolean migrate_hash_fn(gpointer p_key, gpointer p_value, void *p_data)
 {
 	trav_t *data = p_data;
 	hash_t *key = p_key;
@@ -512,8 +510,8 @@ gboolean migrate_hash_fn(gpointer p_key, gpointer p_value, void *p_data)
 		
 		// if we havent supplied the 'name' of this hash to the receiving server, then we need to send it.
 		if (map->migrate_name < _migrate_sync) {
-			if (map->name) { push_sync_name_str(data->client, map->item_key, map->name); }
-			else { push_sync_name_int(data->client, map->item_key, map->int_key); }
+			if (map->name) { push_migrate_name_str(data->client, map->item_key, map->name); }
+			else { push_migrate_name_int(data->client, map->item_key, map->int_key); }
 			map->migrate_name = _migrate_sync;
 		}
 		
@@ -564,7 +562,6 @@ int data_migrate_items(client_t *client, bucket_data_t *data, hash_t hashmask, i
 		.item=NULL,
 		.items_count=0
 	};
-	
 	
 	assert(data);
 	assert(_mask > 0);

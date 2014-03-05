@@ -1,7 +1,7 @@
 OpenCluster shutdown to disk.
 
-There may be a time when the cluster needs to be stopped, but the data needs to be saved and restored when the cluster is started 
-again.
+There may be a time when the cluster needs to be stopped, but the 
+data needs to be saved and restored when the cluster is started again.
 
 There may be many reasons for this stoppage:
 
@@ -13,7 +13,7 @@ In MOST cases, stopping everything and storing to disk would not be needed, beca
 nature of the cluster means that it can move around by doing orderly shutdowns and starts of the 
 node members.  So as long as data can be moved around the network, it should be ok.
 
-Additionally, because of the current way to server works, if you need to update one server in the 
+Additionally, because of the current way the server works, if you need to update one server in the 
 cluster, you can make sure there is enough memory on the other nodes and then just shutdown the 
 other.
 

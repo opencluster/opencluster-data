@@ -65,6 +65,10 @@ static int attempt_switch(client_t *client)
 					   bucket->hash, ((node_t*)client->node)->name); 
 
 					assert(bucket->transfer_client == NULL);
+					assert(client);
+					assert(client->node);
+					assert(((node_t*)client->node)->name);
+					logger(LOG_DEBUG, "Setting transfer client ('%s') to bucket %#llx.", ((node_t*)client->node)->name, bucket->hash);
 					bucket->transfer_client = client;
 					
 					assert(_bucket_transfer == 0);
@@ -251,7 +255,8 @@ static void process_loadlevels(client_t *client, header_t *header, void *ptr)
 			// splitting the buckets)
 			assert(bucket->transfer_client == NULL);
 			bucket->transfer_client = client;
-			
+			assert(client);
+
 			assert(bucket->hash >= 0);
 			assert(client->node);
 			assert(((node_t*)client->node)->name);
@@ -385,6 +390,8 @@ static void process_accept_bucket(client_t *client, header_t *header, void *ptr)
 	bucket = _buckets[hash];
 	assert(bucket);
 
+	assert(bucket->transfer_client == client);
+
 	// increment the migrate_sync counter which will help indicate which items have already been 
 	// sent or not.
 	assert(_migrate_sync >= 0);
@@ -428,6 +435,10 @@ static void process_control_bucket_complete(client_t *client, header_t *header, 
 
 	assert(bucket->transfer_client == client);
 	bucket->transfer_client = NULL;
+	assert(client);
+	assert(client->node);
+	assert(((node_t*)client->node)->name);
+	logger(LOG_DEBUG, "Removing transfer client ('%s') from bucket %#llx.", ((node_t*)client->node)->name, bucket->hash);
 	
 	logger(LOG_INFO, "Bucket switching complete: %#llx", hash);
 
@@ -507,11 +518,15 @@ static void process_migration_ack(client_t *client, header_t *header, void *ptr)
 
 	assert(bucket->transfer_client == client);
 	bucket->transfer_client = NULL;
+	assert(client);
+	assert(client->node);
+	logger(LOG_DEBUG, "Removing transfer client ('%s') from bucket %#llx.", node_getname(client->node), bucket->hash);
 	
 	logger(LOG_INFO, "Bucket migration complete: %#llx", hash);
 
 	// do we need to let other nodes that the transfer is complete?
-
+	
+// #error "yes, we need to push the hashmask list to all the clients.... or at least this entry.  need to look at the protocol."
 
 	// if we transferred a backup node, or we transferred a primary that already has a backup node, 
 	// then we dont need this copy of the bucket anymore, so we can delete it.
@@ -578,9 +593,8 @@ static void process_sync_name_ack(client_t *client, header_t *header, void *ptr)
 	assert(client && header && ptr);
 	assert(client->node);
 	
-	next = ptr;
-
 	// need to get the data out of the payload.
+	next = ptr;
 	hash = data_long(&next);
 	index = hash & _mask;
 		
@@ -591,14 +605,77 @@ static void process_sync_name_ack(client_t *client, header_t *header, void *ptr)
 	assert(bucket);
 
 	// ** This assert doesnt seem to be correct when we lose a client connection.  Not sure what is happening here.
-	assert(bucket->transfer_client == client || (bucket->backup_node && bucket->backup_node->client == client) );
-	
-	logger(LOG_DEBUG, "Migration of item name complete: %#llx", hash);
+	assert(client);
+	assert(bucket->backup_node);
+	assert(bucket->backup_node->client == client);
+	logger(LOG_DEBUG, "Sync of item name complete: %#llx", hash);
 }
 
 
 
 static void process_sync_ack(client_t *client, header_t *header, void *ptr)
+{
+	char *next;
+	hash_t hash;
+	hash_t map;
+	bucket_t *bucket;
+	int index;
+
+	assert(client && header && ptr);
+	assert(client->node);
+	
+	// need to get the data out of the payload.
+	next = ptr;
+	map = data_long(&next);
+	hash = data_long(&next);
+	
+	logger(LOG_DEBUG, "PROCESS sync_ack. map=%#llx, hash=%#llx", map, hash);
+	
+	index = hash & _mask;
+	assert(index >= 0 && index <= _mask);
+		
+	// get the bucket.
+	assert(_buckets);
+	bucket = _buckets[index];
+	assert(bucket);
+	assert(bucket->backup_node);
+	assert(bucket->backup_node->client == client);
+
+	logger(LOG_DEBUG, "Sync of item complete: %#llx", hash);
+}
+
+
+static void process_migrate_name_ack(client_t *client, header_t *header, void *ptr)
+{
+	char *next;
+	hash_t hash;
+	bucket_t *bucket;
+	int index;
+
+	assert(client && header && ptr);
+	assert(client->node);
+	
+	// need to get the data out of the payload.
+	next = ptr;
+	hash = data_long(&next);
+	index = hash & _mask;
+
+	// get the bucket.
+	assert(_buckets);
+	assert(index >= 0 && index <= _mask);
+	bucket = _buckets[index];
+	assert(bucket);
+	
+	logger(LOG_DEBUG, "Migration of item name complete: bucket=%#llx, hash=%#llx", bucket->hash, hash);
+
+	// ** This assert doesnt seem to be correct when we lose a client connection.  Not sure what is happening here.
+	assert(client);
+	assert(bucket->transfer_client == client);
+	logger(LOG_DEBUG, "Migration of item name complete: %#llx", hash);
+}
+
+
+static void process_migrate_ack(client_t *client, header_t *header, void *ptr)
 {
 	char *next;
 	hash_t map;
@@ -609,33 +686,27 @@ static void process_sync_ack(client_t *client, header_t *header, void *ptr)
 	assert(client && header && ptr);
 	assert(client->node);
 	
-	next = ptr;
-
 	// need to get the data out of the payload.
+	next = ptr;
 	map = data_long(&next);
 	hash = data_long(&next);
 	
 	index = hash & _mask;
+	assert(index >= 0 && index <= _mask);
 		
 	// get the bucket.
 	assert(_buckets);
-	assert(index >= 0 && index <= _mask);
 	bucket = _buckets[index];
 	assert(bucket);
 
-	if (client == bucket->transfer_client) {
-		// this was a result of a migration, so we need to continue migrating.
-		data_migrated(bucket->data, map, hash);
-		data_in_transit_dec();
-		
-		// send another if there is one more available.
-		send_transfer_items(bucket);
-	}
-	else {
-		// this was a result of a backup_sync, so we dont really need to do anything.
-		assert(bucket->backup_node);
-		assert(bucket->backup_node->client == client);
-	}
+	assert(client == bucket->transfer_client);
+	
+	// this was a result of a migration, so we need to continue migrating.
+	data_migrated(bucket->data, map, hash);
+	data_in_transit_dec();
+	
+	// send another if there is one more available.
+	send_transfer_items(bucket);
 
 	logger(LOG_DEBUG, "Migration of item complete: %#llx", hash);
 }
@@ -648,6 +719,8 @@ void process_init(void)
 	client_add_cmd(REPLY_ACK, process_ack);
 	client_add_cmd(REPLY_SYNC_NAME_ACK, process_sync_name_ack);
 	client_add_cmd(REPLY_SYNC_ACK, process_sync_ack);
+	client_add_cmd(REPLY_MIGRATE_NAME_ACK, process_migrate_name_ack);
+	client_add_cmd(REPLY_MIGRATE_ACK, process_migrate_ack);
 	client_add_cmd(REPLY_LOADLEVELS, process_loadlevels);
 	client_add_cmd(REPLY_ACCEPTING_BUCKET, process_accept_bucket);
 	client_add_cmd(REPLY_CONTROL_BUCKET_COMPLETE, process_control_bucket_complete);

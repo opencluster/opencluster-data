@@ -83,6 +83,7 @@ void bucket_shutdown(bucket_t *bucket);
 int buckets_nobackup_count(void);
 void bucket_destroy_contents(bucket_t *bucket);
 
+char * buckets_get_primary(hash_t key_hash);
 
 void buckets_dump(void);
 void hashmasks_dump(void);

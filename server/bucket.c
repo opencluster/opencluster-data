@@ -1,5 +1,7 @@
 // bucket.c
 
+
+// By setting __BUCKET_C, we indicate that we dont want the externs to be defined.
 #define __BUCKET_C
 #include "bucket.h"
 #undef __BUCKET_C
@@ -82,13 +84,15 @@ value_t * buckets_get_value(hash_t map_hash, hash_t key_hash)
 		if (bucket->level != 0) {
 			// we need to reply with an indication of which server is actually responsible for this bucket.
 			assert(value == NULL);
-			assert(0);
 		}
 		else {
 			// search the btree in the bucket for this key.
 			assert(bucket->data);
 			value = data_get_value(map_hash, key_hash, bucket->data);
 		}	
+	}
+	else {
+		assert(value == NULL);
 	}
 	
 	return(value);
@@ -675,3 +679,32 @@ void hashmask_switch(hash_t hash)
 	_hashmasks[hash]->primary = _hashmasks[hash]->secondary;
 	_hashmasks[hash]->secondary = tmp;
 }
+
+
+
+
+
+// Get the primary node for an external bucket.  If the bucket is being handled by this instance, then this 
+// function will return NULL.  If it is being handled by another node, then it will return a string.
+char * buckets_get_primary(hash_t key_hash) 
+{
+	int bucket_index;
+	bucket_t *bucket;
+
+	// calculate the bucket that this item belongs in.
+	bucket_index = _mask & key_hash;
+	assert(bucket_index >= 0);
+	assert(bucket_index <= _mask);
+	bucket = _buckets[bucket_index];
+	if (bucket->target_node) {
+		// that bucket is being handled 
+		return(NULL);
+	}
+	else {
+		assert(_hashmasks[bucket_index]);
+		assert(_hashmasks[bucket_index]->primary);
+		return(_hashmasks[bucket_index]->primary);
+	}
+}
+
+

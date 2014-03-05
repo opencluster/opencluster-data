@@ -39,13 +39,11 @@ static void accept_conn_cb(
 	void *ctx)
 {
 	client_t *client;
-	server_t *server = (server_t *) ctx;
 
 	assert(listener);
 	assert(fd > 0);
 	assert(address && socklen > 0);
 	assert(ctx);
-	assert(server);
 
 	// create client object.
 	// TODO: We should be pulling these client objects out of a mempool.

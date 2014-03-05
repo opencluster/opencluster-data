@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# This script will automatically and randomly add and remove nodes from the cluster.  This will be 
-# used with other testing scripts and tools, to ensure that the data retains integrity and 
-# accessibility even when nodes are joining and leaving the cluster resulting in data being moved 
+# This script will automatically and randomly add and remove nodes from the cluster.  This will be
+# used with other testing scripts and tools, to ensure that the data retains integrity and
+# accessibility even when nodes are joining and leaving the cluster resulting in data being moved
 # around the cluster.
 
 # Arrays in Bash are done like:
@@ -46,24 +46,38 @@ function logfile () {
 
 echo "Starting Initial server Node" 
 
+echo "./ocd.debug -g $(logfile $NODES) $LOG_SETTINGS &"
+sleep 2
 ./ocd.debug -g $(logfile $NODES) $LOG_SETTINGS &
 NODE[$NODES]=$!
 NODES=$[NODES+1]
-
 sleep 6
-
-
 echo "Node-0000 PID: ${NODE[0]}"
+
+echo "Press ENTER to start another node"
+read
+
+echo "./ocd.debug -g $(logfile $NODES) $LOG_SETTINGS &"
+sleep 2
+./ocd.debug -l 127.0.0.1:13601 -n 127.0.0.1:13600 -g $(logfile $NODES) $LOG_SETTINGS &
+NODE[$NODES]=$!
+NODES=$[NODES+1]
+sleep 6
+echo "Node-0001 PID: ${NODE[1]}"
+
+
+
+
+
+
 echo "Press ENTER to start Cycling the server nodes randomly."
 read
 
 trap 'XXX=1' 2
 
 while [ $XXX -eq 0 ] ; do
-	
 	echo "Sleeping..."
 	sleep 1
-
 done
 
 
@@ -71,7 +85,7 @@ done
 while [ $NODES -gt 0 ]; do
 
 	NODES=$[NODES-1]
-	
+
 	PID=${NODE[$NODES]}
 	if [ $PID -gt 0 ]; then
 

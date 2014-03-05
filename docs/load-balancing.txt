@@ -400,7 +400,7 @@ Now we have:
  +--------+ +--------+ +--------+
    8+7=15     8+7=15     0+2=2       
 
-Note that now Bucket #8 is marked as the "Last Transfer" bucket and note #0.  Only one bucket per node is marked this way.
+Note that now Bucket #8 is marked as the "Last Transfer" bucket and not #0.  Only one bucket per node is marked this way.
 
 As soon as a migration is complete, a Node will normally immediately send a LoadLevel request to try and move more buckets quickly.  NODE-B sees that NODE-C has more secondaries than primaries, so it decides to switch Bucket #0.  This works the same way as previously described before, so we'll end up with:
 
@@ -456,7 +456,7 @@ When NODE-A has sent all it can:
       saying "Bucket #9 is all yours"
 
   8.  NODE-C will begin sending SYNC data to NODE-B which is the backup node 
-      for the bucket.
+      for the bucket (including the items that were not sent during the handover).
 
 At this point, NODE-C is the primary and all communication for that bucket will go through it.
 

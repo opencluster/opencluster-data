@@ -35,7 +35,7 @@ int node_active_count(void);
 
 void nodes_dump(void);
 
-
+char * node_getname(node_t *node);
 
 
 // if this header is not being included by node.c, then we set the externs.

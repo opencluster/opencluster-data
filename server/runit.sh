@@ -18,7 +18,9 @@ echo "Starting Node-B"
 ./ocd.debug -vvvvvv -l 127.0.0.1:13601 -n 127.0.0.1:13600 -g /tmp/b-logs- &
 PID_NODE_B=$!
 
-sleep 1
+sleep 5
+
+killall -SIGHUP ocd.debug
 
 
 # dialog --menu hello 10 40 3 one one two two three three 2>>res.txt && (RESULT=$(cat res.txt); rm res.txt; clear; echo "RESULT: $RESULT" )
