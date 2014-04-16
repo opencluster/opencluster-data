@@ -1,8 +1,0 @@
-This file describes terms used in the documentation.
-
-Buckets - A group of hashes that are described by a Mask.
-Hash - A calculated number based on the key.  This is used to determine which server it belongs to.
-Key - The identifier of a peice of data that is being stored on the cluster.  Otherwise called 'Name'
-Mask - A binary mask to seperate the Hashes.
-Name - Another name for the Key.
-Value - The data being stored.  It is identified by a Key.
