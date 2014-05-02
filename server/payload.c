@@ -61,9 +61,8 @@ void payload_int(int value)
 	ptr = ((void*) _payload + _payload_length);
 	ptr[0] = htobe32(value);
 
-#if (sizeof(int) != 4) 
-#error "This code is assuming that an int is 32bit".
-#endif
+        // we need to assume that an int is 32 bits.
+        assert(sizeof(int) == 4); 
 
 	
 	_payload_length += sizeof(int);
@@ -120,9 +119,7 @@ void payload_data(int length, void *data)
 	}
 
 	// we need to assume that an int is 32 bits.
-#if (sizeof(int) != 4) 
-#error "This code is assuming that an int is 32bit".
-#endif
+	assert(sizeof(int) == 4);
 	
 	// add the length of the string first.
 	ptr = ((void*) _payload + _payload_length);
