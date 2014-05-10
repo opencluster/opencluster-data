@@ -539,6 +539,11 @@ static void read_handler(int fd, short int flags, void *arg)
 			if (client->in.length > 0) {
 				client->in.length = 0;
 			}
+			
+			// if we have data pending to send, we might as well clear that out too, as we cant send it now.
+			if (client->out.length > 0) {
+				client->out.length = 0;
+			}
 
 			client_free(client);
 			client = NULL;
