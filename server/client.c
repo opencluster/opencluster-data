@@ -534,6 +534,11 @@ static void read_handler(int fd, short int flags, void *arg)
 				// and then try connecting again.
 				node_retry(client->node);
 			}
+			
+			// if we received partial data from the socket before it closed, we need to clear it.
+			if (client->in.length > 0) {
+				client->in.length = 0;
+			}
 
 			client_free(client);
 			client = NULL;
