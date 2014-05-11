@@ -17,3 +17,4 @@ server/a-logs-*
 server/b-logs-*
 utils/oc_get
 utils/oc_set
+*.class
