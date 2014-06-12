@@ -8,7 +8,7 @@
 
 typedef struct {
 	uint16_t command;
-	uint16_t repcmd;
+	uint16_t response_code;
 	uint32_t userid;
 	uint32_t length;
 } header_t;
@@ -18,7 +18,7 @@ typedef struct {
 #pragma pack(push,1)
 typedef struct {
 	uint16_t command;
-	uint16_t repcmd;
+	uint16_t response_code;
 	uint32_t userid;
 	uint32_t length;
 } raw_header_t;

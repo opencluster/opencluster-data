@@ -5,6 +5,10 @@
 
 #include "event-compat.h"
 #include "header.h"
+#include "messages.h"
+
+
+
 
 typedef struct {
 	void *node;	// node_t;
@@ -22,8 +26,6 @@ typedef struct {
 		long long total;
 	} in, out;
 	
-	int nextid;
-
 	int timeout_limit;
 	int timeout;
 	int tries;
@@ -31,6 +33,8 @@ typedef struct {
 	int closing;
 
 	void *transfer_bucket;
+	
+	messages_t messages;
 
 } client_t;
 
@@ -39,7 +43,8 @@ typedef struct {
 client_t * client_new(void);
 void client_free(client_t *client);
 void client_accept(client_t *client, evutil_socket_t handle, struct sockaddr *address, int socklen);
-void client_send_message(client_t *client, header_t *header, short command, int length, void *payload);
+void client_send_message(client_t *client, short command, int length, void *payload, void *data);
+void client_send_reply(client_t *client, header_t *header, short code, int length, void *payload);
 void client_attach_node(client_t *client, void *node, int fd);
 void client_shutdown(client_t *client);
 void client_closing(client_t *client);
@@ -47,7 +52,12 @@ void client_closing(client_t *client);
 void clients_dump(void);
 
 void client_add_cmd(int cmd, void *fn);
+void client_add_response(int cmd, int code, void *fn);
+void client_add_special(int code, void *fn);
+
+
 void client_init_commands(int max);
+void client_cleanup(void);
 
 
 

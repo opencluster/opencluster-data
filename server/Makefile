@@ -21,30 +21,34 @@ OBJS=\
 	bucket.o bucket_data.o\
 	client.o commands.o \
 	event-compat.o \
+	hashfn.o \
 	item.o \
 	logging.o \
 	node.o \
-	payload.o process.o push.o \
+	params.o payload.o process.o push.o \
 	seconds.o server.o settle.o stats.o shutdown.o\
 	timeout.o \
 	value.o \
 	ocd.o
 
 # we define the headers and their dependencies.
+H_PARAMS=params.h
+H_MESSAGES=messages.h
 H_GLOBALS=globals.h event-compat.h
 H_LOGGING=logging.h $(H_GLOBALS)
 H_HASH=hash.h
+H_HASHFN=hashfn.h $(H_HASH)
 H_VALUE=value.h
 H_ITEM=item.h $(H_HASH) $(H_VALUE)
 H_PROTOCOL=protocol.h
 H_CONSTANTS=constants.h
 H_SERVER=server.h
 H_HEADER=header.h
-H_CLIENT=client.h event-compat.h $(H_HEADER)
-H_NODE=node.h $(H_CLIENT)
+H_CLIENT=client.h event-compat.h $(H_HEADER) $(H_MESSAGES)
+H_NODE=node.h $(H_CLIENT) $(H_HASH)
 H_BUCKET_DATA=bucket_data.h $(H_VALUE) $(H_HASH) $(H_ITEM) $(H_CLIENT) $(H_CONSTANTS) $(H_NODE)
 H_BUCKET=bucket.h $(H_HASH) $(H_NODE) $(H_BUCKET_DATA) $(H_VALUE)
-H_PUSH=push.h $(H_CLIENT) $(H_BUCKET)
+H_PUSH=push.h $(H_BUCKET) $(H_CLIENT) $(H_ITEM)
 H_STATS=stats.h
 H_SECONDS=seconds.h
 H_PROCESS=process.h $(H_CLIENT) $(H_HEADER)
@@ -91,22 +95,28 @@ INC_CLIENT= \
 	$(H_STATS)
 
 INC_COMMANDS= \
-	$(H_COMMANDS) \
-	$(H_VALUE) \
-	$(H_GLOBALS) \
 	$(H_BUCKET) \
+	$(H_CLIENT) \
+	$(H_COMMANDS) \
+	$(H_GLOBALS) \
+	$(H_HASHFN) \
+	$(H_HEADER) \
+	$(H_LOGGING) \
 	$(H_PAYLOAD) \
 	$(H_PROTOCOL) \
 	$(H_PUSH) \
+	$(H_SERVER) \
 	$(H_TIMEOUT) \
-	$(H_LOGGING) \
-	$(H_CLIENT) \
-	$(H_HEADER) \
-	$(H_SERVER)
+	$(H_VALUE) 
+	
 
+INC_HASHFN=$(H_HASHFN)
+	
 INC_ITEM=$(H_ITEM)
 
 INC_LOGGING=$(H_LOGGING)
+
+INC_MESSAGES=$(H_MESSAGES)
 
 INC_NODE= \
 	$(H_NODE) \
@@ -126,10 +136,13 @@ INC_OCD= \
 	$(H_SECONDS) \
 	$(H_STATS) \
 	$(H_SETTLE) \
+	$(H_PARAMS) \
 	$(H_PAYLOAD) \
 	$(H_LOGGING) \
 	$(H_SHUTDOWN)
 
+INC_PARAMS=$(H_PARAMS)
+	
 INC_PAYLOAD=$(H_PAYLOAD)
 
 INC_PROCESS= \
@@ -221,17 +234,26 @@ client.o: client.c $(INC_CLIENT)
 commands.o: commands.c $(INC_COMMANDS)
 	gcc `pkg-config --cflags glib-2.0` -c -o $@ commands.c $(DEBUG_ARGS) $(ARGS)
 
+hashfn.o: hashfn.c $(INC_HASHFN)
+	gcc -c -o $@ hashfn.c $(DEBUG_ARGS) $(ARGS)
+
 item.o: item.c $(INC_ITEM)
 	gcc -c -o $@ item.c $(DEBUG_ARGS) $(ARGS)
 
 logging.o: logging.c $(INC_LOGGING)
 	gcc -c -o $@ logging.c $(DEBUG_ARGS) $(ARGS)
 
+messages.o: messages.c $(INC_MESSAGES)
+	gcc -c -o $@ messages.c $(DEBUG_ARGS) $(ARGS)
+
 node.o: node.c $(INC_NODE)
 	gcc `pkg-config --cflags glib-2.0` -c -o $@ node.c $(DEBUG_ARGS) $(ARGS)
 
 ocd.o: ocd.c event-compat.h $(INC_OCD)
 	gcc `pkg-config --cflags glib-2.0` -c -o $@ ocd.c $(DEBUG_ARGS) $(ARGS)
+
+params.o: params.c $(INC_PARAMS)
+	gcc -c -o $@ params.c $(DEBUG_ARGS) $(ARGS)
 
 payload.o: payload.c $(INC_PAYLOAD)
 	gcc -c -o $@ payload.c $(DEBUG_ARGS) $(ARGS)

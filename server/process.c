@@ -20,7 +20,7 @@
 
 
 
-
+/*
 static void process_ack(client_t *client, header_t *header)
 {
 	int active;
@@ -35,7 +35,7 @@ static void process_ack(client_t *client, header_t *header)
 		logger(LOG_INFO, "Active cluster node connections: %d", active);
 	}
 }
-
+*/
 
 
 
@@ -61,26 +61,26 @@ static int attempt_switch(client_t *client)
 					// yes it is, we can promote this bucket.
 					bucket = _buckets[i];
 					
+					assert(((node_t*)client->node)->details.name);
 					logger(LOG_INFO, "Attempting to promote bucket #%#llx on '%s'",
-					   bucket->hash, ((node_t*)client->node)->name); 
+					   bucket->hash, ((node_t*)client->node)->details.name); 
 
 					assert(bucket->transfer_client == NULL);
 					assert(client);
 					assert(client->node);
-					assert(((node_t*)client->node)->name);
-					logger(LOG_DEBUG, "Setting transfer client ('%s') to bucket %#llx.", ((node_t*)client->node)->name, bucket->hash);
+					assert(((node_t*)client->node)->details.name);
+					logger(LOG_DEBUG, "Setting transfer client ('%s') to bucket %#llx.", ((node_t*)client->node)->details.name, bucket->hash);
 					bucket->transfer_client = client;
 					
 					assert(_bucket_transfer == 0);
 					_bucket_transfer = 1;
 					
 					// we found a bucket we can promote, so we send out the command to start it.
-					push_control_bucket(client, bucket, bucket->level);
+					push_control_bucket(client, bucket->hash, bucket->level);
 				}
 			}
 		}
 	}
-	
 	
 	// if we have a bucket, then we must have done a switch, so return 1.  Otherwise return 0.
 	return (bucket ? 1 : 0);
@@ -101,7 +101,6 @@ static bucket_t * find_nobackup_bucket(void)
 					bucket = _buckets[i];
 
 					logger(LOG_INFO, "Attempting to migrate bucket #%#llx that has no backup copy.", bucket->hash); 
-					
 					
 					assert(bucket->hash == i);
 					assert(bucket->transfer_client == NULL);
@@ -141,7 +140,7 @@ static bucket_t * choose_bucket_for_migrate(client_t *client, int primary, int b
 				if (_buckets[i]->level == send_level) {
 					
 					if (send_level == 0) {
-						assert(_buckets[i]->target_node == NULL);
+						assert(_buckets[i]->source_node == NULL);
 						assert(_buckets[i]->backup_node);
 						
 						if (_buckets[i]->backup_node != client->node) {
@@ -149,10 +148,10 @@ static bucket_t * choose_bucket_for_migrate(client_t *client, int primary, int b
 						}
 					}
 					else {
-						assert(_buckets[i]->target_node);
+						assert(_buckets[i]->source_node);
 						assert(_buckets[i]->backup_node == NULL);
 						
-						if (_buckets[i]->target_node != client->node) {
+						if (_buckets[i]->source_node != client->node) {
 							bucket = _buckets[i];
 						}
 					}
@@ -198,14 +197,14 @@ static void process_loadlevels(client_t *client, header_t *header, void *ptr)
 	// if the target node is not currently transferring, and we are not currently transferring
 	if (_bucket_transfer == 0 && transferring == 0) {
 
-		
-		logger(LOG_DEBUG, "Processing loadlevel data from: '%s'", ((node_t*)client->node)->name); 
+		assert(((node_t*)client->node)->details.name);
+		logger(LOG_DEBUG, "Processing loadlevel data from: '%s'", ((node_t*)client->node)->details.name); 
 
 		
 		// first check to see if the target needs to have some buckets switched (if it has more secondaries than primaries)
 		// before contemplating promoting any buckets, we need to make sure it wont destabilize us.
 		if ((_primary_buckets-1 >= _secondary_buckets+1) && (backups > primary)) {
-			logger(LOG_DEBUG, "Attempting to switch with '%s'", ((node_t*)client->node)->name); 
+			logger(LOG_DEBUG, "Attempting to switch with '%s'", ((node_t*)client->node)->details.name); 
 			if (attempt_switch(client) == 1) {
 				// we started a promotion process, so we dont need to continue.
 				assert(_bucket_transfer == 1);
@@ -259,8 +258,8 @@ static void process_loadlevels(client_t *client, header_t *header, void *ptr)
 
 			assert(bucket->hash >= 0);
 			assert(client->node);
-			assert(((node_t*)client->node)->name);
-			logger(LOG_DEBUG, "Migrating bucket #%#llx to '%s'", bucket->hash, ((node_t*)client->node)->name); 
+			assert(((node_t*)client->node)->details.name);
+			logger(LOG_DEBUG, "Migrating bucket #%#llx to '%s'", bucket->hash, ((node_t*)client->node)->details.name); 
 	
 			assert(_bucket_transfer == 0);
 			_bucket_transfer = 1;
@@ -283,6 +282,8 @@ static void process_loadlevels(client_t *client, header_t *header, void *ptr)
 // bucket, and we do not send out SYNC data to the backup nodes.
 static void finalize_migration(client_t *client, bucket_t *bucket) 
 {
+	const char *conninfo=NULL;
+	
 	assert(client);
 	assert(bucket);
 
@@ -291,7 +292,37 @@ static void finalize_migration(client_t *client, bucket_t *bucket)
 			// we are sending a nobackup bucket.
 			
 			// send a message to the client telling them that they are now a backup node for the bucket.
-			push_finalise_migration(client, bucket, 1);
+			assert(client == bucket->transfer_client);
+			
+			// if we are sending a primary bucket, then there must be a backup node somewhere. If we are 
+			// sending a backup node, then there could be a source node elsewhere (moving a bucket), or we 
+			// are the source (bucket had no backup).
+
+			if (bucket->level == 0) {
+				assert(_hashmasks);
+				assert(_hashmasks[bucket->hash]);
+				assert(_hashmasks[bucket->hash]->primary);
+				conninfo = _hashmasks[bucket->hash]->primary;
+			}
+			else if (bucket->level == 1) {
+				if (bucket->source_node) {
+					assert(_hashmasks);
+					assert(_hashmasks[bucket->hash]);
+					assert(_hashmasks[bucket->hash]->secondary);
+					conninfo = _hashmasks[bucket->hash]->secondary;
+				}
+				else {
+					assert(_interface);
+					conninfo = _interface;
+				}
+			}
+			else {
+				assert(_interface);
+				conninfo = _interface;
+			}
+			
+			assert(conninfo);
+			push_finalise_migration(client, bucket->hash, conninfo, 1);
 		}
 		else if (bucket->backup_node) {
 			// we are sending a primary bucket.  
@@ -308,7 +339,7 @@ static void finalize_migration(client_t *client, bucket_t *bucket)
 		// we are sending a backup bucket. 
 		
 		// if we are a backup bucket, we should have a connection to the primary node.
-		assert(bucket->target_node);
+		assert(bucket->source_node);
 		
 		// mark our bucket so that if we get new sync data, we can ignore it.
 		assert(0);
@@ -437,8 +468,8 @@ static void process_control_bucket_complete(client_t *client, header_t *header, 
 	bucket->transfer_client = NULL;
 	assert(client);
 	assert(client->node);
-	assert(((node_t*)client->node)->name);
-	logger(LOG_DEBUG, "Removing transfer client ('%s') from bucket %#llx.", ((node_t*)client->node)->name, bucket->hash);
+	assert(((node_t*)client->node)->details.name);
+	logger(LOG_DEBUG, "Removing transfer client ('%s') from bucket %#llx.", ((node_t*)client->node)->details.name, bucket->hash);
 	
 	logger(LOG_INFO, "Bucket switching complete: %#llx", hash);
 
@@ -453,8 +484,8 @@ static void process_control_bucket_complete(client_t *client, header_t *header, 
 		_secondary_buckets ++;
 		
 		assert(bucket->backup_node);
-		assert(bucket->target_node == NULL);
-		bucket->target_node = bucket->backup_node;
+		assert(bucket->source_node == NULL);
+		bucket->source_node = bucket->backup_node;
 		bucket->backup_node = NULL;
 		
 		assert(_primary_buckets >= 0);
@@ -467,9 +498,9 @@ static void process_control_bucket_complete(client_t *client, header_t *header, 
 		_secondary_buckets --;
 
 		assert(bucket->backup_node == NULL);
-		assert(bucket->target_node);
-		bucket->backup_node = bucket->target_node;
-		bucket->target_node = NULL;
+		assert(bucket->source_node);
+		bucket->backup_node = bucket->source_node;
+		bucket->source_node = NULL;
 		
 		assert(_primary_buckets > 0);
 		assert(_secondary_buckets >= 0);
@@ -479,7 +510,8 @@ static void process_control_bucket_complete(client_t *client, header_t *header, 
 	hashmask_switch(hash);
 	
 	// Tell all our clients that the hashmasks are changing.
-	push_hashmask_update(bucket);
+	assert(0);
+//**	push_hashmask_update(bucket);
 	
 	assert(_bucket_transfer == 1);
 	_bucket_transfer = 0;
@@ -611,8 +643,6 @@ static void process_sync_name_ack(client_t *client, header_t *header, void *ptr)
 	logger(LOG_DEBUG, "Sync of item name complete: %#llx", hash);
 }
 
-
-
 static void process_sync_ack(client_t *client, header_t *header, void *ptr)
 {
 	char *next;
@@ -644,7 +674,7 @@ static void process_sync_ack(client_t *client, header_t *header, void *ptr)
 	logger(LOG_DEBUG, "Sync of item complete: %#llx", hash);
 }
 
-
+/*
 static void process_migrate_name_ack(client_t *client, header_t *header, void *ptr)
 {
 	char *next;
@@ -673,8 +703,9 @@ static void process_migrate_name_ack(client_t *client, header_t *header, void *p
 	assert(bucket->transfer_client == client);
 	logger(LOG_DEBUG, "Migration of item name complete: %#llx", hash);
 }
+*/
 
-
+/*
 static void process_migrate_ack(client_t *client, header_t *header, void *ptr)
 {
 	char *next;
@@ -710,22 +741,23 @@ static void process_migrate_ack(client_t *client, header_t *header, void *ptr)
 
 	logger(LOG_DEBUG, "Migration of item complete: %#llx", hash);
 }
-
+*/
 
 
 // Add the reply processor callbacks to the client list.
 void process_init(void) 
 {
-	client_add_cmd(REPLY_ACK, process_ack);
-	client_add_cmd(REPLY_SYNC_NAME_ACK, process_sync_name_ack);
-	client_add_cmd(REPLY_SYNC_ACK, process_sync_ack);
-	client_add_cmd(REPLY_MIGRATE_NAME_ACK, process_migrate_name_ack);
-	client_add_cmd(REPLY_MIGRATE_ACK, process_migrate_ack);
-	client_add_cmd(REPLY_LOADLEVELS, process_loadlevels);
-	client_add_cmd(REPLY_ACCEPTING_BUCKET, process_accept_bucket);
-	client_add_cmd(REPLY_CONTROL_BUCKET_COMPLETE, process_control_bucket_complete);
-	client_add_cmd(REPLY_MIGRATION_ACK, process_migration_ack);
-	client_add_cmd(REPLY_UNKNOWN, process_unknown);
+// 	client_add_reply(REPLY_ACK, process_ack);
+// 	client_add_reply(REPLY_SYNC_NAME_ACK, process_sync_name_ack);
+// 	client_add_(REPLY_SYNC_ACK, process_sync_ack);
+// 	client_add_cmd(REPLY_MIGRATE_NAME_ACK, process_migrate_name_ack);
+// 	client_add_cmd(REPLY_MIGRATE_ACK, process_migrate_ack);
+// 	client_add_cmd(REPLY_LOADLEVELS, process_loadlevels);
+// 	client_add_cmd(REPLY_ACCEPTING_BUCKET, process_accept_bucket);
+// 	client_add_cmd(REPLY_CONTROL_BUCKET_COMPLETE, process_control_bucket_complete);
+// 	client_add_cmd(REPLY_MIGRATION_ACK, process_migration_ack);
+
+	client_add_special(RESPONSE_UNKNOWN, process_unknown);
 }
 
 

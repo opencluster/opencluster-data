@@ -29,12 +29,24 @@
 // external variables.
 extern int _conncount;		// server.c
 
+typedef struct {
+	int code;
+	void *fn;
+} handler_info_t;
 
+
+typedef struct {
+	int cmd;
+	int max;
+	handler_info_t *handlers;
+} command_handlers_t;
 
 
 client_t **_clients = NULL;
 int _client_count = 0;
 
+
+char *_connectinfo = NULL;
 
 struct timeval _standard_timeout = {5,0};
 
@@ -44,8 +56,17 @@ static void read_handler(int fd, short int flags, void *arg);
 static void write_handler(int fd, short int flags, void *arg);
 
 
-void **_commands = NULL;
+command_handlers_t **_commands = NULL;
 int _command_max = 0;
+
+handler_info_t *_specials = NULL;
+int _special_max = 0;
+
+
+
+
+
+
 
 void client_init_commands(int max)
 {
@@ -53,7 +74,7 @@ void client_init_commands(int max)
 	assert(_command_max == 0);
 	assert(max > 0);
 	
-	_commands = calloc(max, sizeof(void *));
+	_commands = calloc(max, sizeof(command_handlers_t *));
 	_command_max = max;
 	
 	cmd_init();
@@ -63,23 +84,118 @@ void client_init_commands(int max)
 void client_add_cmd(int cmd, void *fn)
 {
 	int new_max;
+	command_handlers_t *handler;
+	
+	assert(cmd > 0);
+	assert(fn);
 	
 	assert(_commands);
 	assert(_command_max > 0);
 	
 	if (cmd >= _command_max) {
 		new_max = cmd + 512;
-		_commands = realloc(_commands, sizeof(void *) * new_max);
+		_commands = realloc(_commands, sizeof(command_handlers_t *) * new_max);
 		for ( ; _command_max < new_max; _command_max++) {
 			_commands[_command_max] = NULL;
 		}
 	}
 	
+	
+	handler = calloc(1, sizeof(command_handlers_t));
+	handler->cmd = cmd;
+	handler->max = 1;	
+	handler->handlers = calloc(handler->max, sizeof(handler_info_t));
+	assert(handler->handlers);
+	handler->handlers[0].code = 0;
+	handler->handlers[0].fn = fn;
+	
 	assert(cmd < _command_max);
 	assert(_commands[cmd] == NULL);
-	_commands[cmd] = fn;
+	_commands[cmd] = handler;
 }
 
+
+void client_add_response(int cmd, int code, void *fn)
+{
+	int i;
+	
+	assert(cmd > 0);
+	assert(code > 0);
+	assert(fn);
+	
+	assert(_commands);
+	assert(_command_max > cmd);
+	assert(_commands[cmd]);
+	assert(_commands[cmd]->cmd == cmd);
+	assert(_commands[cmd]->max > 0);
+	assert(_commands[cmd]->handlers);
+	assert(_commands[cmd]->handlers[0].code == 0);
+	assert(_commands[cmd]->handlers[0].fn);
+	
+	int found = 0;
+	for (i=1; i<_commands[cmd]->max && found == 0; i++) {
+		if (_commands[cmd]->handlers[_commands[cmd]->max].code == code) {
+			found ++;
+		}
+	}
+	
+	if (found == 0) {
+		// code was not found already
+		_commands[cmd]->handlers = realloc(_commands[cmd]->handlers, ((_commands[cmd]->max+1) * sizeof(handler_info_t)));
+		assert(_commands[cmd]->handlers);
+		_commands[cmd]->handlers[_commands[cmd]->max].code = code;
+		_commands[cmd]->handlers[_commands[cmd]->max].fn = fn;
+		_commands[cmd]->max ++;
+	}
+	else {
+		// why adding the same result code more than once?
+		assert(0);
+	}
+}
+
+
+// add handlers for special responces that might be returned from any command.
+void client_add_special(int code, void *fn)
+{
+	assert(code > 0);
+	assert(fn);
+	
+	assert(_special_max >= 0);
+	_specials = realloc(_specials, ((_special_max+1) * sizeof(handler_info_t)));
+	_specials[_special_max].code = code;
+	_specials[_special_max].fn = fn;
+	_special_max ++;
+}
+
+
+void client_cleanup(void)
+{
+	int i;
+	for (i=0; i<_command_max; i++) {
+		if (_commands[i]) {
+			assert(_commands[i]->handlers);
+			free(_commands[i]->handlers);
+			_commands[i]->handlers = NULL;
+			_commands[i]->max = 0;
+			
+			free(_commands[i]);
+			_commands[i] = NULL;
+		}
+	}
+	
+	// there should always be some commands
+	assert(_commands);
+	free(_commands);
+	_commands = NULL;
+	_command_max = 0;
+	
+	// there should always be some special handling.
+	assert(_specials);
+	free(_specials);
+	_specials = NULL;
+	_special_max = 0;
+	
+}
 
 client_t * client_new(void)
 {
@@ -106,11 +222,11 @@ client_t * client_new(void)
 	client->in.max = 0;
 	client->in.total = 0;
 	
-	client->nextid = 0;
-	
 	client->timeout_limit = CLIENT_TIMEOUT_LIMIT;
 	client->timeout = 0;
 	client->tries = 0;
+	
+	messages_init(&client->messages);
 	
 	client->closing = 0;
 
@@ -258,6 +374,8 @@ void client_free(client_t *client)
 		_clients = realloc(_clients, sizeof(void*)*_client_count);
 	}
 	
+	messages_free(&client->messages);
+	
 	_conncount --;
 	
 	assert(client);
@@ -269,9 +387,7 @@ void client_free(client_t *client)
 
 
 
-// Process the messages received.  Because of the way the protocol was designed, almost every 
-// operation and reply can be treated as a singular thing.  Enough information is included in a 
-// reply for it to be handled correctly without having to know the details of the original command. 
+// Process the messages received.  The messages could be new commands, or replies to commands that were sent.
 static int process_data(client_t *client) 
 {
 	int processed = 0;
@@ -279,8 +395,10 @@ static int process_data(client_t *client)
 	char *ptr;
 	header_t header;
 	raw_header_t *raw;
+	message_t *msg;
 
-	void (*func)(client_t *client, header_t *header, char *payload);
+	void (*func_cmd)(client_t *client, header_t *header, char *payload);
+	void (*func_response)(client_t *client, header_t *header, char *payload, char *data);
 	
 	assert(sizeof(char) == 1);
 	assert(sizeof(short int) == 2);
@@ -295,8 +413,7 @@ static int process_data(client_t *client)
 		assert(client->in.buffer);
 		assert((client->in.length + client->in.offset) <= client->in.max);
 		
-		// if we dont have 10 characters, then we dont have enough to build a message.  Messages are 
-		// at least that.
+		// if we dont have enough for a header, then we dont have enough to build a message.  Messages are at least that.
 		if (client->in.length < HEADER_SIZE) {
 			// we didn't have enough, even for the header, so we are stopping.
             logger(LOG_DEBUG, "[process_data] There wasn't enough data to build anything so not processing the buffer. in.length=%d", client->in.length);
@@ -312,20 +429,20 @@ static int process_data(client_t *client)
 			
 			raw = (void *) (client->in.buffer + client->in.offset);
 
-			header.command = be16toh(raw->command);
-			header.repcmd  = be16toh(raw->repcmd);
-			header.userid  = be32toh(raw->userid);
 			header.length  = be32toh(raw->length);
-			
-			logger(LOG_DEBUG, "New telegram: Command=%d, repcmd=%d, userid=%d, length=%d, buffer_length=%d", 
-					header.command, header.repcmd, 
-					header.userid, header.length, client->in.length);
-			
 			if ((client->in.length-HEADER_SIZE) < header.length) {
 				// we dont have enough data yet.
 				stopped = 1;
 			}
 			else {
+
+				header.command = be16toh(raw->command);
+				header.response_code  = be16toh(raw->response_code);
+				header.userid  = be32toh(raw->userid);
+
+				logger(LOG_DEBUG, "New telegram: Command=%d, repcmd=%d, userid=%d, length=%d, buffer_length=%d", 
+						header.command, header.response_code, 
+						header.userid, header.length, client->in.length);
 				
 				// get a pointer to the payload
 				ptr = client->in.buffer + client->in.offset + HEADER_SIZE;
@@ -333,13 +450,17 @@ static int process_data(client_t *client)
 
 				if (header.command >= _command_max || _commands[header.command] == NULL) {
 
-					if (header.repcmd != 0) {
-						logger(LOG_ERROR, "Unknown reply: Reply=%d, Command=%d, userid=%d, length=%d", 
-									header.repcmd, header.command, header.userid, header.length);
+					if (header.response_code == 0) {
+						logger(LOG_ERROR, "Unknown command received: Command=%d, userid=%d, length=%d", header.command, header.userid, header.length);
+									client_send_reply(client, &header, RESPONSE_UNKNOWN, 0, NULL);
 					}
 					else {
-						logger(LOG_ERROR, "Unknown command received: Command=%d, userid=%d, length=%d", header.command, header.userid, header.length);
-						client_send_message(client, &header, REPLY_UNKNOWN, 0, NULL);
+						logger(LOG_ERROR, "Unknown reply: Reply=%d, Command=%d, userid=%d, length=%d", 
+									header.response_code, header.command, header.userid, header.length);
+						
+						// if we got a reply we werent expecting, then something bad has happened to the connection and we cant trust it.
+						assert(0);
+						
 					}
 
 					#ifndef NDEBUG
@@ -347,9 +468,70 @@ static int process_data(client_t *client)
 					#endif							
 				}
 				else {
+
 					assert(_commands[header.command]);
-					func = _commands[header.command];
-					(*func)(client, &header, ptr);
+					assert(_commands[header.command]->max > 0);
+					assert(_commands[header.command]->cmd == header.command);
+					assert(_commands[header.command]->handlers);
+
+					if (header.response_code == 0) {
+						// this is a command, so we simply call the handler.
+						
+						if (_commands[header.command] == NULL) {
+							// this server doesnt understand that command.
+							assert(0);
+						}
+						else {
+							assert(_commands[header.command]->handlers[0].code == 0);
+							assert(_commands[header.command]->handlers[0].fn);
+							
+							func_cmd = _commands[header.command]->handlers[0].fn;
+							(*func_cmd)(client, &header, ptr);
+						}
+					}
+					else {
+					
+						// this is a response code.   We need to lookup the UserID for this client to find the stored data for this message.
+						msg = message_get(&client->messages, header.userid);
+						
+						if (msg == NULL) {
+							// something went wrong.  the userid is not stored... so the client must have responded incorrectly.
+							assert(0);
+						}
+						else {
+							assert(msg->command == header.command);
+							assert(msg->userid == header.userid);
+						
+							assert(func_response == NULL);
+							int i;
+							for (i=0; i<_commands[header.command]->max && func_response==NULL; i++) {
+								assert(_commands[header.command]->handlers[i].code >= 0);
+								if (_commands[header.command]->handlers[i].code == header.response_code) {
+									func_response = _commands[header.command]->handlers[i].fn;
+									assert(func_response);
+									(*func_response)(client, &header, ptr, msg->data);
+								}
+							}
+							
+							if (func_response == NULL) {
+								// no function was found, but if there are special responses, such as 'tryelsewhere' and 'unknown'... these can be returned from any command.
+								assert(0);
+								
+								assert(func_response == NULL);
+								int i;
+								for (i=0; i<_special_max && func_response == NULL; i++) {
+									if (_specials[i].code == header.response_code) {
+										assert(_specials[i].fn);
+										func_response = _specials[i].fn;
+										(*func_response)(client, &header, ptr, msg->data);
+									}
+								}
+								
+								// we should have handled the specials.  If we still didnt find something to handle it, then our implementation of the protocol is broken.
+								assert(func_response);
+							}
+						}
+					}
 				}
 				
 				// need to adjust the details of the incoming buffer.
@@ -547,40 +729,20 @@ static void read_handler(int fd, short int flags, void *arg)
 
 			client_free(client);
 			client = NULL;
-}	}	}
+		}	
+	}
+}
 
-
-
-
-// add a reply to the clients outgoing buffer.  If a 'write' event isnt 
-// already set, then set one so that it can begin sending out the data.
-void client_send_message(client_t *client, header_t *header, short command, int length, void *payload)
+static void send_data(client_t *client, raw_header_t *rawheader, int length, void *payload)
 {
-	raw_header_t raw;
 	char *ptr;
 	
 	assert(client);
-	assert(command > 0);
+	assert(rawheader);
 	assert((length == 0 && payload == NULL) || (length > 0 && payload));
-	
+
 	assert(sizeof(raw_header_t) == HEADER_SIZE);
 
-	// build the raw header.
-	raw.command = htobe16(command);
-	if (header) {
-		raw.repcmd = htobe16(header->command);
-		raw.userid = htobe32(header->userid);
-	}
-	else {
-		// this is a command, not a reply, so we need to give it a new unique id.
-		assert(client->nextid >= 0);
-		raw.repcmd = 0;
-		raw.userid = htobe32(client->nextid);
-		client->nextid++;
-		if (client->nextid < 0) client->nextid = 0;
-	}
-	raw.length = htobe32(length);
-	
 	// make sure the clients out_buffer is big enough for the message.
 	while (client->out.max < client->out.length + client->out.offset + sizeof(raw_header_t) + length) {
 		client->out.buffer = realloc(client->out.buffer, client->out.max + DEFAULT_BUFSIZE);
@@ -591,7 +753,7 @@ void client_send_message(client_t *client, header_t *header, short command, int 
 	// add the header and the payload to the clients out_buffer, a
 	ptr = (client->out.buffer + client->out.offset + client->out.length);
 	
-	memcpy(ptr, &raw, sizeof(raw_header_t));
+	memcpy(ptr, rawheader, sizeof(raw_header_t));
 	ptr += sizeof(raw_header_t);
 	memcpy(ptr, payload, length);
 	client->out.length += (sizeof(raw_header_t) + length);
@@ -605,6 +767,50 @@ void client_send_message(client_t *client, header_t *header, short command, int 
 		assert(client->write_event);
 		event_add(client->write_event, NULL);
 	}
+}
+
+
+void client_send_message(client_t *client, short command, int length, void *payload, void *data)
+{
+	raw_header_t raw;
+	int userid;
+	
+	assert(client);
+	assert(command > 0);
+	assert((length == 0 && payload == NULL) || (length > 0 && payload));
+	
+	// when sending a message, we need to save a copy of the specifics.  we will also take a void ptr that we will keep till the response is received.
+	userid = message_set(&client->messages, command, data);
+	
+	raw.command = htobe16(command);
+	raw.response_code = 0;
+	raw.userid = htobe32(userid);
+	raw.length = htobe32(length);
+
+	send_data(client, &raw, length, payload);
+}
+
+
+// add a reply to the clients outgoing buffer.  If a 'write' event isnt 
+// already set, then set one so that it can begin sending out the data.
+void client_send_reply(client_t *client, header_t *header, short code, int length, void *payload)
+{
+	raw_header_t raw;
+	
+	assert(client);
+	assert(header);
+	assert(code > 0);
+	assert((length == 0 && payload == NULL) || (length > 0 && payload));
+	
+	assert(sizeof(raw_header_t) == HEADER_SIZE);
+
+	// build the raw header.
+	raw.command = htobe16(header->command);
+	raw.response_code = htobe16(code);
+	raw.userid = htobe32(header->userid);
+	raw.length = htobe32(length);
+
+	send_data(client, &raw, length, payload);
 }
 
 

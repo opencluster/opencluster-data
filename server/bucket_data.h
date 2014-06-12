@@ -10,6 +10,22 @@
 
 
 
+#define KEYVALUE_TYPE_INT   1
+#define KEYVALUE_TYPE_STR   2
+
+typedef struct {
+	hash_t key_hash;
+	int type;
+	union {
+		long long i;
+		struct {
+			int length;
+			char *data;
+		} s;
+	} keyvalue;
+} keyvalue_t;
+
+
 typedef struct __bucket_data_t {
 
 	hash_t mask;
@@ -21,6 +37,9 @@ typedef struct __bucket_data_t {
 	
 	// the map tree.
 	GTree *tree;
+	
+	// the keyvalue tree.
+	GTree *keyvalues;
 
 	// if we already have an 'oldtree' and we need to split again, then we put the existing old tree 
 	// inside this new one.   When the data is eventually moved out of it, it can be deleted.
@@ -36,9 +55,6 @@ typedef struct {
 	GTree *mapstree;
 	hash_t item_key;
 	int migrate;		// indicates that something inside this maps tree has not been migrated yet.
-	int migrate_name;	// indicates that the name of the item has not been migrated (if less than _sync_migrate)
-	char *name;			// user specified name of the item, that is used to generate the hash-key.  May be NULL.
-	long long int_key;	// user specified integer of the key, if specified.  Only valid if 'name' is NULL.
 } maplist_t;
 
 
@@ -48,9 +64,9 @@ void data_free(bucket_data_t *data);
 void data_destroy(bucket_data_t *data, hash_t hash);
 
 value_t * data_get_value(hash_t map_hash, hash_t key_hash, bucket_data_t *ddata);
-void data_set_value(hash_t map_hash, hash_t key_hash, bucket_data_t *ddata, char *name, long long name_int, value_t *value, int expires, client_t *backup_client);
-void data_set_name_str(hash_t key_hash, bucket_data_t *data, char *name);
-void data_set_name_int(hash_t key_hash, bucket_data_t *data, long long name_int);
+void data_set_value(hash_t map_hash, hash_t key_hash, bucket_data_t *ddata, value_t *value, int expires, client_t *backup_client);
+void data_set_keyvalue_str(hash_t key_hash, bucket_data_t *data, int length, char *keyvalue);
+void data_set_keyvalue_int(hash_t key_hash, bucket_data_t *data, long long keyvalue_int);
 int data_migrate_items(client_t *client, bucket_data_t *data, hash_t hash, int limit);
 int data_in_transit(void);
 void data_in_transit_dec(void);

@@ -1,5 +1,8 @@
 This file provides some information about active branches in the repository.
 
+protocol 
+	Change the protocol so that SET's do not include a textual name.  
+	The Names can be stored seperately (in the cluster).
 
 client-maps
 	The client library does not handle maps because it was originally written 
@@ -8,6 +11,13 @@ client-maps
 client-connectivity
 	The client library does not handle multiple servers correctly.   It also 
 	does not handle recovery of a server connection.
+
+check-and-set
+	When setting a value, the client returns the hash of the previous value 
+	also, and will not set if the value on the cluster has changed since the 
+	client got the value.  Basically it means that it will not over-write a 
+	change that another node has made in between the get and set.
+	This would require some additions to the protocol.
 
 node-start
 	When a node (server) is started but not given the address of another 
@@ -18,15 +28,6 @@ node-start
 	nodes.   If a node is given connection details, it will not start up a 
 	cluster unless given an option to specifically do so.  This makes the 
 	startup process a lot more predictable.
-
-hash-check
-	Add to the protocol so that a client can locally hash a string, and also 
-	send that string to the server and receive a hash back so that it can 
-	compare that its algorithm is working the same as the server.  Even 
-	though the server does not actually need to generate hashes at all. It 
-	will be a way to make sure that different clients and languages generate 
-	the hashes consistantly.  The client should do this automatically as part 
-	of the connection process.
 
 shutdown
 	The system is not currently shutting down properly, because it is not 
@@ -86,3 +87,59 @@ client-timeout
 	general timeout... then, if connecting takes longer than that time, then 
 	it stops connecting and the function returns.  We should probably set 
 	different timeouts, like a connect timeout and a wait_for_data timeout.
+
+data-events
+	clients request to be notified when particular data is updated. 
+
+logging-split
+	Currently the log file continues to grow until it hits the maximum and then 
+	a new logfile is created.  We need to modify it so that when the time rolls 
+	over to a new day, it closes off the current log and starts a new one.   
+	This means that if the maximums are high enough, there should only be one 
+	log per day.
+
+shutdown-persist
+	When a server node is being shutdown and it is the last node in the cluster,
+	it should persist all the data that it has (which it should now have all of it).  
+	This is a command line argument.  Once the server is running, may be able to 
+	turn on this activity with a Server Command.
+
+
+append-log
+	As the server is running, all changes to the cluster components that it 
+	controls, will be written to a file.  This transaction log can be used to 
+	replay activity if there is a crash.  It must do this log writing in a way 
+	that least impacts performance of the server node.   It might have to do 
+	the writing in a different thread.   The changes would be added a pending buffer.  
+	Each server in the node will need to write to a log, and may also need some 
+	synchronisation parts in there as well for it to be effective (so that the logs 
+	can be replayed with a semblance of synchronisation, but not a big deal if 
+	it cant).
+	
+
+buffer-overrun
+	When processing parameters from the payloads, we need to verify that we got 
+	exactly what we expected.  These checks were not done during initial development 
+	because they are specific to the protocol and it is expected that the protocol 
+	will change a lot through the initial development while we discover flaws or 
+	improvements.   All the places where commands or replies are processed, need to 
+	verfiy that the length of the payload is correct for the message type.  
+	specifically strings.   
+	This is because we are given the length from the client connection.   
+	
+memory-chunks
+	When starting the cluster nodes, it should have an option to limit the 
+	amount of memory that it will use for data.  This memory will be pre-allocated 
+	into chunks and will be managed by the server to ensure that fragmentation does 
+	not occur.  To do this, we set aside chunks for similar sized objects.  
+	Memcached does a similar thing.   Every malloc and free should be examined to 
+	see if it is possible to use memory pools, or pre-allocated chunks instead.
+	
+pause_resume
+	There may be certain instances where the entire cluster needs to be paused.
+	In those cases, the node will tell all the other nodes, that they need to pause.
+	This could be when resuming all the nodes
+
+	
+	
+	

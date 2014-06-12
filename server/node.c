@@ -28,19 +28,37 @@ int _active_nodes = 0;
 
 // pre-declare our handlers where necessary.
 static void node_wait_handler(int fd, short int flags, void *arg);
+static void node_loadlevel_handler(int fd, short int flags, void *arg);
 
 
 
+static void parse_connect_info(node_t *node, char *connect_info)
+{
+	assert(node);
+	assert(connect_info);
+	
+	assert(node->details.name == NULL);
+	assert(node->details.connectinfo == NULL);
+	assert(node->details.remote_addr == NULL);
+	
+	assert(0);
+}
 
-node_t * node_new(const char *name) 
+
+node_t * node_new(char *connect_info) 
 {
 	node_t *node;
 	
-	assert(name);
+	
 	
 	node = malloc(sizeof(node_t));
 	assert(node);
-	node->name = strdup(name);
+	node->nodehash = 0;
+	
+	node->details.name = NULL;
+	node->details.connectinfo = NULL;
+	node->details.remote_addr = NULL;
+	
 	node->client = NULL;
 	node->connect_event = NULL;
 	node->loadlevel_event = NULL;
@@ -48,6 +66,8 @@ node_t * node_new(const char *name)
 	node->shutdown_event = NULL;
 
 	node->connect_attempts = 0;
+	
+	parse_connect_info(node, connect_info);
 	
 	return(node);
 }
@@ -80,10 +100,11 @@ static void node_connect_handler(int fd, short int flags, void *arg)
 	assert(fd >= 0 && flags != 0 && node);
 	logger(LOG_INFO, "CONNECT: handle=%d", fd);
 
+	assert(node->details.name);
+	
 	if (flags & EV_TIMEOUT) {
 		// timeout on the connect.  Need to handle that somehow.
-		
-		logger(LOG_WARN, "Timeout connecting to: %s", node->name);
+		logger(LOG_WARN, "Timeout connecting to: %s", node->details.name);
 		assert(0);
 	}
 	else {
@@ -99,7 +120,7 @@ static void node_connect_handler(int fd, short int flags, void *arg)
 		getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &foo);
 		if (error == ECONNREFUSED) {
 
-			logger(LOG_ERROR, "Unable to connect to: %s", node->name);
+			logger(LOG_ERROR, "Unable to connect to: %s", node->details.name);
 
 			// close the socket that didn't connect.
 			close(fd);
@@ -112,7 +133,7 @@ static void node_connect_handler(int fd, short int flags, void *arg)
 			evtimer_add(node->wait_event, &_timeout_node_wait);
 		}
 		else {
-			logger(LOG_INFO, "Connected to node: %s", node->name);
+			logger(LOG_INFO, "Connected to node: %s", node->details.name);
 			
 			// we've connected to another server.... 
 			// TODO: we still dont know if its a valid connection, but we can delay the _settling event.
@@ -132,8 +153,10 @@ static void node_connect_handler(int fd, short int flags, void *arg)
 			evtimer_add(node->loadlevel_event, &_timeout_node_loadlevel);
 
 			// should send a SERVERHELLO command to the server we've connected to.
-			push_serverhello(node->client);
-}	}	}
+			push_serverhello(node->client, node->details.connectinfo);
+		}	
+	}	
+}
 
 
 
@@ -155,11 +178,12 @@ static void node_connect(node_t *node)
 	evutil_make_socket_nonblocking(sock);
 
 	assert(node);
-	assert(node->name);
+	assert(node->details.name);
+	assert(node->details.remote_addr);
 	
 	// resolve the address.
 	len = sizeof(saddr);
-	if (evutil_parse_sockaddr_port(node->name, &saddr, &len) != 0) {
+	if (evutil_parse_sockaddr_port(node->details.remote_addr, &saddr, &len) != 0) {
 		// if we cant parse the socket, then we should probably remove it from the nodes list.
 		assert(0);
 	}
@@ -170,7 +194,7 @@ static void node_connect(node_t *node)
 	assert(errno == EINPROGRESS);
 
 		
-	logger(LOG_INFO, "attempting to connect to node: %s", node->name);
+	logger(LOG_INFO, "attempting to connect to node: %s", node->details.name);
 	
 	// set the connect event with a timeout.
 	assert(node->connect_event == NULL);
@@ -194,8 +218,8 @@ static void node_wait_handler(int fd, short int flags, void *arg)
 	assert((flags & EV_TIMEOUT) == EV_TIMEOUT);
 	assert(arg);
 	
-	assert(node->name);
-	logger(LOG_INFO, "WAIT: node:'%s'", node->name);
+	assert(node->details.name);
+	logger(LOG_INFO, "WAIT: node:'%s'", node->details.name);
 	
 	assert(node->connect_event == NULL);
 	assert(node->wait_event);
@@ -228,12 +252,12 @@ void node_retry(node_t *node)
 
 
 
-node_t * node_find(char *name)
+node_t * node_find(char *connect_info)
 {
 	int i;
 	node_t *node = NULL;
 	
-	assert(name);
+	assert(connect_info);
 	
 	for (i=0; i<_node_count && node == NULL; i++) {
 		
@@ -241,9 +265,10 @@ node_t * node_find(char *name)
 		if (_nodes[i]) {
 			assert(_nodes[i]);
 			assert(_nodes[i]->client);
-			assert(_nodes[i]->name);
+			assert(_nodes[i]->details.name);
+			assert(_nodes[i]->details.connectinfo);
 			
-			if (strcmp(_nodes[i]->name, name) == 0) {
+			if (strcmp(_nodes[i]->details.connectinfo, connect_info) == 0) {
 				node = _nodes[i];
 			}
 		}		
@@ -255,27 +280,31 @@ node_t * node_find(char *name)
 
 
 
-node_t * node_add(client_t *client, char *name)
+node_t * node_add(client_t *client, char *connect_info)
 {
 	node_t *node = NULL;
 
 	assert(client);
-	assert(name);
+	assert(connect_info);
 	
-	assert((_nodes == NULL && _node_count == 0) || (_nodes && _node_count >= 0));
-	_nodes = realloc(_nodes, sizeof(node_t *) * (_node_count + 1));
-	assert(_nodes);
-	_nodes[_node_count] = node_new(name);
-	_nodes[_node_count]->client = client;
-	
-	node = _nodes[_node_count];
-	
-	assert(client->node == NULL);
-	client->node = _nodes[_node_count];
-	_node_count ++;
+	// first need to go through the list to find out if thise node is already there.
+	node = node_find(connect_info);
+	if (node == NULL) {
+		assert((_nodes == NULL && _node_count == 0) || (_nodes && _node_count >= 0));
+		_nodes = realloc(_nodes, sizeof(node_t *) * (_node_count + 1));
+		assert(_nodes);
+		_nodes[_node_count] = node_new(connect_info);
+		_nodes[_node_count]->client = client;
 		
-	_active_nodes ++;
-	assert(_active_nodes > 0);
+		node = _nodes[_node_count];
+		
+		assert(client->node == NULL);
+		client->node = _nodes[_node_count];
+		_node_count ++;
+			
+		_active_nodes ++;
+		assert(_active_nodes > 0);
+	}
 
 	assert(node);
 	return(node);
@@ -340,7 +369,9 @@ void node_connect_all(void)
 	for (i=0; i<_node_count; i++) {
 		assert(_nodes);
 		assert(_nodes[i]);
-		assert(_nodes[i]->name);
+		assert(_nodes[i]->details.name);
+		assert(_nodes[i]->details.connectinfo);
+		assert(_nodes[i]->details.remote_addr);
 		if (_nodes[i]->client == NULL) {
 			node_connect(_nodes[i]);
 		}
@@ -352,7 +383,9 @@ void node_connect_all(void)
 static void node_free(node_t *node)
 {
 	assert(node);
-	assert(node->name);
+	assert(node->details.name);
+	assert(node->details.connectinfo);
+	assert(node->details.remote_addr);
 	
 	assert(node->client == NULL);
 	assert(node->connect_event == NULL);
@@ -360,8 +393,20 @@ static void node_free(node_t *node)
 	assert(node->wait_event == NULL);
 	assert(node->shutdown_event == NULL);
 	
-	free(node->name);
-	node->name = NULL;
+	if (node->details.connectinfo) {
+		free(node->details.connectinfo);
+		node->details.connectinfo = NULL;
+	}
+	
+	if (node->details.name) {
+		free(node->details.name);
+		node->details.name = NULL;
+	}
+	
+	if (node->details.remote_addr) {
+		free(node->details.remote_addr);
+		node->details.remote_addr = NULL;
+	}
 	
 	free(node);
 }
@@ -428,10 +473,11 @@ void node_shutdown(node_t *node)
 static void node_dump(int index, node_t *node)
 {
 	assert(node);
+	assert(node->details.name);
 
 	stat_dumpstr("    [%02d] '%s', Connected=%s, Connect_attempts=%d", 
 				 index, 
-				 node->name, 
+				 node->details.name, 
 				 node->client ? "yes" : "no", 
 				 node->connect_attempts);
 }
@@ -462,8 +508,8 @@ void nodes_dump(void)
 char * node_getname(node_t *node)
 {
 	assert(node);
-	assert(node->name);
-	return(node->name);
+	assert(node->details.name);
+	return(node->details.name);
 }
 
 

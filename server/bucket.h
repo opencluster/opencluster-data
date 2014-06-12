@@ -27,10 +27,15 @@ typedef struct {
 	// tree that the maps containing the actual data is stored.
 	bucket_data_t *data;
 	
-	// if this bucket is not hosted here, then this is the server that it is hosted.
+	// if this bucket is not hosted here, then source is the server that it is hosted.
 	// NULL if it is hosted here.
-	node_t *target_node;
+	node_t *source_node;
+	
+	// next node in the chain to send data to.
 	node_t *backup_node;
+	
+	// special 'logger' nodes can be added to the cluster.  They do not serve data, but instead 
+	// record changes to a transaction log which can be used to recover data.
 	node_t *logging_node;
 
 	// client we are transferring this bucket to.  if this is not null, then a transfer is in progress.
@@ -71,11 +76,11 @@ typedef struct {
 
 
 value_t * buckets_get_value(hash_t map_hash, hash_t key_hash);
-int buckets_store_value(hash_t map_hash, hash_t key_hash, char *name, long long name_int, int expires, value_t *value);
+int buckets_store_value(hash_t map_hash, hash_t key_hash, int expires, value_t *value);
 void buckets_split_mask(hash_t mask);
 void buckets_init(void);
-int buckets_store_name_int(hash_t key_hash, long long int_key);
-int buckets_store_name_str(hash_t key_hash, char *name);
+int buckets_store_keyvalue_int(hash_t key_hash, long long int_key);
+int buckets_store_keyvalue_str(hash_t key_hash, int length, char *name);
 
 bucket_t * bucket_new(hash_t hash);
 void bucket_shutdown(bucket_t *bucket);
@@ -83,7 +88,7 @@ void bucket_shutdown(bucket_t *bucket);
 int buckets_nobackup_count(void);
 void bucket_destroy_contents(bucket_t *bucket);
 
-char * buckets_get_primary(hash_t key_hash);
+const char * buckets_get_primary(hash_t key_hash);
 
 void buckets_dump(void);
 void hashmasks_dump(void);

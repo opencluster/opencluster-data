@@ -4,6 +4,7 @@
 #include "client.h"
 #include "commands.h"
 #include "globals.h"
+#include "hashfn.h"
 #include "header.h"
 #include "logging.h"
 #include "payload.h"
@@ -39,16 +40,25 @@ static void cmd_get_int(client_t *client, header_t *header, char *payload)
 	assert(payload);
 
 	next = payload;
-	
 	map_hash = data_long(&next);
 	key_hash = data_long(&next);
 	
 	logger(LOG_INFO, "CMD: get (integer) [%#llx/%#llx]", map_hash, key_hash);
+
+	/* First we will blindly attempt to get the data from this node.   If this data is not primarily 
+	 * stored on this server, it is rather quick to exit.   Since we need to cater for clients that 
+	 * connect directly to each node for super fast response, we need to treat that method the 
+	 * quickest.  Therefore it is assumed that if the client is asking this node for the data, then 
+	 * there is a good change the data is on this server.
+	 * 
+	 * The function will return NULL even if the data is there but this server is a backup node.  
+	 * Since the source of truth is the primary store, it will not grab the data from the backup 
+	 * node.
+	 */
 	value = buckets_get_value(map_hash, key_hash);
 	
-	// send the ACK reply.
 	if (value) {
-		if (value->type != VALUE_INT) {
+		if (value->type != VALUE_LONG) {
 			// need to indicate stored value is a different type.
 			assert(0);
 		}
@@ -57,10 +67,11 @@ static void cmd_get_int(client_t *client, header_t *header, char *payload)
 			assert(payload_length() == 0);
 			payload_long(map_hash);
 			payload_long(key_hash);
-			payload_int(value->data.i);
+			payload_long(value->valuehash);
+			payload_long(value->data.l);
 
 			assert(payload_length() > 0);
-			client_send_message(client, header, REPLY_DATA_INT, payload_length(), payload_ptr());
+			client_send_reply(client, header, RESPONSE_DATA_INT, payload_length(), payload_ptr());
 			payload_clear();
 		}
 	}
@@ -85,27 +96,33 @@ static void cmd_get_int(client_t *client, header_t *header, char *payload)
 		// the data they are looking for is not here.
 		// we need to check to make sure taht this instance is responsible for the bucket this item would be located.  If it this instance, then the item doesnt exist, but if this instance is not responsible, we need to reply with the primary server for that bucket.
 		
-		char *server = buckets_get_primary(key_hash);
+		const char *server = buckets_get_primary(key_hash);
 		if (server == NULL) {
 			// the server for the bucket is this one, so the key mustn't exit.
-			client_send_message(client, header, REPLY_FAIL, 0, NULL);
+			client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
 		}
 		else {
-			// need to reply with the actual server that is responsible for this key.
+			// The data is not here, but we know where the data is, so we need to make a request to the actual server that has it.
 
+			
 			assert(server);
 			assert(strlen(server) > 0);
 			logger(LOG_DEBUG, "CMD: Bucket %#llx not here, it is at '%s'", key_hash, server);
 			
-			
-			assert(payload_length() == 0);
-			payload_string(server);
+			assert(0);
 
-			assert(payload_length() > 0);
-			client_send_message(client, header, REPLY_TRYELSEWHERE, payload_length(), payload_ptr());
-			payload_clear();
+			// create a structure with the data we will need when the response comes back.
 
+			// The data is no
 			
+			
+			
+// 			assert(payload_length() == 0);
+// 			payload_string(server);
+
+// 			assert(payload_length() > 0);
+// 			client_send_message(client, header, REPLY_TRYELSEWHERE, payload_length(), payload_ptr());
+// 			payload_clear();
 
 		}
 	}
@@ -114,13 +131,13 @@ static void cmd_get_int(client_t *client, header_t *header, char *payload)
 }
 
 
-
 // Get a value from storage.
 static void cmd_get_str(client_t *client, header_t *header, char *payload)
 {
 	char *next;
 	hash_t map_hash;
 	hash_t key_hash;
+	int max_length;
 	value_t *value;
 	
 	assert(client);
@@ -128,65 +145,86 @@ static void cmd_get_str(client_t *client, header_t *header, char *payload)
 	assert(payload);
 
 	next = payload;
-	
 	map_hash = data_long(&next);
 	key_hash = data_long(&next);
+	max_length = data_int(&next);
 	
-	value = buckets_get_value(map_hash, key_hash);
-	
-	// send the ACK reply.
-	if (value) {
-		if (value->type != VALUE_STRING) {
-			// need to indicate stored value is a different type.
-			assert(0);
-		}
-		else {
-			// build the reply.
-			assert(payload_length() == 0);
-			payload_long(map_hash);
-			payload_long(key_hash);
-			payload_data(value->data.s.length, value->data.s.data);
-			
-			assert(payload_length() > 0);
-			client_send_message(client, header, REPLY_DATA_STR, payload_length(), payload_ptr());
-			payload_clear();
-		}
+	if (max_length < 0) {
+		// the client gave a negative number which is invalid.
+		client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
 	}
 	else {
+
+		/* First we will blindly attempt to get the data from this node.   If this data is not primarily 
+		* stored on this server, it is rather quick to exit.   Since we need to cater for clients that 
+		* connect directly to each node for super fast response, we need to treat that method the 
+		* quickest.  Therefore it is assumed that if the client is asking this node for the data, then 
+		* there is a good change the data is on this server.
+		* 
+		* The function will return NULL even if the data is there but this server is a backup node.  
+		* Since the source of truth is the primary store, it will not grab the data from the backup 
+		* node.
+		*/
+		value = buckets_get_value(map_hash, key_hash);
 		
-		/* NOTE:
-		 * 
-		 * For this function, we are assuming that the majority of requests will be correctly 
-		 * allocated to the correct server, and would likely result in an item being found.   
-		 * That is why we first just blindly attempt to find the item in the maps, rather than first 
-		 * checking that this key belongs on this server.   If we are unable to find the item, then 
-		 * we check to see if the client should be looking on a different server.
-		 * 
-		 * You may be tempted to do those checks first, but then you are penalizing the 99% of 
-		 * requests that return an item.  So you better make sure that's actually what you want to 
-		 * do.
-		 */
-		
-		
-		// the data they are looking for is not here.
-		char *server = buckets_get_primary(key_hash);
-		if (server == NULL) {
-			// the server for the bucket is this one, so the key mustn't exit.
-			client_send_message(client, header, REPLY_FAIL, 0, NULL);
+		if (value) {
+			if (value->type != VALUE_STRING) {
+				// need to indicate stored value is a different type.
+				client_send_reply(client, header, RESPONSE_WRONGTYPE, 0, NULL);
+			}
+			else {
+				
+				// the value is a string, but is it within the max length specified?
+				if (max_length > 0 && value->data.s.length > max_length) {
+					client_send_reply(client, header, RESPONSE_TOOLARGE, 0, NULL);
+				}
+				else {
+					// everything is goog, so build the reply.
+					assert(payload_length() == 0);
+					payload_long(map_hash);
+					payload_long(key_hash);
+					payload_long(value->valuehash);
+					payload_data(value->data.s.length, value->data.s.data);
+					
+					assert(payload_length() > 0);
+					client_send_reply(client, header, RESPONSE_DATA_STRING, payload_length(), payload_ptr());
+					payload_clear();
+				}
+			}
 		}
 		else {
-			// need to reply with the actual server that is responsible for this key.
-
-			assert(server);
-			assert(strlen(server) > 0);
-			logger(LOG_DEBUG, "CMD: Bucket %#llx not here, it is at '%s'", key_hash, server);
 			
-			assert(payload_length() == 0);
-			payload_string(server);
+			/* NOTE:
+			* 
+			* For this function, we are assuming that the majority of requests will be correctly 
+			* allocated to the correct server, and would likely result in an item being found.   
+			* That is why we first just blindly attempt to find the item in the maps, rather than first 
+			* checking that this key belongs on this server.   If we are unable to find the item, then 
+			* we check to see if the client should be looking on a different server.
+			* 
+			* You may be tempted to do those checks first, but then you are penalizing the 99% of 
+			* requests that return an item.  So you better make sure that's actually what you want to 
+			* do.
+			*/
+			
+			
+			// the data they are looking for is not here.
+			const char *server = buckets_get_primary(key_hash);
+			if (server == NULL) {
+				// the server for the bucket is this one, so the key mustn't exit.
+				client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
+			}
+			else {
+				// need to reply with the actual server that is responsible for this key.
 
-			assert(payload_length() > 0);
-			client_send_message(client, header, REPLY_TRYELSEWHERE, payload_length(), payload_ptr());
-			payload_clear();
+				assert(server);
+				assert(strlen(server) > 0);
+				logger(LOG_DEBUG, "CMD: Bucket %#llx not here, it is at '%s'", key_hash, server);
+				
+				// need to pass the request on to the appropriate server that has the data.
+				assert(0);
+
+			}
 		}
 	}
 
@@ -204,53 +242,52 @@ static void cmd_set_str(client_t *client, header_t *header, char *payload)
 	int expires;
 	value_t *value;
 	char *str;
-	char *name;
-	int name_len;
 	int result;
 	int str_len;
 	
 	assert(client);
 	assert(header);
 	assert(payload);
-
-	// create a new value.
-	value = calloc(1, sizeof(value_t));
-	assert(value);
 	
 	next = payload;
-	
 	map_hash = data_long(&next);
 	key_hash = data_long(&next);
 	expires = data_int(&next);
-
-	str = data_string(&next, &name_len);
-	assert(str && name_len > 0);
-	name = malloc(name_len + 1);
-	memcpy(name, str, name_len);
-	name[name_len] = 0;
-
-	value->type = VALUE_STRING;
 	str = data_string(&next, &str_len);
-	value->data.s.data = malloc(str_len + 1);
-	memcpy(value->data.s.data, str, str_len);
-	value->data.s.data[str_len] = 0;
-	value->data.s.length = str_len;
 	
-	// store the value into the trees.  If a value already exists, it will get released and this one 
-	// will replace it, so control of this value is given to the tree structure.
-	// NOTE: value is controlled by the tree after this function call.
-	// NOTE: name is controlled by the tree after this function call.
-	result = buckets_store_value(map_hash, key_hash, name, 0, expires, value);
-	value = NULL;
-	name = NULL;
-	
-	// send the ACK reply.
-	if (result == 0) {
-		client_send_message(client, header, REPLY_ACK, 0, NULL);
-		payload_clear();
+	// first we need to check that this server is responsible for this data.  If not, we need to pass a message to the server that is.
+	const char *server = buckets_get_primary(key_hash);
+	if (server) {
+		// this data is being served by another node... we need to relay the query.
+		assert(0);
 	}
 	else {
-		assert(0);
+		
+		// create a new value.
+		value = calloc(1, sizeof(value_t));
+		assert(value);
+
+		value->type = VALUE_STRING;
+		value->valuehash = generate_hash_str(str, str_len);
+		value->data.s.data = malloc(str_len + 1);
+		memcpy(value->data.s.data, str, str_len);
+		value->data.s.data[str_len] = 0;
+		value->data.s.length = str_len;
+
+		// store the value into the trees.  If a value already exists, it will get released and this one 
+		// will replace it, so control of this value is given to the tree structure.
+		// NOTE: value is controlled by the tree after this function call.
+		result = buckets_store_value(map_hash, key_hash, expires, value);
+		value = NULL;
+		
+		// send the ACK reply.
+		if (result == 0) {
+			client_send_reply(client, header, RESPONSE_OK, 0, NULL);
+			payload_clear();
+		}
+		else {
+			assert(0);
+		}
 	}
 	
 	assert(payload_length() == 0);
@@ -263,6 +300,9 @@ static void cmd_loadlevels(client_t *client, header_t *header)
 	assert(client);
 	assert(header);
 
+	// the header shouldn't have any payload for this command.
+	assert(header->length == 0);
+	
 	assert(payload_length() == 0);
 	
 	assert(_primary_buckets >= 0);
@@ -273,10 +313,9 @@ static void cmd_loadlevels(client_t *client, header_t *header)
 	payload_int(_bucket_transfer);
 	
 	// send the reply.
-	client_send_message(client, header, REPLY_LOADLEVELS, payload_length(), payload_ptr());
+	client_send_reply(client, header, RESPONSE_LOADLEVELS, payload_length(), payload_ptr());
 
 	payload_clear();
-	
 	assert(_hashmasks);
 }
 
@@ -289,7 +328,6 @@ static void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
 	char *next;
 	hash_t mask;
 	hash_t key_hash;
-	int reply = 0;
 	bucket_t *bucket;
 	
 	assert(client);
@@ -297,22 +335,15 @@ static void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
 	assert(payload);
 
 	next = payload;
-	
 	mask = data_long(&next);
 	key_hash = data_long(&next);
 	
 	logger(LOG_INFO, "CMD: accept bucket (%#llx/%#llx)", mask, key_hash);
 
-	assert(payload_length() == 0);
-
-	// regardless of the reply, the payload will be the same.
-	payload_long(mask);
-	payload_long(key_hash);
-
 	if (_bucket_transfer != 0) {
 		//  we are currently transferring another bucket, therefore we cannot accept another one.
 		logger(LOG_WARN, "cant accept bucket, already transferring one.");
-		reply = REPLY_CANT_ACCEPT_BUCKET;
+		client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
 	}
 	else { 
 		assert(_bucket_transfer == 0);
@@ -320,7 +351,7 @@ static void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
 			// the masks are different, we cannot accept a bucket unless our masks match... which should 
 			// balance out once hashmasks have proceeded through all the nodes.
 			logger(LOG_WARN, "cant accept bucket, masks are not compatible.");
-			reply = REPLY_CANT_ACCEPT_BUCKET;
+			client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
 		}
 		else {
 			// now we need to check that this bucket isn't already handled by this server.
@@ -341,11 +372,10 @@ static void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
 			assert(_buckets);
 			if (_buckets[key_hash]) {
 				logger(LOG_ERROR, "cant accept bucket, already have that bucket.");
-				reply = REPLY_CANT_ACCEPT_BUCKET;
+				client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
 			}
 			else {
-				logger(LOG_INFO, "accepting bucket.");
-				reply = REPLY_ACCEPTING_BUCKET;
+				logger(LOG_INFO, "accepting bucket. (%#llx/%#llx)", mask, key_hash);
 				
 				assert(_bucket_transfer == 0);
 				_bucket_transfer = 1;
@@ -359,15 +389,14 @@ static void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
 				logger(LOG_DEBUG, "Setting transfer client ('%s') to bucket %#llx.", node_getname(client->node), bucket->hash);
 				bucket->transfer_client = client;
 				assert(bucket->level < 0);
+				
+				client_send_reply(client, header, RESPONSE_OK, 0, NULL);
 			}
 		}
 	}
 
-	assert(payload_length() > 0);
-	assert(reply > 0);
-	client_send_message(client, header, reply, payload_length(), payload_ptr());
-
-	payload_clear();
+	// we did not create an outgoing payload, better check that it is still empty.
+	assert(payload_length() == 0);
 }
 
 
@@ -381,9 +410,6 @@ static void cmd_set_int(client_t *client, header_t *header, char *payload)
 	hash_t key_hash;
 	int expires;
 	value_t *value;
-	char *str;
-	char *name;
-	int name_len;
 	int result;
 	
 	assert(client);
@@ -396,34 +422,23 @@ static void cmd_set_int(client_t *client, header_t *header, char *payload)
 	assert(value);
 	
 	next = payload;
+	map_hash      = data_long(&next);
+	key_hash      = data_long(&next);
+	expires       = data_int(&next);
+	value->data.l = data_long(&next);
+	value->type = VALUE_LONG;
 	
-	map_hash = data_long(&next);
-	key_hash = data_long(&next);
-	expires = data_int(&next);
-	str = data_string(&next, &name_len);
-	value->type = VALUE_INT;
-	value->data.i = data_int(&next);
-	
-	assert(str && name_len > 0);
-	
-	name = malloc(name_len + 1);
-	memcpy(name, str, name_len);
-	name[name_len] = 0;
-	
-	logger(LOG_DEBUG, "CMD: set (integer): [%#llx/%#llx]'%s'=%d", map_hash, key_hash, name, value->data.i);
-
+	logger(LOG_DEBUG, "CMD: set (integer): [%#llx/%#llx]=%d", map_hash, key_hash, value->data.l);
 
 	// store the value into the trees.  If a value already exists, it will get released and this one 
 	// will replace it, so control of this value is given to the tree structure.
 	// NOTE: value is controlled by the tree after this function call.
-	// NOTE: name is controlled by the tree after this function call.
-	result = buckets_store_value(map_hash, key_hash, name, 0, expires, value);
+	result = buckets_store_value(map_hash, key_hash, expires, value);
 	value = NULL;
-	name = NULL;
 	
 	// send the ACK reply.
 	if (result == 0) {
-		client_send_message(client, header, REPLY_ACK, 0, NULL);
+		client_send_reply(client, header, RESPONSE_OK, 0, NULL);
 		assert(payload_length() == 0);
 	}
 	else {
@@ -441,9 +456,10 @@ static void cmd_ping(client_t *client, header_t *header)
 	assert(header);
 
 	// there is no payload required for an ack.
+	assert(header->length == 0);
 	
 	// send the ACK reply.
-	client_send_message(client, header, REPLY_ACK, 0, NULL);
+	client_send_reply(client, header, RESPONSE_OK, 0, NULL);
 }
 
 
@@ -457,11 +473,11 @@ static void cmd_goodbye(client_t *client, header_t *header)
 	client_closing(client);
 	
 	// send the ACK reply.
-	client_send_message(client, header, REPLY_ACK, 0, NULL);
+	client_send_reply(client, header, RESPONSE_OK, 0, NULL);
 }
 
 
-
+/*
 static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 {
 	char *next;
@@ -554,9 +570,9 @@ static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 	free(name);
 	name=NULL;
 }
+*/
 
-
-
+/*
 static void cmd_serverinfo(client_t *client, header_t *header, char *payload)
 {
 	char *next;
@@ -599,7 +615,7 @@ static void cmd_serverinfo(client_t *client, header_t *header, char *payload)
 	free(name);
 	name=NULL;
 }
-
+*/
 
 
 
@@ -622,6 +638,7 @@ static void cmd_hashmask(client_t *client, header_t *header, char *payload)
 	assert(client);
 	assert(header);
 	assert(payload);
+	assert(header->length > 0);
 
 	assert(client->node);
 
@@ -664,13 +681,14 @@ static void cmd_hashmask(client_t *client, header_t *header, char *payload)
 	// these entries should only be coming from server nodes;
 	assert(client->node);
 	node = client->node;
-	assert(node->name);
+	assert(node->details.name);
 
 	if (level == 0) {
 		assert(_hashmasks);
 		assert(_hashmasks[hash]);
 		if (_hashmasks[hash]->primary) { free(_hashmasks[hash]->primary); }
-		_hashmasks[hash]->primary = strdup(node->name);
+		assert(node->details.connectinfo);
+		_hashmasks[hash]->primary = strdup(node->details.connectinfo);
 		
 		logger(LOG_DEBUG, "Setting HASHMASK: Primary [%#llx] = '%s'",
 			hash, _hashmasks[hash]->primary
@@ -680,7 +698,8 @@ static void cmd_hashmask(client_t *client, header_t *header, char *payload)
 		assert(_hashmasks);
 		assert(_hashmasks[hash]);
 		if (_hashmasks[hash]->secondary) { free(_hashmasks[hash]->secondary); }
-		_hashmasks[hash]->secondary = strdup(node->name);
+		assert(node->details.connectinfo);
+		_hashmasks[hash]->secondary = strdup(node->details.connectinfo);
 
 		logger(LOG_DEBUG, "Setting HASHMASK: Secondary [%#llx] = '%s'",
 			hash, _hashmasks[hash]->primary
@@ -691,9 +710,16 @@ static void cmd_hashmask(client_t *client, header_t *header, char *payload)
 	}
 
 	// send the ACK reply.
-	client_send_message(client, header, REPLY_ACK, 0, NULL);
+	client_send_reply(client, header, RESPONSE_OK, 0, NULL);
 }
 
+
+// send message to all other connected clients and nodes alerting them to the change in buckets.
+static void hashmask_update(bucket_t *bucket)
+{
+	assert(bucket);
+	assert(0);
+}
 
 
 
@@ -706,7 +732,6 @@ static void cmd_control_bucket(client_t *client, header_t *header, char *payload
 	hash_t mask;
 	hash_t key_hash;
 	int level;
-	int reply = 0;
 	bucket_t *bucket = NULL;
 	
 	assert(client);
@@ -714,25 +739,18 @@ static void cmd_control_bucket(client_t *client, header_t *header, char *payload
 	assert(payload);
 
 	next = payload;
-	mask = data_long(&next);
+	mask     = data_long(&next);
 	key_hash = data_long(&next);
-	level = data_int(&next);
+	level    = data_int(&next);
 	
 	logger(LOG_INFO, "CMD: bucket control (%#llx/%#llx), level:%d", mask, key_hash, level);
 
-	// regardless of the reply, the payload will be the same.
-	assert(payload_length() == 0);
-	payload_long(mask);
-	payload_long(key_hash);
-
 	// make sure that the masks are the same.
 	if (mask != _mask) {
-		reply = REPLY_CONTROL_BUCKET_FAILED;
+		client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
 		assert(bucket == NULL);
 	}
 	else {
-		reply = REPLY_CONTROL_BUCKET_COMPLETE;
-		
 		assert(_buckets);
 		assert(key_hash <= _mask);
 		assert(key_hash >= 0);
@@ -750,10 +768,10 @@ static void cmd_control_bucket(client_t *client, header_t *header, char *payload
 			// we are switching a bucket from secondary to primary.
 			assert(bucket->level == 1);
 			assert(bucket->backup_node == NULL);
-			assert(bucket->target_node);
-			assert(bucket->target_node->client == client);
-			bucket->backup_node = bucket->target_node;
-			bucket->target_node = NULL;
+			assert(bucket->source_node);
+			assert(bucket->source_node->client == client);
+			bucket->backup_node = bucket->source_node;
+			bucket->source_node = NULL;
 			
 			_primary_buckets ++;
 			_secondary_buckets --;
@@ -765,10 +783,10 @@ static void cmd_control_bucket(client_t *client, header_t *header, char *payload
 			assert(bucket->level == 0);
 			
 			// we should be connected to this other node.
-			assert(bucket->target_node == NULL);
+			assert(bucket->source_node == NULL);
 			assert(bucket->backup_node);
 			assert(bucket->backup_node->client == client);
-			bucket->target_node = bucket->backup_node;
+			bucket->source_node = bucket->backup_node;
 			bucket->backup_node = NULL;
 			
 			_primary_buckets --;
@@ -785,12 +803,9 @@ static void cmd_control_bucket(client_t *client, header_t *header, char *payload
 		bucket->level = level;
 		
 		hashmask_switch(key_hash);
+		
+		client_send_reply(client, header, RESPONSE_OK, 0, NULL);
 	}
-
-	assert(payload_length() > 0);
-	assert(reply > 0);
-	client_send_message(client, header, reply, payload_length(), payload_ptr());
-	payload_clear();
 
 	// since this node is receiving the 'switch' command, we should not have any buckets transferring.
 	assert(_bucket_transfer == 0);
@@ -798,8 +813,12 @@ static void cmd_control_bucket(client_t *client, header_t *header, char *payload
 	if (bucket) {
 		// send message to all other connected clients and nodes alerting them to the change in buckets.
 		assert(bucket->level >= 0);
-		push_hashmask_update(bucket);
+		hashmask_update(bucket);
 	}
+
+	// outgoing payload should not be needed, better make sure that it is still empty.
+	assert(payload_length() == 0);
+
 }
 
 
@@ -815,7 +834,6 @@ static void cmd_finalise_migration(client_t *client, header_t *header, char *pay
 	hash_t key_hash;
 	int level;
 	char *remote_host = NULL;
-	int reply = 0;
 	bucket_t *bucket = NULL;
 	
 	assert(client);
@@ -826,29 +844,19 @@ static void cmd_finalise_migration(client_t *client, header_t *header, char *pay
 	mask        = data_long(&next);
 	key_hash    = data_long(&next);
 	level       = data_int(&next);
-	remote_host = data_string_copy(&next);
+	remote_host = data_string_copy(&next);  // the connect_info for a particular node.
 	
 	logger(LOG_INFO, "CMD: finalise migration (%#llx/%#llx), level:%d, remote:'%s'", mask, key_hash, level, remote_host);
 
 	// regardless of the reply, the payload will be the same.
 	assert(payload_length() == 0);
-	payload_long(mask);
-	payload_long(key_hash);
 
 	// make sure that the masks are the same.
 	if (mask != _mask) {
-		reply = REPLY_MIGRATION_FAIL;
-		
-		// since we are not going to be using the remote_host, then we should free it now.
-		if (remote_host) {
-			free(remote_host);
-			remote_host = NULL;
-		}
-	
 		assert(bucket == NULL);
+		client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
 	}
 	else {
-		reply = REPLY_MIGRATION_ACK;
 		
 		assert(_buckets);
 		assert(key_hash <= _mask);
@@ -859,7 +867,7 @@ static void cmd_finalise_migration(client_t *client, header_t *header, char *pay
 		assert(bucket);
 		assert(bucket->hash == key_hash);
 		assert(bucket->level < 0);
-		assert(bucket->target_node == NULL);
+		assert(bucket->source_node == NULL);
 		assert(bucket->backup_node == NULL);
 		assert(data_in_transit() == 0);
 		assert(bucket->transfer_event == NULL);
@@ -886,7 +894,7 @@ static void cmd_finalise_migration(client_t *client, header_t *header, char *pay
 			else {
 				assert(bucket->backup_node == NULL);
 			}
-			assert(bucket->target_node == NULL);
+			assert(bucket->source_node == NULL);
 			
 			assert(_hashmasks);
 			assert(_hashmasks[key_hash]);
@@ -901,9 +909,9 @@ static void cmd_finalise_migration(client_t *client, header_t *header, char *pay
 		else {
 			// we are receiving a backup bucket.  
 			assert(remote_host);
-			bucket->target_node = node_find(remote_host);
-			assert(bucket->target_node);
-			assert(bucket->target_node->client);
+			bucket->source_node = node_find(remote_host);
+			assert(bucket->source_node);
+			assert(bucket->source_node->client);
 
 			assert(_hashmasks);
 			assert(_hashmasks[key_hash]);
@@ -919,25 +927,28 @@ static void cmd_finalise_migration(client_t *client, header_t *header, char *pay
 			_secondary_buckets ++;
 			assert(_secondary_buckets > 0);
 		}
+		
+		client_send_reply(client, header, RESPONSE_OK, 0, NULL);
 	}
 	
 	// at this point, the bucket should have at least a source node, or a backup node listed.
-	assert(bucket->target_node || bucket->backup_node);
+	assert(bucket->source_node || bucket->backup_node);
 
 	assert(bucket->transfer_client == NULL);
 	
-	assert(payload_length() > 0);
-	assert(reply > 0);
-	client_send_message(client, header, reply, payload_length(), payload_ptr());
-	payload_clear();
-
 	assert(_bucket_transfer == 1);
 	_bucket_transfer = 0;
+
+	if (remote_host) {
+		free(remote_host);
+		remote_host = NULL;
+	}
+
 	
 	if (bucket) {
 		// send message to all other connected clients and nodes alerting them to the change in buckets.
 		assert(bucket->level >= 0);
-		push_hashmask_update(bucket);
+		hashmask_update(bucket);
 	}
 }
 
@@ -945,21 +956,25 @@ static void cmd_finalise_migration(client_t *client, header_t *header, char *pay
 
 // the hello command does not require a payload, and simply does a reply.   
 // However, it triggers a servermap, and a hashmasks command to follow it.
-static void cmd_hello(client_t *client, header_t *header)
+static void cmd_hello(client_t *client, header_t *header, char *payload)
 {
+	char *auth;
+	int auth_len;
+	char *next;
+	
 	assert(client);
 	assert(header);
 
 	// there is no payload required for an ack.
+	assert(header->length > 0);
+	
+	next = payload;
+	auth = data_string(&next, &auth_len);
+	
+// TODO: Need to actually parse the authentication information and compare against teh server's authentication methods to determine if there is a match.
 	
 	// send the ACK reply.
-	client_send_message(client, header, REPLY_ACK, 0, NULL);
-	
-	// send a servermap command to the client.
-	push_serverlist(client);
-	
-	// send a hashmasks command to the client.
-	push_hashmasks(client);
+	client_send_reply(client, header, RESPONSE_OK, 0, NULL);
 }
 
 
@@ -991,18 +1006,17 @@ static void cmd_sync_string(client_t *client, header_t *header, char *payload)
 	map_hash = data_long(&next);
 	key_hash = data_long(&next);
 	expires = data_int(&next);
+	str = data_string(&next, &str_len);
 	
 	assert(_hashmasks);
 
 	
 	// we cant treat the string as a typical C string, because it is actually a binary blob that may 
 	// contain NULL chars.
-	str = data_string(&next, &str_len);
 	value->data.s.data = malloc(str_len + 1);
 	memcpy(value->data.s.data, str, str_len);
 	value->data.s.data[str_len] = 0;
 	value->data.s.length = str_len;
-
 	value->type = VALUE_STRING;
 	
 	
@@ -1010,16 +1024,12 @@ static void cmd_sync_string(client_t *client, header_t *header, char *payload)
 	// will replace it, so control of this value is given to the tree structure.
 	// NOTE: value is controlled by the tree after this function call.
 	// NOTE: name is controlled by the tree after this function call.
-	result = buckets_store_value(map_hash, key_hash, NULL, 0, expires, value);
+	result = buckets_store_value(map_hash, key_hash, expires, value);
 	value = NULL;
 	
 	// send the ACK reply.
 	if (result == 0) {
-		assert(payload_length() == 0);
-		payload_long(map_hash);
-		payload_long(key_hash);
-		client_send_message(client, header, REPLY_SYNC_ACK, payload_length(), payload_ptr());
-		payload_clear();
+		client_send_reply(client, header, RESPONSE_OK, 0, NULL);
 	}
 	else {
 		assert(0);
@@ -1055,119 +1065,19 @@ static void cmd_sync_int(client_t *client, header_t *header, char *payload)
 	map_hash = data_long(&next);
 	key_hash = data_long(&next);
 	expires = data_int(&next);
-	
-	value->data.i = data_int(&next);
-	value->type = VALUE_INT;
-	
-	// store the value into the trees.  If a value already exists, it will get released and this one 
-	// will replace it, so control of this value is given to the tree structure.
-	// NOTE: value is controlled by the tree after this function call.
-	// NOTE: name is controlled by the tree after this function call (if it is supplied).
-	result = buckets_store_value(map_hash, key_hash, NULL, 0, expires, value);
-	value = NULL;
-	
-	// send the ACK reply.
-	if (result == 0) {
-		
-		assert(payload_length() == 0);
-		payload_int(map_hash);
-		payload_int(key_hash);
-		client_send_message(client, header, REPLY_SYNC_ACK, payload_length(), payload_ptr());
-		payload_clear();
-	}
-	else {
-		assert(0);
-	}
-	
-	assert(payload_length() == 0);
-}
-
-
-
-
-
-// Set a value into the hash storage for a new bucket we are receiving.  Almost the same as 
-// cmd_set_str, except the data received is slightly different.
-static void cmd_sync_name(client_t *client, header_t *header, char *payload)
-{
-	char *next;
-	hash_t key_hash;
-	int result;
-	char *name;
-	
-	assert(client);
-	assert(header);
-	assert(payload);
-	
-	next = payload;
-	
-	key_hash = data_long(&next);
-	name = data_string_copy(&next);
-	assert(name);
-	
-	logger(LOG_DEBUG, "Received: CMD_SYNC_NAME: %#llx='%s'", key_hash, name);
-	
-	// NOTE: name is controlled by the tree after this function call.
-	result = buckets_store_name_str(key_hash, name);
-	name = NULL;
-	
-	// send the ACK reply.
-	if (result == 0) {
-		assert(payload_length() == 0);
-		payload_long(key_hash);
-		client_send_message(client, header, REPLY_SYNC_NAME_ACK, payload_length(), payload_ptr());
-		payload_clear();
-	}
-	else {
-		assert(0);
-	}
-	
-	assert(payload_length() == 0);
-}
-
-
-// Set a value into the hash storage for a new bucket we are receiving.  Almost the same as 
-// cmd_set_str, except the data received is slightly different.
-static void cmd_migrate_int(client_t *client, header_t *header, char *payload)
-{
-	char *next;
-	hash_t map_hash;
-	hash_t key_hash;
-	int expires;
-	value_t *value;
-	int result;
-	
-	assert(client);
-	assert(header);
-	assert(payload);
-
-	// create a new value.
-	value = calloc(1, sizeof(value_t));
-	assert(value);
-	
-	next = payload;
-	map_hash = data_long(&next);
-	key_hash = data_long(&next);
-	expires = data_int(&next);
-	
-	value->data.i = data_int(&next);
-	value->type = VALUE_INT;
+	value->data.l = data_long(&next);
+	value->type = VALUE_LONG;
 	
 	// store the value into the trees.  If a value already exists, it will get released and this one 
 	// will replace it, so control of this value is given to the tree structure.
 	// NOTE: value is controlled by the tree after this function call.
 	// NOTE: name is controlled by the tree after this function call (if it is supplied).
-	result = buckets_store_value(map_hash, key_hash, NULL, 0, expires, value);
+	result = buckets_store_value(map_hash, key_hash, expires, value);
 	value = NULL;
 	
 	// send the ACK reply.
 	if (result == 0) {
-		
-		assert(payload_length() == 0);
-		payload_long(map_hash);
-		payload_long(key_hash);
-		client_send_message(client, header, REPLY_MIGRATE_ACK, payload_length(), payload_ptr());
-		payload_clear();
+		client_send_reply(client, header, RESPONSE_OK, 0, NULL);
 	}
 	else {
 		assert(0);
@@ -1177,98 +1087,43 @@ static void cmd_migrate_int(client_t *client, header_t *header, char *payload)
 }
 
 
+
+
+
 // Set a value into the hash storage for a new bucket we are receiving.  Almost the same as 
 // cmd_set_str, except the data received is slightly different.
-static void cmd_migrate_name(client_t *client, header_t *header, char *payload)
+static void cmd_sync_keyvalue(client_t *client, header_t *header, char *payload)
 {
 	char *next;
 	hash_t key_hash;
 	int result;
-	char *name;
-	
-	assert(client);
-	assert(header);
-	assert(payload);
-	
-	next = payload;
-	key_hash = data_long(&next);
-	name = data_string_copy(&next);
-	assert(name);
-	
-	logger(LOG_DEBUG, "Received: CMD_MIGRATE_NAME: %#llx='%s'", key_hash, name);
-	
-	// NOTE: name is controlled by the tree after this function call.
-	result = buckets_store_name_str(key_hash, name);
-	name = NULL;
-	
-	// send the ACK reply.
-	if (result == 0) {
-		assert(payload_length() == 0);
-		payload_long(key_hash);
-		client_send_message(client, header, REPLY_MIGRATE_NAME_ACK, payload_length(), payload_ptr());
-		payload_clear();
-	}
-	else {
-		assert(0);
-	}
-	
-	assert(payload_length() == 0);
-}
-
-
-
-// Set a value into the hash storage for a new bucket we are receiving.  Almost the same as 
-// cmd_set_str, except the data received is slightly different.
-static void cmd_migrate_string(client_t *client, header_t *header, char *payload)
-{
-	char *next;
-	hash_t map_hash;
-	hash_t key_hash;
-	int expires;
-	value_t *value;
 	char *str;
-	int result;
-	int str_len;
+	char *keyvalue;
+	int length;
 	
 	assert(client);
 	assert(header);
 	assert(payload);
-	assert(_hashmasks);
-
-	// create a new value.
-	value = calloc(1, sizeof(value_t));
-	assert(value);
 	
 	next = payload;
-	map_hash = data_long(&next);
+	
 	key_hash = data_long(&next);
-	expires = data_int(&next);
-	
-	// we cant treat the string as a typical C string, because it is actually a binary blob that may 
-	// contain NULL chars.
-	str = data_string(&next, &str_len);
-	value->data.s.data = malloc(str_len + 1);
-	memcpy(value->data.s.data, str, str_len);
-	value->data.s.data[str_len] = 0;
-	value->data.s.length = str_len;
+	str = data_string(&next, &length);
+	assert(str);
+	assert(length > 0);
 
-	value->type = VALUE_STRING;
+	keyvalue = malloc(length + 1);
+	memcpy(keyvalue, str, length);
+	keyvalue[length] = 0;
 	
+	logger(LOG_DEBUG, "Received: CMD_SYNC_KEYVALUE: %#llx", key_hash);
 	
-	// store the value into the trees.  If a value already exists, it will get released and this one 
-	// will replace it, so control of this value is given to the tree structure.
-	// NOTE: value is controlled by the tree after this function call.
 	// NOTE: name is controlled by the tree after this function call.
-	result = buckets_store_value(map_hash, key_hash, NULL, 0, expires, value);
-	value = NULL;
+	result = buckets_store_keyvalue_str(key_hash, length, keyvalue);
 	
 	// send the ACK reply.
 	if (result == 0) {
-		assert(payload_length() == 0);
-		payload_long(map_hash);
-		payload_long(key_hash);
-		client_send_message(client, header, REPLY_MIGRATE_ACK, payload_length(), payload_ptr());
-		payload_clear();
+		client_send_reply(client, header, RESPONSE_OK, 0, NULL);
 	}
 	else {
 		assert(0);
@@ -1282,27 +1137,25 @@ static void cmd_migrate_string(client_t *client, header_t *header, char *payload
 
 void cmd_init(void)
 {
-	// add the commands to the client processing code.
-	client_add_cmd(CMD_GET_INT, cmd_get_int);
-	client_add_cmd(CMD_GET_STR, cmd_get_str);
-	client_add_cmd(CMD_SET_INT, cmd_set_int);
-	client_add_cmd(CMD_SET_STR, cmd_set_str);
-	client_add_cmd(CMD_SYNC_INT, cmd_sync_int);
-	client_add_cmd(CMD_SYNC_NAME, cmd_sync_name);
-	client_add_cmd(CMD_SYNC_STRING, cmd_sync_string);
-	client_add_cmd(CMD_MIGRATE_INT, cmd_migrate_int);
-	client_add_cmd(CMD_MIGRATE_NAME, cmd_migrate_name);
-	client_add_cmd(CMD_MIGRATE_STRING, cmd_migrate_string);
-	client_add_cmd(CMD_PING, cmd_ping);
-	client_add_cmd(CMD_LOADLEVELS, cmd_loadlevels);
-	client_add_cmd(CMD_ACCEPT_BUCKET, cmd_accept_bucket);
-	client_add_cmd(CMD_CONTROL_BUCKET, cmd_control_bucket);
-	client_add_cmd(CMD_FINALISE_MIGRATION, cmd_finalise_migration);
-	client_add_cmd(CMD_HASHMASK, cmd_hashmask);
-	client_add_cmd(CMD_HELLO, cmd_hello);
-	client_add_cmd(CMD_GOODBYE, cmd_goodbye);
-	client_add_cmd(CMD_SERVERHELLO, cmd_serverhello);
-	client_add_cmd(CMD_SERVERINFO, cmd_serverinfo);
+	// add the commands to the client processing code.   It doesn't really matter which order they 
+	// are set.  Previous versions used an array so it was beneficial to have the most common ones 
+	// added first.
+	client_add_cmd(COMMAND_GET_INT, cmd_get_int);
+ 	client_add_cmd(COMMAND_GET_STRING, cmd_get_str);
+ 	client_add_cmd(COMMAND_SET_INT, cmd_set_int);
+ 	client_add_cmd(COMMAND_SET_STRING, cmd_set_str);
+ 	client_add_cmd(COMMAND_SYNC_INT, cmd_sync_int);
+ 	client_add_cmd(COMMAND_SYNC_KEYVALUE, cmd_sync_keyvalue);
+ 	client_add_cmd(COMMAND_SYNC_STRING, cmd_sync_string);
+ 	client_add_cmd(COMMAND_PING, cmd_ping);
+ 	client_add_cmd(COMMAND_LOADLEVELS, cmd_loadlevels);
+ 	client_add_cmd(COMMAND_ACCEPT_BUCKET, cmd_accept_bucket);
+ 	client_add_cmd(COMMAND_CONTROL_BUCKET, cmd_control_bucket);
+ 	client_add_cmd(COMMAND_FINALIZE_MIGRATION, cmd_finalise_migration);
+ 	client_add_cmd(COMMAND_HASHMASK, cmd_hashmask);
+ 	client_add_cmd(COMMAND_HELLO, cmd_hello);
+ 	client_add_cmd(COMMAND_GOODBYE, cmd_goodbye);
+//  	client_add_cmd(COMMAND_SERVERHELLO, cmd_serverhello);
 }
 
 

@@ -5,19 +5,27 @@
 
 
 #define VALUE_DELETED  0
-#define VALUE_SHORT    1
-#define VALUE_INT      2
-#define VALUE_LONG     3
-#define VALUE_STRING   4
+#define VALUE_LONG     1
+#define VALUE_STRING   2
+//#define VALUE_LIST     3
+
+
+typedef struct {
+} value_list_entry_t;
+
 typedef struct {
 	short type;
+	long long valuehash;
 	union {
-		int i;					// integer
 		long long l;			// long
 		struct {
 			int length;
 			char *data;
 		} s;					// string
+		struct {
+			int count;
+			value_list_entry_t **array;
+		} list;
 	} data;
 } value_t;
 

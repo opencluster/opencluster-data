@@ -72,6 +72,9 @@ bucket_data_t * data_new(hash_t hashmask)
 	assert(data->tree);
 	data->next = NULL;
 	
+	data->keyvalues = g_tree_new(key_compare_fn);
+	assert(data->keyvalues);
+	
 	data->item_count = 0;
 	data->data_size = 0;
 	
@@ -218,8 +221,55 @@ void data_free(bucket_data_t *data)
 	g_tree_destroy(data->tree);
 	data->tree = NULL;
 	
+	g_tree_destroy(data->keyvalues);
+	data->keyvalues = NULL;
+	
 	free(data);
 }
+
+
+static keyvalue_t * find_keyvalue(hash_t key_hash, bucket_data_t *data)
+{
+	keyvalue_t *entry = NULL;
+	bucket_data_t *current;
+	
+	assert(data);
+
+	current = data;
+	assert(current->tree);
+
+	while (current) {
+		
+		logger(LOG_DEBUG, "find_keyvalue: Looking for %#llx in container %#llx/%#llx", key_hash, current->mask, current->hashmask);
+		
+		entry = g_tree_lookup(current->tree, &key_hash);
+		if (entry == NULL) {
+			// list is not in this one, so we should try the next one.
+			current = current->next;
+		}
+		else {
+			// we found the item.
+			
+			assert(entry->key_hash == key_hash);
+			if (current != data) {
+				// we found the item in one of the sub-chains, so we need to move it to the top.
+				g_tree_remove(current->tree, &key_hash);
+				g_tree_insert(data->tree, &key_hash, entry);
+			}
+			
+			// since the item was found, it shouldn't be anywhere else, so we can stop going 
+			// through the trees.
+			current = NULL;
+			
+			// since we MUST be returning a list at this point, make sure we haven't lost it.
+			assert(entry);
+		}
+	}
+	
+	return (entry);
+}
+
+
 
 
 // will look through the data-tree for this item hash-key.  If it finds the item in a sub-chain of 
@@ -322,9 +372,6 @@ static maplist_t * list_new(hash_t key_hash)
 	list->mapstree = g_tree_new(key_compare_fn);
 	assert(list->mapstree);
 	assert(list->migrate == 0);
-	assert(list->migrate_name == 0);
-	assert(list->name == NULL);
-	assert(list->int_key == 0);
 
 	return(list);
 }
@@ -336,7 +383,7 @@ static maplist_t * list_new(hash_t key_hash)
 // NOTE: value is controlled by the tree after this function call.
 // NOTE: name is controlled by the tree after this function call.
 void data_set_value(
-	hash_t map_hash, hash_t key_hash, bucket_data_t *ddata, char *name, long long name_int, 
+	hash_t map_hash, hash_t key_hash, bucket_data_t *ddata,  
 	value_t *value, int expires, client_t *backup_client) 
 {
 	maplist_t *list;
@@ -359,18 +406,6 @@ void data_set_value(
 		
 		list = list_new(key_hash);
 		g_tree_insert(ddata->tree, &list->item_key, list);
-
-		// this item didn't exist, so if we are doing a sync, we also need to let the 
-		// backup node know about the name of this item.
-		if (backup_client) {
-			if (name) { push_sync_name_str(backup_client, key_hash, name); }
-			else { push_sync_name_int(backup_client, key_hash, name_int); }
-		}
-
-		assert(list->name == NULL);
-		list->name = name;
-		list->int_key = name_int;
-		name = NULL;
 	}
 	else {
 		// since we found a maplist for this hash, we should look to see if this map is in there.  
@@ -394,12 +429,6 @@ void data_set_value(
 			// ** PERF: value objects should be put back in a pool to avoid having to alloc/free all the time.
 			free(value);
 			value = NULL;
-			
-			// since we control the 'name' memory, but dont actually need it, we will free it.
-			if (name) {
-				free(name);
-				name = NULL;
-			}
 			
 			item->expires = expires == 0 ? 0 : _seconds + expires;
 		}
@@ -431,8 +460,6 @@ void data_set_value(
 	if (backup_client) {
 		push_sync_item(backup_client, item);
 	}
-
-	assert(name == NULL);
 }
 
 
@@ -460,7 +487,7 @@ static gboolean migrate_map_fn(gpointer p_key, gpointer p_value, void *p_data)
 	assert(item->migrate <= _migrate_sync);
 	if (item->migrate < _migrate_sync) {
 		logger(LOG_DEBUG, "migrate: map %#llx ready to migrate.  Sending now.", *key);
-		push_migrate_item(data->client, item);
+		push_sync_item(data->client, item);
 		_in_transit ++;
 		assert(_in_transit <= TRANSIT_MAX);
 		data->items_count ++;
@@ -506,15 +533,6 @@ static gboolean migrate_hash_fn(gpointer p_key, gpointer p_value, void *p_data)
 // 		logger(LOG_DEBUG, "migrate: found hash: %#llx, migrate=%d", *key, map->migrate);
 	
 		assert(map->migrate <= _migrate_sync);
-		assert(map->migrate_name <= _migrate_sync);
-		
-		// if we havent supplied the 'name' of this hash to the receiving server, then we need to send it.
-		if (map->migrate_name < _migrate_sync) {
-			if (map->name) { push_migrate_name_str(data->client, map->item_key, map->name); }
-			else { push_migrate_name_int(data->client, map->item_key, map->int_key); }
-			map->migrate_name = _migrate_sync;
-		}
-		
 		if (map->migrate < _migrate_sync) {
 			// found one.
 			// now we need to search the inner tree
@@ -602,67 +620,92 @@ int data_migrate_items(client_t *client, bucket_data_t *data, hash_t hashmask, i
 
 
 
-
-
-
-
-void data_set_name_str(hash_t key_hash, bucket_data_t *data, char *name)
+// 'keyvalue' is a pointer that is controlled by the keyvalue tree.
+void data_set_keyvalue_str(hash_t key_hash, bucket_data_t *data, int len, char *keyvalue)
 {
-	maplist_t *list;
+	keyvalue_t *entry;
 	
 	assert(data);
-	assert(data->tree);
-	assert(name);
+	assert(data->keyvalues);
+	assert(len > 0);
+	assert(keyvalue);
 	
 	// first we are going to store the value in the primary 'bucket_data'.  If it exists, we will 
 	// update the value in there.  If it doesn't exist we will add it, and when we've done that, 
 	// then we will go through the rest of the chain to find this same entry, if it exists, then 
 	
-	list = find_maplist(key_hash, data);
-	if (list == NULL) {
+	entry = find_keyvalue(key_hash, data);
+	if (entry == NULL) {
 		// that hash was not found anywhere in the chain, so we need to create an entry for it.
 
-		list = list_new(key_hash);
-		g_tree_insert(data->tree, &list->item_key, list);
+		entry = malloc(sizeof(keyvalue_t));
+		entry->key_hash = key_hash;
+		entry->type = KEYVALUE_TYPE_STR;
+		entry->keyvalue.s.length = len;
+		entry->keyvalue.s.data = keyvalue;
+		
+		g_tree_insert(data->keyvalues, &entry->key_hash, entry);
 	}
+	else {
 
-	assert(list);
-	
-	// now that we've got a maplist created for this hash, we need to add this map (item) to it.
-	if (list->name) { 
-		free(list->name); 
+		assert(entry);
+
+		// if the existing entry is a string, then this string should be the same otherwise we have a collision.
+		if (entry->type == KEYVALUE_TYPE_STR) {
+			if (len != entry->keyvalue.s.length || memcmp(keyvalue, entry->keyvalue.s.data, len) != 0) {
+				logger(LOG_INFO, "Keyvalue Collision:%#llx", key_hash);
+			}
+		}
+		else {
+			// the existing entry is an integer, we've had a collision.
+			logger(LOG_INFO, "Keyvalue Type Collision:%#llx", key_hash);
+			assert(0);
+		}
+		
+		// since we are in control of 'keyvalue' at this point. we need to free it.
+		free(keyvalue);
 	}
-	list->name = name;
-	list->int_key = 0;
-	name = NULL;
-
-	assert(name == NULL);
 }
 
 
-void data_set_name_int(hash_t key_hash, bucket_data_t *data, long long name_int)
+void data_set_keyvalue_int(hash_t key_hash, bucket_data_t *data, long long keyvalue_int)
 {
-	maplist_t *list;
+	keyvalue_t *entry;
 	
 	assert(data);
-	assert(data->tree);
+	assert(data->keyvalues);
 	
 	// first we are going to store the value in the primary 'bucket_data'.  If it exists, we will 
 	// update the value in there.  If it doesn't exist we will add it, and when we've done that, 
 	// then we will go through the rest of the chain to find this same entry, if it exists, then 
 	
-	list = find_maplist(key_hash, data);
-	if (list == NULL) {
+	entry = find_keyvalue(key_hash, data);
+	if (entry == NULL) {
 		// that hash was not found anywhere in the chain, so we need to create an entry for it.
 
-		list = list_new(key_hash);
-		g_tree_insert(data->tree, &list->item_key, list);
+		entry = malloc(sizeof(keyvalue_t));
+		entry->key_hash = key_hash;
+		entry->type = KEYVALUE_TYPE_INT;
+		entry->keyvalue.i = keyvalue_int;
+		
+		g_tree_insert(data->keyvalues, &entry->key_hash, entry);
 	}
+	else {
 
-	assert(list);
-	
-	assert(list->name == NULL);
-	list->int_key = name_int;
+		assert(entry);
+
+		// if the existing entry is an integer, then this string should be the same otherwise we have a collision.
+		if (entry->type == KEYVALUE_TYPE_INT) {
+			if (entry->keyvalue.i != keyvalue_int) {
+				logger(LOG_INFO, "Keyvalue Collision:%#llx", key_hash);
+			}
+		}
+		else {
+			// the existing entry is a string, we've had a collision.
+			logger(LOG_INFO, "Keyvalue Type Collision:%#llx", key_hash);
+			assert(0);
+		}
+	}
 }
 
 

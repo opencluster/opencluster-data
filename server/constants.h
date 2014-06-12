@@ -14,7 +14,7 @@
 #define INVALID_HANDLE -1
 #endif
 
-
+// client protocol header size in bytes.
 #define HEADER_SIZE 12
 
 #define STARTING_MASK  0x0F
@@ -26,6 +26,14 @@
 #define TRANSIT_MIN 0
 #define TRANSIT_MAX 1
 
+
+// When data is received on a socket, and processed, the offset is where processed items are still 
+// in the incoming buffer.  This occurs if data arrives fragmented.  If the server receives a lot 
+// of rapid messages from a client, the offset can creep up to unmanageable levels.  So we set a 
+// maximum offset.  This means that if the offset gets this high, then it needs to move the data 
+// up the buffer.   This is not something we want to happen a lot because it impacts performance 
+// to be moving data in memory like that.
+#define MAX_INCOMING_OFFSET  65536
 
 // minimum number of buckets that a node should have before it splits the buckets.  This means that 
 // if some action causes the server to get less than this many buckets (but not if the server never 

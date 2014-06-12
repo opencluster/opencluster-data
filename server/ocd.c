@@ -15,6 +15,7 @@
 #include "constants.h"
 #include "item.h"
 #include "logging.h"
+#include "params.h"
 #include "payload.h"
 #include "seconds.h"
 #include "server.h"
@@ -41,50 +42,12 @@
 // event base for listening on the sockets, and timeout events.
 struct event_base *_evbase = NULL;
 
-// startup settings.
-int _daemonize = 0;
-const char *_username = NULL;
-const char *_pid_file = NULL;
-const char *_logfile = NULL;
-int _logfile_max = 0;
-
-
-
-
-
-
-//-----------------------------------------------------------------------------
-// Global Variables.    
-// If we ever add threads then we need to be careful when accessing these 
-// global variables.
-
-
-
 
 
 
 // signal catchers that are used to clean up, and store final data before 
 // shutting down.
 struct event *_sigint_event = NULL;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -119,9 +82,9 @@ static void sigint_handler(evutil_socket_t fd, short what, void *arg)
 static void usage(void) {
 	printf(
 		PACKAGE " " VERSION "\n"
-		"-l <ip_addr:port>  interface to listen on, default is localhost:13600\n"
+		"-l <file>          config file for listener details\n"
 		"-c <num>           max simultaneous connections, default is 1024\n"
-		"-n <node>          Other cluster node to connect to. Can be specified more than once.\n"
+		"-n <file>          Other cluster node to connect to. Can be specified more than once.\n"
 		"\n"
 		"-d                 run as a daemon\n"
 		"-P <file>          save PID in <file>, only used with -d option\n"
@@ -146,90 +109,6 @@ static void usage(void) {
 }
 
 
-static void parse_params(int argc, char **argv)
-{
-	int c;
-	
-	assert(argc >= 0);
-	assert(argv);
-	
-	// process arguments
-	/// Need to check the options in here, there're possibly ones that we dont need.
-	while ((c = getopt(argc, argv, 
-		"c:"    /* max connections. */
-		"h"     /* help */
-		"v"     /* verbosity */
-		"d"     /* daemon */
-		"u:"    /* user to run as */
-		"P:"    /* PID file */
-		"l:"    /* interfaces to listen on */
-		"n:"    /* other node to connect to */
-		"g:"	/* logfile */
-		"m:"	/* logfile maximum size */
-		)) != -1) {
-		switch (c) {
-			case 'c':
-				_maxconns = atoi(optarg);
-				assert(_maxconns > 0);
-				break;
-			case 'h':
-				usage();
-				exit(EXIT_SUCCESS);
-			case 'v':
-				_verbose++;
-				break;
-			case 'd':
-				assert(_daemonize == 0);
-				_daemonize = 1;
-				break;
-			case 'u':
-				assert(_username == NULL);
-				_username = strdup(optarg);
-				assert(_username != NULL);
-				assert(_username[0] != 0);
-				break;
-			case 'P':
-				assert(_pid_file == NULL);
-				_pid_file = strdup(optarg);
-				assert(_pid_file != NULL);
-				assert(_pid_file[0] != 0);
-				break;
-			case 'l':
-				_interface = optarg;
-				assert(_interface != NULL);
-				assert(_interface[0] != 0);
-				break;
-			case 'n':
-				assert((_node_count == 0 && _nodes == NULL) || (_node_count > 0 && _nodes));
-				_nodes = realloc(_nodes, sizeof(node_t *) * (_node_count + 1));
-				assert(_nodes);
-				_nodes[_node_count] = node_new(optarg);
-				_node_count ++;
-				break;
-				
-			case 'g':
-				assert(_logfile == NULL);
-				_logfile = strdup(optarg);
-				assert(_logfile);
-				break;
-				
-			case 'm':
-				assert(_logfile_max == 0);
-				_logfile_max = atoi(optarg);
-				assert(_logfile_max >= 0);
-				break;
-				
-			default:
-				fprintf(stderr, "Illegal argument \"%c\"\n", c);
-				return;
-				
-		}	
-	}
-	
-	if (_verbose <= 0) {
-		_verbose = LOG_INFO;
-	}
-}
 
 // this is used to fork the process and run in the background as a different user.  
 void daemonize(const char *username, const char *pidfile, const int noclose)
@@ -360,7 +239,6 @@ int main(int argc, char **argv)
 	
 	payload_init();
 	
-	
 	// we need to set a timer to fire in 5 seconds to setup the cluster if no connections were made.
 	settle_init();
 
@@ -407,6 +285,8 @@ int main(int argc, char **argv)
 // 	assert(_client_count == 0);
 
 
+	client_cleanup(void);	
+	
 	// make sure signal handlers have been cleared.
 	assert(_sigint_event == NULL);
 

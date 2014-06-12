@@ -13,11 +13,9 @@ void server_listen(void);
 void server_shutdown(void);
 
 
-#ifndef __SERVER_C
-	extern const char *_interface;
-	extern int _maxconns;
-
-#endif
+// #ifndef __SERVER_C
+// 	extern int _maxconns;
+// #endif
 
 
 #endif

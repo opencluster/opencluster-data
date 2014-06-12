@@ -61,9 +61,8 @@ void payload_int(int value)
 	ptr = ((void*) _payload + _payload_length);
 	ptr[0] = htobe32(value);
 
-        // we need to assume that an int is 32 bits.
-        assert(sizeof(int) == 4); 
-
+	// we need to assume that an int is 32 bits.
+	assert(sizeof(int) == 4); 
 	
 	_payload_length += sizeof(int);
 	

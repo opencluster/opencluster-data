@@ -103,7 +103,7 @@ value_t * buckets_get_value(hash_t map_hash, hash_t key_hash)
 // store the value in whatever bucket is resposible for the key_hash.
 // NOTE: value is controlled by the tree after this function call.
 // NOTE: name is controlled by the tree after this function call.
-int buckets_store_value(hash_t map_hash, hash_t key_hash, char *name, long long name_int, int expires, value_t *value) 
+int buckets_store_value(hash_t map_hash, hash_t key_hash, int expires, value_t *value) 
 {
 	int bucket_index;
 	bucket_t *bucket;
@@ -130,7 +130,7 @@ int buckets_store_value(hash_t map_hash, hash_t key_hash, char *name, long long 
 			backup_client = NULL;
 		}
 		
-		data_set_value(map_hash, key_hash, bucket->data, name, name_int, value, expires, backup_client);
+		data_set_value(map_hash, key_hash, bucket->data, value, expires, backup_client);
 		return(0);
 	}
 	else {
@@ -152,7 +152,7 @@ bucket_t * bucket_new(hash_t hash)
 	bucket->level = -1;
 			
 	assert(bucket->backup_node == NULL);
-	assert(bucket->target_node == NULL);
+	assert(bucket->source_node == NULL);
 	assert(bucket->logging_node == NULL);
 	assert(bucket->transfer_event == NULL);
 	assert(bucket->shutdown_event == NULL);
@@ -285,7 +285,7 @@ void buckets_split_mask(hash_t mask)
 			assert(newbuckets[i]->hash == i);
 			newbuckets[i]->level = oldbuckets[index]->level;
 			
-			newbuckets[i]->target_node = oldbuckets[index]->target_node;
+			newbuckets[i]->source_node = oldbuckets[index]->source_node;
 			newbuckets[i]->backup_node = oldbuckets[index]->backup_node;
 			newbuckets[i]->logging_node = oldbuckets[index]->logging_node;
 			
@@ -352,7 +352,7 @@ static void bucket_free(bucket_t *bucket)
 	assert(bucket);
 	assert(bucket->level < 0);
 	assert(bucket->data == NULL);
-	assert(bucket->target_node == NULL);
+	assert(bucket->source_node == NULL);
 	assert(bucket->backup_node == NULL);
 	assert(bucket->logging_node == NULL);
 	assert(bucket->transfer_client == NULL);
@@ -364,6 +364,27 @@ static void bucket_free(bucket_t *bucket)
 	free(bucket);
 }
 
+
+static void update_hashmasks(bucket_t *bucket)
+{
+	int i;
+	
+	assert(bucket);
+	
+	assert(bucket->hash >= 0 && bucket->hash <= _mask);
+	assert(bucket->level == -1 || bucket->level == 0 || bucket->level == 1);
+
+	if (_clients) {
+		for (i=0; i<_client_count; i++) {
+			if (_clients[i]) {
+				if (_clients[i]->handle >= 0) {
+					// we have a client, that seems to be connected.
+					push_hashmask(_clients[i], bucket->hash, bucket->level);
+				}
+			}
+		}
+	}
+}
 
 
 static void bucket_shutdown_handler(evutil_socket_t fd, short what, void *arg) 
@@ -421,7 +442,7 @@ static void bucket_shutdown_handler(evutil_socket_t fd, short what, void *arg)
 	
 		assert(bucket->transfer_client == NULL);
 		bucket_destroy_contents(bucket);
-		push_hashmask_update(bucket);
+		update_hashmasks(bucket);
 				
 		assert(bucket->shutdown_event);
 		event_free(bucket->shutdown_event);
@@ -483,7 +504,7 @@ void buckets_init(void)
 		_buckets[i]->level = 0;
 
 		// send out a message to all connected clients, to let them know that the buckets have changed.
-		push_hashmask_update(_buckets[i]); // all_hashmask(i, 0);
+		update_hashmasks(_buckets[i]); // all_hashmask(i, 0);
 		
 		_hashmasks[i] = calloc(1, sizeof(hashmask_t));
 		assert(_hashmasks[i]);
@@ -504,12 +525,13 @@ void buckets_init(void)
 
 // we've been given a 'name' for a hash-key item, and so we lookup the bucket that is responsible 
 // for that item.  the 'data' module will then find the data store within that handles that item.
-int buckets_store_name_str(hash_t key_hash, char *name)
+int buckets_store_name_str(hash_t key_hash, int length, char *name)
 {
 	hash_t bucket_index;
 	bucket_t *bucket;
 
 	assert(name);
+	assert(length > 0);
 
 	// calculate the bucket that this item belongs in.
 	bucket_index = _mask & key_hash;
@@ -522,7 +544,9 @@ int buckets_store_name_str(hash_t key_hash, char *name)
 		
 		// make sure that this server is 'primary' or 'secondary' for this bucket.
 		assert(bucket->data);
-		data_set_name_str(key_hash, bucket->data, name);
+		
+		// 'name' will be controlled by the keyvalue tree after this function.
+		data_set_keyvalue_str(key_hash, bucket->data, length, name);
 		return(0);
 	}
 	else {
@@ -550,7 +574,7 @@ int buckets_store_name_int(hash_t key_hash, long long int_key)
 		
 		// make sure that this server is 'primary' or 'secondary' for this bucket.
 		assert(bucket->data);
-		data_set_name_int(key_hash, bucket->data, int_key);
+		data_set_keyvalue_int(key_hash, bucket->data, int_key);
 		return(0);
 	}
 	else {
@@ -575,10 +599,10 @@ static void bucket_dump(bucket_t *bucket)
 	if (bucket->level == 0) {
 		mode = "Primary";
 		altmode = "Backup";
-		assert(bucket->target_node == NULL);
+		assert(bucket->source_node == NULL);
 		if (bucket->backup_node) {
-			assert(bucket->backup_node->name);
-			altnode = bucket->backup_node->name;
+			assert(bucket->backup_node->details.name);
+			altnode = bucket->backup_node->details.name;
 		}
 		else {
 			altnode = "";
@@ -587,10 +611,10 @@ static void bucket_dump(bucket_t *bucket)
 	else if (bucket->level == 1) {
 		mode = "Secondary";
 		assert(bucket->backup_node == NULL);
-		assert(bucket->target_node);
-		assert(bucket->target_node->name);
+		assert(bucket->source_node);
+		assert(bucket->source_node->details.name);
 		altmode = "Source";
-		altnode = bucket->target_node->name;
+		altnode = bucket->source_node->details.name;
 	}
 	else {
 		mode = "Unknown";
@@ -609,8 +633,8 @@ static void bucket_dump(bucket_t *bucket)
 	if (bucket->transfer_client) {
 		node = bucket->transfer_client->node;
 		assert(node);
-		assert(node->name);
-		stat_dumpstr("      Currently transferring to: %s", node->name);
+		assert(node->details.name);
+		stat_dumpstr("      Currently transferring to: %s", node->details.name);
 		stat_dumpstr("      Transfer Mode: %d", bucket->transfer_mode_special);
 	}
 }
@@ -686,7 +710,7 @@ void hashmask_switch(hash_t hash)
 
 // Get the primary node for an external bucket.  If the bucket is being handled by this instance, then this 
 // function will return NULL.  If it is being handled by another node, then it will return a string.
-char * buckets_get_primary(hash_t key_hash) 
+const char * buckets_get_primary(hash_t key_hash) 
 {
 	int bucket_index;
 	bucket_t *bucket;
@@ -696,7 +720,7 @@ char * buckets_get_primary(hash_t key_hash)
 	assert(bucket_index >= 0);
 	assert(bucket_index <= _mask);
 	bucket = _buckets[bucket_index];
-	if (bucket->target_node) {
+	if (bucket->source_node) {
 		// that bucket is being handled 
 		return(NULL);
 	}

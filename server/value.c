@@ -18,6 +18,7 @@ void value_clear(value_t *value)
 		value->data.s.data = NULL;
 	}
 	
+	
 	value->type = VALUE_DELETED;
 }
 
@@ -42,10 +43,6 @@ void value_move(value_t *dest, value_t *src)
 	dest->type = src->type;
 
 	switch(src->type) {
-		case VALUE_INT:
-		case VALUE_SHORT:
-			dest->data.i = src->data.i;
-			break;
 			
 		case VALUE_LONG:
 			dest->data.l = src->data.l;
