@@ -1,0 +1,23 @@
+The tools that would be used to interact with the conninfo files would be.
+Most of these would be useful for scripting.  Particularly the automatic generation of conninfo files, or pulling info out.
+
+set
+	Will update the conninfo file with specific information, most likely the IP address that is embedded in the file.
+	eg.  conninfo_set node-A10.ci "IP" "127.0.0.1" 
+
+get
+	used to extract particular items from the file.  Pulls out specific information.
+	eg.  conninfo_get node-A10.ci "Name"
+
+pack
+	used to pack the conninfo file the same way that the server does before distributing.  
+	This would be useful to take a user generated and formatted file, and generated a more compact version to be given to the client apps.
+	eg.  conninfo_pack node-A10.ci.txt > node-A10.ci.packed
+
+public
+	Used to generate a public conninfo file based on a private conninfo file.
+	Server nodes will have a conninfo file that has private information in it, such as private keys, etc.   
+	A public version is needed which has all the private details removed out.  
+	The public file can then be given to clients that connect to the nodes.
+	eg.  conninfo_public node-A10.ci.private > node-A10.ci
+

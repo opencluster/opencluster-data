@@ -1,0 +1,16 @@
+# conninfo pkg-config 
+
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${prefix}/lib/x86_64-linux-gnu
+includedir=${prefix}/include
+
+Name: libconninfo
+Description: libconninfo is a library used to open, parse and manipulate the conninfo files as part of OpenCluster.
+Version: 0.1
+Requires:jansson
+Conflicts:
+Libs: -L${libdir} -lconninfo
+Libs.private: 
+Cflags: -I${includedir}
+
