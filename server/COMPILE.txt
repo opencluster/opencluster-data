@@ -1,0 +1,29 @@
+Compiling OpenCluster.
+
+Pre-requisits.
+
+Opencluster requires the following libraries to compile (and run)
+
+ - glibc
+ - libjansson
+
+
+To do a production build.  
+
+	make clean
+	make
+	sudo make install
+
+
+To do a development build which enables a lot of sanity checks.
+
+	make clean
+	make debug
+
+
+
+
+
+
+
+
