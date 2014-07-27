@@ -6,6 +6,7 @@
 
 #ifndef __TIMEOUT_C
 	extern struct timeval _timeout_now;
+	extern struct timeval _timeout_accept;
 	extern struct timeval _timeout_shutdown;
 	extern struct timeval _timeout_settle;
 	extern struct timeval _timeout_seconds;

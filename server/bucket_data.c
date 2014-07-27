@@ -4,7 +4,6 @@
 #include "bucket.h"
 #include "client.h"
 #include "constants.h"
-#include "globals.h"
 #include "hash.h"
 #include "item.h"
 #include "logging.h"
@@ -20,6 +19,7 @@
 
 typedef struct {
 	hash_t search_hash;
+	hash_t search_mask;
 	maplist_t *map;
 	item_t *item;
 	int items_count;
@@ -61,10 +61,14 @@ static gint key_compare_fn(gconstpointer a, gconstpointer b)
 
 
 
-bucket_data_t * data_new(hash_t hashmask)
+bucket_data_t * data_new(hash_t mask, hash_t hashmask)
 {
 	bucket_data_t *data;
 	
+	assert(mask > 0);
+	assert(hashmask <= mask);
+	assert(hashmask >= 0);
+		
 	data = malloc(sizeof(bucket_data_t));
 	assert(data);
 	data->ref = 1;
@@ -78,10 +82,10 @@ bucket_data_t * data_new(hash_t hashmask)
 	data->item_count = 0;
 	data->data_size = 0;
 	
-	assert(_mask > 0);
-	assert(hashmask >= 0 && hashmask <= _mask);
+	assert(mask > 0);
+	assert(hashmask >= 0 && hashmask <= mask);
 	
-	data->mask = _mask;
+	data->mask = mask;
 	data->hashmask = hashmask;
 	
 	return(data);
@@ -98,6 +102,7 @@ gboolean traverse_map_fn(gpointer p_key, gpointer p_value, void *p_data)
 	assert(p_data);
 	assert(data->map);
 	assert(data->item == NULL);
+	assert(data->search_mask > 0);
 
 	data->item = p_value;
 	return(TRUE);
@@ -115,8 +120,9 @@ gboolean traverse_hash_fn(gpointer p_key, gpointer p_value, void *p_data)
 	assert(p_value);
 	assert(p_data);
 	assert(data->map == NULL);
+	assert(data->search_mask > 0);
 	
-	if ((*key & _mask) == data->search_hash) {
+	if ((*key & data->search_mask) == data->search_hash) {
 		data->map = p_value;
 		return(TRUE);
 	}
@@ -126,28 +132,28 @@ gboolean traverse_hash_fn(gpointer p_key, gpointer p_value, void *p_data)
 	}
 }
 
-void data_destroy(bucket_data_t *data, hash_t hash) 
+void data_destroy(bucket_data_t *data, hash_t mask, hash_t hashmask) 
 {
 	int total;
 	trav_t trav;
 	int finished = 0;
 	bucket_data_t *current;
 	
+	assert(mask > 0);
+	assert(hashmask >= 0);
+	assert(hashmask <= mask);
+
+	trav.search_hash = hashmask;
+	trav.search_mask = mask;
 	
 	assert(data);
-	assert(hash <= _mask);
-	
+	assert(hashmask <= trav.search_mask);
 	
 	// while going through the tree, cannot modify the tree, so we will continuously go through the 
 	// list, getting an item one at a time, clearing it and removing it from the tree.  Continue the 
 	// process until there is no more items in the tree.
-
-	trav.search_hash = hash;
-	
-	
 	current = data;
 	assert(current);
-	
 	while (current) {
 		
 		assert(current->tree);
@@ -345,7 +351,7 @@ value_t * data_get_value(hash_t map_hash, hash_t key_hash, bucket_data_t *ddata)
 
 			logger(LOG_DEBUG, "data_get_value: key and map found. [%#llx/%#llx].", map_hash, key_hash);
 			
-			if (item->expires > 0 && item->expires < _seconds) {
+			if (item->expires > 0 && item->expires < seconds_get()) {
 				// item has expired.   We need to remove it from the map list.
 				assert(value == NULL);
 				assert(0);
@@ -430,7 +436,7 @@ void data_set_value(
 			free(value);
 			value = NULL;
 			
-			item->expires = expires == 0 ? 0 : _seconds + expires;
+			item->expires = expires == 0 ? 0 : seconds_get() + expires;
 		}
 	}
 	
@@ -447,7 +453,7 @@ void data_set_value(
 		item->item_key = key_hash;
 		item->map_key = map_hash;
 		item->value = value;
-		item->expires = expires == 0 ? 0 : _seconds + expires;
+		item->expires = expires == 0 ? 0 : seconds_get() + expires;
 		item->migrate = 0;
 		
 		g_tree_insert(list->mapstree, &item->map_key, item);
@@ -471,6 +477,7 @@ static gboolean migrate_map_fn(gpointer p_key, gpointer p_value, void *p_data)
 	trav_t *data = p_data;
 	hash_t *key = p_key;
 	item_t *item;
+	int sync;
 	
 	assert(p_key);
 	assert(p_value);
@@ -482,17 +489,20 @@ static gboolean migrate_map_fn(gpointer p_key, gpointer p_value, void *p_data)
 	assert(data->items_count < data->limit);
 	assert(data->items_count >= 0);
 	
+	// get the current sync value for all the buckets.  This is used so that we can find the items that have not yet been migrated.
+	sync = buckets_get_migrate_sync();
+	assert(sync > 0);
+	
 	item = p_value;
-	assert(_migrate_sync > 0);
-	assert(item->migrate <= _migrate_sync);
-	if (item->migrate < _migrate_sync) {
+	assert(item->migrate <= sync);
+	if (item->migrate < sync) {
 		logger(LOG_DEBUG, "migrate: map %#llx ready to migrate.  Sending now.", *key);
 		push_sync_item(data->client, item);
 		_in_transit ++;
 		assert(_in_transit <= TRANSIT_MAX);
 		data->items_count ++;
 		assert(data->items_count <= data->limit);
-		item->migrate = _migrate_sync;
+		item->migrate = sync;
 		logger(LOG_DEBUG, "migrate: items in list: %d", data->items_count);
 	}
 	
@@ -520,20 +530,24 @@ static gboolean migrate_hash_fn(gpointer p_key, gpointer p_value, void *p_data)
 	assert(p_data);
 	assert(data->map == NULL);
 	assert(data->client);
+	assert(data->search_mask > 0);
 	
 	assert(data->limit > 0);
 	assert(data->items_count < data->limit);
 
-	if ((*key & _mask) == data->search_hash) {
+	int sync = buckets_get_migrate_sync();
+	assert(sync > 0);
+	
+	if ((*key & data->search_mask) == data->search_hash) {
 		
 		map = p_value;
-		assert(_migrate_sync > 0);
+		assert(sync > 0);
 		assert(map->migrate >= 0);
 		
 // 		logger(LOG_DEBUG, "migrate: found hash: %#llx, migrate=%d", *key, map->migrate);
 	
-		assert(map->migrate <= _migrate_sync);
-		if (map->migrate < _migrate_sync) {
+		assert(map->migrate <= sync);
+		if (map->migrate < sync) {
 			// found one.
 			// now we need to search the inner tree
 			
@@ -545,7 +559,7 @@ static gboolean migrate_hash_fn(gpointer p_key, gpointer p_value, void *p_data)
 				// the traversal returned while there are still item slots available.  This must 
 				// mean that there are no more items in this map that need to be migrated, so we 
 				// will mark the map with the current migrate sync value.
-				map->migrate = _migrate_sync;
+				map->migrate = sync;
 				
 				logger(LOG_DEBUG,
 						"migrate: hash %#llx seems to have all its maps migrated, "
@@ -582,8 +596,6 @@ int data_migrate_items(client_t *client, bucket_data_t *data, hash_t hashmask, i
 	};
 	
 	assert(data);
-	assert(_mask > 0);
-	assert(hashmask >= 0 && hashmask <= _mask);
 	assert(limit > 0);
 	
 	assert(client);
@@ -594,8 +606,8 @@ int data_migrate_items(client_t *client, bucket_data_t *data, hash_t hashmask, i
 	trav.search_hash = hashmask;
 	current = data;
 
-	logger(LOG_DEBUG, "About to search the data for hashmask:%#llx/%#llx, limit:%d", 
-			   _mask, hashmask, limit);
+	logger(LOG_DEBUG, "About to search the data for hashmask:%#llx, limit:%d", 
+			   hashmask, limit);
 	
 	while (current && trav.items_count < limit) {
 
@@ -730,7 +742,7 @@ void data_migrated(bucket_data_t *data, hash_t map_hash, hash_t key_hash)
 		if (item) {
 			// item is found, return with the data.
 			assert(item->value);
-			assert(item->migrate == _migrate_sync || item->migrate == 0);
+			assert(item->migrate == buckets_get_migrate_sync() || item->migrate == 0);
 		}
 	}
 #endif

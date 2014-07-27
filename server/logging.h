@@ -14,7 +14,7 @@
 #define LOG_EXTRA   7
 
 
-void log_init(const char *logfile, short int loglevel, int maxfilesize);
+void log_init(const char *logfile, int maxfilesize, struct event_base *evbase);
 void log_shutdown(void);
 void log_prepareshutdown(void);
 
@@ -25,7 +25,8 @@ short int log_getlevel(void);
 
 void logger(short int level, const char *format, ...);
 
-extern int _verbose;
+void log_set_evbase(struct event_base *evbase);
+
 
 
 

@@ -1,11 +1,11 @@
 // server.c
-#define __SERVER_C
+
+
 #include "server.h"
-#undef __SERVER_C
 
 #include "event-compat.h"
 #include "client.h"
-#include "globals.h"
+#include "conninfo.h"
 #include "logging.h"
 
 #include <assert.h>
@@ -15,16 +15,16 @@
 #include <string.h>
 
 // number of connections that we are currently listening for activity from.
-int _conncount = 0;
+static int _conncount = 0;
 
-// list of listening sockets (servers). 
-server_t *_server = NULL;
+// maximum number of connections we allow to be open.  Used to stop a node from taking too many resources.   Includes server-node connections.
+static int _maxconns = 1024;
 
-// default interface.
-// const char *_interface = "127.0.0.1:13600";
+static conninfo_t *_conninfo = NULL;
 
-int _maxconns = 1024;
+static struct event_base *_evbase = NULL;
 
+static struct evconnlistener *_listener = NULL;
 
 
 
@@ -43,77 +43,107 @@ static void accept_conn_cb(
 	assert(listener);
 	assert(fd > 0);
 	assert(address && socklen > 0);
-	assert(ctx);
+	assert(ctx == NULL);
 
 	// create client object.
 	// TODO: We should be pulling these client objects out of a mempool.
 	client = client_new();
 	client_accept(client, fd, address, socklen);
+
+	_conncount ++;
 }
 
+
+// the server is being told that a client connection was closed, so that it can update its counters.
+void server_conn_closed(void)
+{
+	assert(_conncount > 0);
+	_conncount --;
+	assert(_conncount >= 0);
+}
 
 
 //-----------------------------------------------------------------------------
 // Listen for socket connections on a particular interface.
-void server_listen(void)
+void server_listen(struct event_base *evbase, conninfo_t *conninfo)
 {
 	struct sockaddr_in sin;
 	int len;
 	
-	assert(_server == NULL);
-	assert(_interface);
+	assert(evbase);
+	assert(_evbase == NULL);
+	_evbase = evbase;
+	
 	assert(_maxconns > 0);
 	assert(_conncount == 0);
-	
-	_server = calloc(1, sizeof(*_server));
-	assert(_server);
-
-	_server->listener = NULL;
+	assert(_listener == NULL);
 
 	memset(&sin, 0, sizeof(sin));
 	// 	sin.sin_family = AF_INET;
 	len = sizeof(sin);
 	
+	assert(_conninfo);
+	const char *remote_addr = conninfo_remoteaddr(_conninfo);
+	assert(remote_addr);
+	
 	assert(sizeof(struct sockaddr_in) == sizeof(struct sockaddr));
-	if (evutil_parse_sockaddr_port(_interface, (struct sockaddr *)&sin, &len) != 0) {
+	if (evutil_parse_sockaddr_port(remote_addr, (struct sockaddr *)&sin, &len) != 0) {
 		assert(0);
 	}
 	else {
 		
-		assert(_server->listener == NULL);
+		assert(_listener == NULL);
 		assert(_evbase);
 		
-		logger(LOG_INFO, "listen: %s", _interface);
+		logger(LOG_INFO, "listen: %s", remote_addr);
 
-		_server->listener = evconnlistener_new_bind(
+		_listener = evconnlistener_new_bind(
 								_evbase,
 								accept_conn_cb,
-								_server,
+								NULL,
 								LEV_OPT_CLOSE_ON_FREE|LEV_OPT_REUSEABLE,
 								-1,
 								(struct sockaddr*)&sin,
 								sizeof(sin)
 							);
-		assert(_server->listener);
-}	}
+		assert(_listener);
+	}
+}
 
 
 
 
 void server_shutdown(void)
 {
-	if (_server) {
-		logger(LOG_INFO, "Shutting down server interface: %s", _interface);
-
-		// need to close the listener socket.
-		if (_server->listener) {
-			evconnlistener_free(_server->listener);
-			_server->listener = NULL;
-			logger(LOG_INFO, "Stopping listening on: %s", _interface);
-		}
+	assert(_conninfo);
+	const char *remote_addr = conninfo_remoteaddr(_conninfo);
 		
-		free(_server);
-		_server = NULL;
+	logger(LOG_INFO, "Shutting down server interface: %s", remote_addr);
+
+	// need to close the listener socket.
+	if (_listener) {
+		evconnlistener_free(_listener);
+		_listener = NULL;
+		logger(LOG_INFO, "Stopping listening on: %s", remote_addr);
 	}
 }
+
+
+
+// void server_set_conninfo(conninfo_t *conninfo)
+// {
+// 	assert(_conninfo == NULL);
+// 	assert(conninfo);
+// 	
+// 	_conninfo = conninfo;
+// }
+
+
+
+conninfo_t * server_conninfo(void)
+{
+	assert(_conninfo);
+	return(_conninfo);
+}
+
 

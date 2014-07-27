@@ -3,13 +3,11 @@
 #include "stats.h"
 
 #include "bucket.h"
-#include "globals.h"
 #include "logging.h"
 #include "node.h"
 #include "timeout.h"
 
 #include <assert.h>
-#include "event-compat.h"
 #include <string.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -41,22 +39,23 @@ struct {
 } _stats;
 
 
+static struct event_base *_evbase = NULL;
 
 // The stats event fires every second, and it collates the stats it has and logs some statistics 
 // (if there were any).
-struct event *_stats_event = NULL;
-long long _stat_counter = 0;
+static struct event *_stats_event = NULL;
+static long long _stat_counter = 0;
 
 // when a SIGHUP is provided, we need to dump some additional information out to the log.
-struct event *_sighup_event = NULL;
+static struct event *_sighup_event = NULL;
 
 
 // the following variables are used when doing a logdump (SIGHUP).  When not actually doing a 
 // logdump, the _dump should be NULL, no point in keeping memory around for it, as it would seldom 
 // be used.
-char *_dump = NULL;
-int _dump_len = 0;
-int _dump_max = 0;
+static char *_dump = NULL;
+static int _dump_len = 0;
+static int _dump_max = 0;
 
 #define DEFAULT_DUMP_BUFFER    (1024*64)
 
@@ -137,9 +136,6 @@ static void sighup_handler(evutil_socket_t fd, short what, void *arg)
 	// dump the list of buckets.
 	buckets_dump();
 	
-	// dump the hashmask info.
-	hashmasks_dump();
-	
 	stat_dumpstr("--------------------------------------------------------------");
 	
 	assert(_dump);
@@ -184,7 +180,7 @@ static void stats_handler(int fd, short int flags, void *arg)
 		changed++;
 	}
 	
-	new_clients = _client_count;
+	new_clients = client_count();
 	if (_stats.last.clients != new_clients) {
 		_stats.last.clients = new_clients;
 		changed++;
@@ -206,8 +202,12 @@ static void stats_handler(int fd, short int flags, void *arg)
 
 
 // we have a stats object that is used throughout the code to log some statistics.  WHen the service is started up, it needs to be cleared.
-void stats_init(void)
+void stats_init(struct event_base *evbase)
 {
+	assert(_evbase == NULL);
+	assert(evbase);
+	_evbase = evbase;
+	
 	// just clear out the whole structure to zero.
 	memset(&_stats, 0, sizeof(_stats));
 	
@@ -226,6 +226,10 @@ void stats_init(void)
 
 void stats_shutdown(void)
 {
+	
+	// need to leave the stats running while a shutdown is in progress.
+	assert(0);
+	
 	assert(_stats_event);
 	event_free(_stats_event);
 	_stats_event = NULL;

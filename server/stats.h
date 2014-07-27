@@ -3,7 +3,10 @@
 #ifndef __STATS_H
 #define __STATS_H
 
-void stats_init(void);
+#include "event-compat.h"
+
+
+void stats_init(struct event_base *evbase);
 void stats_shutdown(void);
 
 void stats_bytes_in(int bb);

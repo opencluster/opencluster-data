@@ -1,12 +1,8 @@
 // node.c
 
-#define __NODE_C
 #include "node.h"
-#undef __NODE_C
-
 
 #include "event-compat.h"
-#include "globals.h"
 #include "logging.h"
 #include "push.h"
 #include "stats.h"
@@ -19,12 +15,12 @@
 #include <unistd.h>
 
 
-node_t **_nodes = NULL;
-int _node_count = 0;
+static node_t **_nodes = NULL;
+static int _node_count = 0;
 
-int _active_nodes = 0;
+static int _active_nodes = 0;
 
-
+static struct event_base *_evbase = NULL;
 
 // pre-declare our handlers where necessary.
 static void node_wait_handler(int fd, short int flags, void *arg);
@@ -32,17 +28,6 @@ static void node_loadlevel_handler(int fd, short int flags, void *arg);
 
 
 
-static void parse_connect_info(node_t *node, char *connect_info)
-{
-	assert(node);
-	assert(connect_info);
-	
-	assert(node->details.name == NULL);
-	assert(node->details.connectinfo == NULL);
-	assert(node->details.remote_addr == NULL);
-	
-	assert(0);
-}
 
 
 node_t * node_new(char *connect_info) 
@@ -51,13 +36,9 @@ node_t * node_new(char *connect_info)
 	
 	
 	
-	node = malloc(sizeof(node_t));
+	node = calloc(1, sizeof(node_t));
 	assert(node);
 	node->nodehash = 0;
-	
-	node->details.name = NULL;
-	node->details.connectinfo = NULL;
-	node->details.remote_addr = NULL;
 	
 	node->client = NULL;
 	node->connect_event = NULL;
@@ -67,8 +48,9 @@ node_t * node_new(char *connect_info)
 
 	node->connect_attempts = 0;
 	
-	parse_connect_info(node, connect_info);
-	
+	node->conninfo = conninfo_parse(connect_info);
+	assert(node->conninfo);
+
 	return(node);
 }
 
@@ -92,6 +74,7 @@ void node_detach_client(node_t *node)
 }
 
 
+
 static void node_connect_handler(int fd, short int flags, void *arg)
 {
 	node_t *node = (node_t *) arg;
@@ -100,11 +83,12 @@ static void node_connect_handler(int fd, short int flags, void *arg)
 	assert(fd >= 0 && flags != 0 && node);
 	logger(LOG_INFO, "CONNECT: handle=%d", fd);
 
-	assert(node->details.name);
+	const char *name = node_name(node);
+	assert(name);
 	
 	if (flags & EV_TIMEOUT) {
 		// timeout on the connect.  Need to handle that somehow.
-		logger(LOG_WARN, "Timeout connecting to: %s", node->details.name);
+		logger(LOG_WARN, "Timeout connecting to: %s", name);
 		assert(0);
 	}
 	else {
@@ -120,7 +104,7 @@ static void node_connect_handler(int fd, short int flags, void *arg)
 		getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &foo);
 		if (error == ECONNREFUSED) {
 
-			logger(LOG_ERROR, "Unable to connect to: %s", node->details.name);
+			logger(LOG_ERROR, "Unable to connect to: %s", name);
 
 			// close the socket that didn't connect.
 			close(fd);
@@ -133,7 +117,7 @@ static void node_connect_handler(int fd, short int flags, void *arg)
 			evtimer_add(node->wait_event, &_timeout_node_wait);
 		}
 		else {
-			logger(LOG_INFO, "Connected to node: %s", node->details.name);
+			logger(LOG_INFO, "Connected to node: %s", name);
 			
 			// we've connected to another server.... 
 			// TODO: we still dont know if its a valid connection, but we can delay the _settling event.
@@ -153,7 +137,8 @@ static void node_connect_handler(int fd, short int flags, void *arg)
 			evtimer_add(node->loadlevel_event, &_timeout_node_loadlevel);
 
 			// should send a SERVERHELLO command to the server we've connected to.
-			push_serverhello(node->client, node->details.connectinfo);
+			assert(node->conninfo);
+			push_serverhello(node->client, conninfo_str(node->conninfo));
 		}	
 	}	
 }
@@ -177,13 +162,17 @@ static void node_connect(node_t *node)
 	// Before we attempt to connect, set the socket to non-blocking mode.
 	evutil_make_socket_nonblocking(sock);
 
+	
+	// get the remote address from the conninfo stored for the node.   
+	// It is possible to return a NULL, but for now we will require a simple remote_addr.
 	assert(node);
-	assert(node->details.name);
-	assert(node->details.remote_addr);
+	assert(node->conninfo);
+	const char *remote_addr = conninfo_remoteaddr(node->conninfo);
+	assert(remote_addr);
 	
 	// resolve the address.
 	len = sizeof(saddr);
-	if (evutil_parse_sockaddr_port(node->details.remote_addr, &saddr, &len) != 0) {
+	if (evutil_parse_sockaddr_port(remote_addr, &saddr, &len) != 0) {
 		// if we cant parse the socket, then we should probably remove it from the nodes list.
 		assert(0);
 	}
@@ -194,7 +183,7 @@ static void node_connect(node_t *node)
 	assert(errno == EINPROGRESS);
 
 		
-	logger(LOG_INFO, "attempting to connect to node: %s", node->details.name);
+	logger(LOG_INFO, "attempting to connect to node: %s", node_name(node));
 	
 	// set the connect event with a timeout.
 	assert(node->connect_event == NULL);
@@ -218,8 +207,7 @@ static void node_wait_handler(int fd, short int flags, void *arg)
 	assert((flags & EV_TIMEOUT) == EV_TIMEOUT);
 	assert(arg);
 	
-	assert(node->details.name);
-	logger(LOG_INFO, "WAIT: node:'%s'", node->details.name);
+	logger(LOG_INFO, "WAIT: node:'%s'", node_name(node));
 	
 	assert(node->connect_event == NULL);
 	assert(node->wait_event);
@@ -252,12 +240,12 @@ void node_retry(node_t *node)
 
 
 
-node_t * node_find(char *connect_info)
+node_t * node_find(const char *conninfo_str)
 {
 	int i;
 	node_t *node = NULL;
 	
-	assert(connect_info);
+	assert(conninfo_str);
 	
 	for (i=0; i<_node_count && node == NULL; i++) {
 		
@@ -265,13 +253,15 @@ node_t * node_find(char *connect_info)
 		if (_nodes[i]) {
 			assert(_nodes[i]);
 			assert(_nodes[i]->client);
-			assert(_nodes[i]->details.name);
-			assert(_nodes[i]->details.connectinfo);
+			assert(_nodes[i]->conninfo);
 			
-			if (strcmp(_nodes[i]->details.connectinfo, connect_info) == 0) {
+			// when conninfo string is loaded it needs to be compressed to remove unnecessary 
+			// elements, and then the resulting string needs to be hashed, and that value is what 
+			// needs to be compared.
+			if (conninfo_compare_str(_nodes[i]->conninfo, conninfo_str) == 0) {
 				node = _nodes[i];
 			}
-		}		
+		}
 	}
 	
 	return(node);
@@ -366,14 +356,14 @@ void node_connect_all(void)
 {
 	int i;
 	
+	assert(_node_count >= 0);
 	for (i=0; i<_node_count; i++) {
 		assert(_nodes);
-		assert(_nodes[i]);
-		assert(_nodes[i]->details.name);
-		assert(_nodes[i]->details.connectinfo);
-		assert(_nodes[i]->details.remote_addr);
-		if (_nodes[i]->client == NULL) {
-			node_connect(_nodes[i]);
+		if (_nodes[i]) {
+			assert(_nodes[i]->conninfo);
+			if (_nodes[i]->client == NULL) {
+				node_connect(_nodes[i]);
+			}
 		}
 	}
 }
@@ -383,9 +373,7 @@ void node_connect_all(void)
 static void node_free(node_t *node)
 {
 	assert(node);
-	assert(node->details.name);
-	assert(node->details.connectinfo);
-	assert(node->details.remote_addr);
+	assert(node->conninfo);
 	
 	assert(node->client == NULL);
 	assert(node->connect_event == NULL);
@@ -393,19 +381,9 @@ static void node_free(node_t *node)
 	assert(node->wait_event == NULL);
 	assert(node->shutdown_event == NULL);
 	
-	if (node->details.connectinfo) {
-		free(node->details.connectinfo);
-		node->details.connectinfo = NULL;
-	}
-	
-	if (node->details.name) {
-		free(node->details.name);
-		node->details.name = NULL;
-	}
-	
-	if (node->details.remote_addr) {
-		free(node->details.remote_addr);
-		node->details.remote_addr = NULL;
+	if (node->conninfo) {
+		conninfo_free(node->conninfo);
+		node->conninfo = NULL;
 	}
 	
 	free(node);
@@ -473,11 +451,10 @@ void node_shutdown(node_t *node)
 static void node_dump(int index, node_t *node)
 {
 	assert(node);
-	assert(node->details.name);
 
 	stat_dumpstr("    [%02d] '%s', Connected=%s, Connect_attempts=%d", 
 				 index, 
-				 node->details.name, 
+				 node_name(node), 
 				 node->client ? "yes" : "no", 
 				 node->connect_attempts);
 }
@@ -505,11 +482,33 @@ void nodes_dump(void)
 }
 
 
-char * node_getname(node_t *node)
+const char * node_name(node_t *node)
 {
 	assert(node);
-	assert(node->details.name);
-	return(node->details.name);
+	assert(node->conninfo);
+	return(conninfo_name(node->conninfo));
+}
+
+// shutdown all the nodes.   Actually, what it will do is fire up an event that will wait until it is safe to shutdown the nodes (ie, all the buckets have been migrated off, or otherwise being discarded.)
+void nodes_shutdown(void)
+{
+	assert(0);
+}
+
+
+void nodes_set_evbase(struct event_base *evbase)
+{
+	assert(_evbase == NULL);
+	assert(evbase);
+	_evbase = evbase;
+}
+
+
+
+int node_count(void)
+{
+	assert(_node_count >= 0);
+	return(_node_count);
 }
 
 

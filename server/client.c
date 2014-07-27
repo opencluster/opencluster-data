@@ -7,13 +7,14 @@
 
 #include "commands.h"
 #include "constants.h"
-#include "globals.h"
 #include "header.h"
 #include "logging.h"
+#include "messages.h"
 #include "node.h"
 #include "process.h"
 #include "protocol.h"
 #include "push.h"
+#include "server.h"
 #include "stats.h"
 #include "timeout.h"
 
@@ -26,8 +27,6 @@
 #include <unistd.h>
 
 
-// external variables.
-extern int _conncount;		// server.c
 
 typedef struct {
 	int code;
@@ -42,26 +41,26 @@ typedef struct {
 } command_handlers_t;
 
 
-client_t **_clients = NULL;
-int _client_count = 0;
+static client_t **_clients = NULL;
+static int _client_count = 0;
 
 
-char *_connectinfo = NULL;
-
-struct timeval _standard_timeout = {5,0};
-
+// char *_connectinfo = NULL;
 
 
 static void read_handler(int fd, short int flags, void *arg);
 static void write_handler(int fd, short int flags, void *arg);
 
 
-command_handlers_t **_commands = NULL;
-int _command_max = 0;
+static command_handlers_t **_commands = NULL;
+static int _command_max = 0;
 
-handler_info_t *_specials = NULL;
-int _special_max = 0;
+static handler_info_t *_specials = NULL;
+static int _special_max = 0;
 
+// we will keep track of the evbase clients will be using here, rather than using an extern 
+// variable.  Gives more flexibility if we want to have seperate evbases.
+static struct event_base *_evbase = NULL;
 
 
 
@@ -226,8 +225,6 @@ client_t * client_new(void)
 	client->timeout = 0;
 	client->tries = 0;
 	
-	messages_init(&client->messages);
-	
 	client->closing = 0;
 
 	// add the new client to the clients list.
@@ -280,10 +277,8 @@ void client_accept(client_t *client, evutil_socket_t handle, struct sockaddr *ad
 	assert(client->handle > 0);
 	client->read_event = event_new( _evbase, client->handle, EV_READ|EV_PERSIST, read_handler, client);
 	assert(client->read_event);
-	int s = event_add(client->read_event, &_standard_timeout);
+	int s = event_add(client->read_event, &_timeout_accept);
 	assert(s == 0);
-	
-	_conncount ++;
 }
 
 
@@ -374,9 +369,7 @@ void client_free(client_t *client)
 		_clients = realloc(_clients, sizeof(void*)*_client_count);
 	}
 	
-	messages_free(&client->messages);
-	
-	_conncount --;
+	server_conn_closed();
 	
 	assert(client);
 	free(client);
@@ -395,7 +388,6 @@ static int process_data(client_t *client)
 	char *ptr;
 	header_t header;
 	raw_header_t *raw;
-	message_t *msg;
 
 	void (*func_cmd)(client_t *client, header_t *header, char *payload);
 	void (*func_response)(client_t *client, header_t *header, char *payload, char *data);
@@ -492,44 +484,35 @@ static int process_data(client_t *client)
 					else {
 					
 						// this is a response code.   We need to lookup the UserID for this client to find the stored data for this message.
-						msg = message_get(&client->messages, header.userid);
+						void *data = message_get(client, header.userid, header.command);
 						
-						if (msg == NULL) {
-							// something went wrong.  the userid is not stored... so the client must have responded incorrectly.
-							assert(0);
+						assert(func_response == NULL);
+						int i;
+						for (i=0; i<_commands[header.command]->max && func_response==NULL; i++) {
+							assert(_commands[header.command]->handlers[i].code >= 0);
+							if (_commands[header.command]->handlers[i].code == header.response_code) {
+								func_response = _commands[header.command]->handlers[i].fn;
+								assert(func_response);
+								(*func_response)(client, &header, ptr, data);
+							}
 						}
-						else {
-							assert(msg->command == header.command);
-							assert(msg->userid == header.userid);
 						
+						if (func_response == NULL) {
+							// no function was found, but if there are special responses, such as 'tryelsewhere' and 'unknown'... these can be returned from any command.
+							assert(0);
+							
 							assert(func_response == NULL);
 							int i;
-							for (i=0; i<_commands[header.command]->max && func_response==NULL; i++) {
-								assert(_commands[header.command]->handlers[i].code >= 0);
-								if (_commands[header.command]->handlers[i].code == header.response_code) {
-									func_response = _commands[header.command]->handlers[i].fn;
-									assert(func_response);
-									(*func_response)(client, &header, ptr, msg->data);
+							for (i=0; i<_special_max && func_response == NULL; i++) {
+								if (_specials[i].code == header.response_code) {
+									assert(_specials[i].fn);
+									func_response = _specials[i].fn;
+									(*func_response)(client, &header, ptr, data);
 								}
 							}
 							
-							if (func_response == NULL) {
-								// no function was found, but if there are special responses, such as 'tryelsewhere' and 'unknown'... these can be returned from any command.
-								assert(0);
-								
-								assert(func_response == NULL);
-								int i;
-								for (i=0; i<_special_max && func_response == NULL; i++) {
-									if (_specials[i].code == header.response_code) {
-										assert(_specials[i].fn);
-										func_response = _specials[i].fn;
-										(*func_response)(client, &header, ptr, msg->data);
-									}
-								}
-								
-								// we should have handled the specials.  If we still didnt find something to handle it, then our implementation of the protocol is broken.
-								assert(func_response);
-							}
+							// we should have handled the specials.  If we still didnt find something to handle it, then our implementation of the protocol is broken.
+							assert(func_response);
 						}
 					}
 				}
@@ -780,7 +763,8 @@ void client_send_message(client_t *client, short command, int length, void *payl
 	assert((length == 0 && payload == NULL) || (length > 0 && payload));
 	
 	// when sending a message, we need to save a copy of the specifics.  we will also take a void ptr that we will keep till the response is received.
-	userid = message_set(&client->messages, command, data);
+	userid = message_set(client, command, data);
+	assert(userid >= 0);
 	
 	raw.command = htobe16(command);
 	raw.response_code = 0;
@@ -1023,32 +1007,42 @@ static void client_shutdown_handler(evutil_socket_t fd, short what, void *arg)
 	assert(fd == -1);
 	assert(arg);
 
-	// check to see if this is a node connection, and there are still buckets, reset the timeout for one_second.
-	assert(client);
-	if (client->node) {
-		if (_primary_buckets > 0 || _secondary_buckets > 0) {
-			// this is a node client, and there are still buckets, so we need to keep the connection open.
-			assert(client->shutdown_event);
-			evtimer_add(client->shutdown_event, &_timeout_shutdown);
-		}
-		else {
-			// this is a node connection, but we dont have any buckets left, so we can close it now.
-			event_free(client->shutdown_event);
-			client->shutdown_event = NULL;
-			client_free(client);
-		}
+	int message_count = messages_count(client);
+	if (message_count > 0) {
+		// there are still messages waiting for replies for this client, so we need to keep waiting.
+		assert(client->shutdown_event);
+		evtimer_add(client->shutdown_event, &_timeout_shutdown);
 	}
 	else {
-		// client is not a node, we can shut it down straight away, if there isn't pending data going out to it.
-		if (client->in.length == 0 && client->out.length == 0) {
-			event_free(client->shutdown_event);
-			client->shutdown_event = NULL;
-			client_free(client);
-		} 
+		
+		
+		// check to see if this is a node connection, and there are still buckets, reset the timeout for one_second.
+		assert(client);
+		if (client->node) {
+			if (buckets_get_primary_count() > 0 || buckets_get_secondary_count() > 0) {
+				// this is a node client, and there are still buckets, so we need to keep the connection open.
+				assert(client->shutdown_event);
+				evtimer_add(client->shutdown_event, &_timeout_shutdown);
+			}
+			else {
+				// this is a node connection, but we dont have any buckets left, so we can close it now.
+				event_free(client->shutdown_event);
+				client->shutdown_event = NULL;
+				client_free(client);
+			}
+		}
 		else {
-			printf("waiting to flush data to client:%d\n", client->handle);
-			assert(client->shutdown_event);
-			evtimer_add(client->shutdown_event, &_timeout_shutdown);
+			// client is not a node, we can shut it down straight away, if there isn't pending data going out to it.
+			if (client->in.length == 0 && client->out.length == 0) {
+				event_free(client->shutdown_event);
+				client->shutdown_event = NULL;
+				client_free(client);
+			} 
+			else {
+				printf("waiting to flush data to client:%d\n", client->handle);
+				assert(client->shutdown_event);
+				evtimer_add(client->shutdown_event, &_timeout_shutdown);
+			}
 		}
 	}
 }
@@ -1112,4 +1106,44 @@ void client_closing(client_t *client)
 	assert(client->closing == 0);
 
 	client->closing = 1;
+}
+
+
+// push the hashmask update to all the clients that we have connections with.
+void client_update_hashmasks(hash_t mask, hash_t hashmask, int level)
+{
+	int i;
+	
+	if (_clients) {
+		for (i=0; i<_client_count; i++) {
+			if (_clients[i]) {
+				if (_clients[i]->handle >= 0) {
+					// we have a client, that seems to be connected.
+					push_hashmask(_clients[i], mask, hashmask, level);
+				}
+			}
+		}
+	}
+}
+
+
+int client_count(void)
+{
+	assert(_client_count >= 0);
+	return(_client_count);
+}
+
+
+
+// setup events to shutdown all the clients.  It will shutdown all the client-only connections, and setup events to shutdown the server-node connections after all the buckets have finished migrating. 
+void clients_shutdown(void)
+{
+	assert(0);
+}
+
+void clients_set_evbase(struct event_base *evbase)
+{
+	assert(_evbase == NULL);
+	assert(evbase);
+	_evbase = evbase;
 }

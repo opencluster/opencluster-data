@@ -2,11 +2,9 @@
 
 
 // By setting __BUCKET_C, we indicate that we dont want the externs to be defined.
-#define __BUCKET_C
 #include "bucket.h"
-#undef __BUCKET_C
 
-#include "globals.h"
+#include "constants.h"
 #include "item.h"
 #include "logging.h"
 #include "push.h"
@@ -18,8 +16,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// the mask is used to determine which bucket a hash belongs to.
-hash_t _mask = 0;
 
 
 // the list of buckets that this server is handling.  '_mask' indicates how many entries in the 
@@ -33,6 +29,9 @@ bucket_t ** _buckets = NULL;
 // certain importain options might get skipped incorrectly.
 int _nobackup_buckets = 0;
 
+// the mask is used to determine which bucket a hash belongs to.
+hash_t _mask = 0;
+
 
 // keep a count of the number of primary and secondary buckets this node has.
 int _primary_buckets = 0;
@@ -42,10 +41,6 @@ int _secondary_buckets = 0;
 // at a time.
 int _bucket_transfer = 0;
 
-// the list of hashmasks is to know which servers are responsible for which buckets.
-// this list of hashmasks will also replace the need to 'settle'.  Instead, a timed event will 
-// occur periodically that checks that the hashmask coverage is complete.
-hashmask_t ** _hashmasks = NULL;
 
 
 // When a migration of a bucket needs to occur, and only one migration can occur at a time, we need 
@@ -60,7 +55,16 @@ hashmask_t ** _hashmasks = NULL;
 // process.
 int _migrate_sync = 0;
 
+static struct event_base *_evbase = NULL;
 
+
+// return the current migrate sync counter.  This is used when traversing the data trees to find 
+// items that have not been migrated.
+int buckets_get_migrate_sync(void)
+{
+	assert(_migrate_sync >= 0);
+	return(_migrate_sync);
+}
 
 // get a value from whichever bucket is resposible.
 value_t * buckets_get_value(hash_t map_hash, hash_t key_hash) 
@@ -70,6 +74,7 @@ value_t * buckets_get_value(hash_t map_hash, hash_t key_hash)
 	value_t *value = NULL;
 
 	// calculate the bucket that this item belongs in.
+	assert(_mask > 0);
 	bucket_index = _mask & key_hash;
 	assert(bucket_index >= 0);
 	assert(bucket_index <= _mask);
@@ -77,8 +82,7 @@ value_t * buckets_get_value(hash_t map_hash, hash_t key_hash)
 
 	// if we have a record for this bucket, then we are either a primary or a backup for it.
 	if (bucket) {
-
-		assert(bucket->hash == bucket_index);
+		assert(bucket->hashmask == bucket_index);
 		
 		// make sure that this server is 'primary' for this bucket.
 		if (bucket->level != 0) {
@@ -118,7 +122,7 @@ int buckets_store_value(hash_t map_hash, hash_t key_hash, int expires, value_t *
 	// if we have a record for this bucket, then we are (potentially) either a primary or a backup 
 	// for it.
 	if (bucket) {
-		assert(bucket->hash == bucket_index);
+		assert(bucket->hashmask == bucket_index);
 		if (bucket->backup_node) {
 			// since we have a backup_node specified, then we must be the primary.
 			backup_client = bucket->backup_node->client;
@@ -141,16 +145,22 @@ int buckets_store_value(hash_t map_hash, hash_t key_hash, int expires, value_t *
 
 
 
-bucket_t * bucket_new(hash_t hash)
+bucket_t * bucket_new(hash_t hashmask)
 {
 	bucket_t *bucket;
+
+	assert(_mask > 0);
+	assert(hashmask >= 0);
+	assert(hashmask <= _mask);
 	
-	assert(_buckets[hash] == NULL);
+	assert(_buckets[hashmask] == NULL);
 	
 	bucket = calloc(1, sizeof(bucket_t));
-	bucket->hash = hash;
+	bucket->hashmask = hashmask;
 	bucket->level = -1;
-			
+
+	assert(bucket->primary_node == NULL);
+	assert(bucket->secondary_node == NULL);
 	assert(bucket->backup_node == NULL);
 	assert(bucket->source_node == NULL);
 	assert(bucket->logging_node == NULL);
@@ -161,8 +171,8 @@ bucket_t * bucket_new(hash_t hash)
 	assert(bucket->oldbucket_event == NULL);
 	assert(bucket->transfer_mode_special == 0);
 	assert(bucket->promoting == NOT_PROMOTING);
-			
-	bucket->data = data_new(hash);
+	
+	bucket->data = data_new(_mask, hashmask);
 	
 	return(bucket);
 }
@@ -179,7 +189,7 @@ void bucket_destroy_contents(bucket_t *bucket)
 	assert(bucket->transfer_client == NULL);
 
 	if (bucket->data) {
-		data_destroy(bucket->data, bucket->hash);
+		data_destroy(bucket->data, _mask, bucket->hashmask);
 		data_free(bucket->data);
 		bucket->data = NULL;
 	}
@@ -203,67 +213,34 @@ static void bucket_close(bucket_t *bucket)
 
 // this function will take the current array, and put it aside, creating a new array based on the 
 // new mask supplied (we can only make the mask bigger, and cannot shrink it).
-// We create a new hashmasks array, and for each entry, we compare it against the old mask, and use 
+// We create a new array, and for each entry, we compare it against the old mask, and use 
 // the data for that hash from the old list.
-// NOTE: We may be starting off with an empty hashmasks lists.  If this is the first time we've 
+// NOTE: We may be starting off with an empty lists.  If this is the first time we've 
 //       received some hashmasks.  To implement this easily, if we dont already have hashmasks, we 
 //       may need to create one that has a dummy entry in it.
-void buckets_split_mask(hash_t mask) 
+void buckets_split_mask(hash_t current_mask, hash_t new_mask) 
 {
-	hashmask_t **newlist = NULL;
-	hashmask_t **oldlist = NULL;
-	
 	bucket_t **newbuckets = NULL;
 	bucket_t **oldbuckets = NULL;
 	
 	int i;
 	int index;
 	
-	assert(mask > _mask);
-	
-	logger(LOG_INFO, "Splitting bucket list: oldmask=%#llx, newmask=%#llx", _mask, mask);
-	
-	// first grab a copy of the existing hashmasks as the 'oldlist'
-	oldlist = _hashmasks;
-	_hashmasks = NULL;
-	if (oldlist == NULL) {
-		
-		oldlist = malloc(sizeof(hashmask_t *));
-		assert(oldlist);
-		
-		// need to create at least one dummy entry so that we can split it to the new entries.
-		oldlist[0] = malloc(sizeof(hashmask_t));
-		assert(oldlist[0]);
-		
-		oldlist[0]->primary = NULL;
-		oldlist[0]->secondary = NULL;
-	}
+	assert(new_mask > current_mask);
 	
 	// grab a copy of the existing buckets as the 'oldbuckets';
 	oldbuckets = _buckets;
 	_buckets = NULL;
 	
-	// make an appropriate sized new hashmask list.
-	newlist = malloc(sizeof(hashmask_t *) * (mask+1));
-	assert(newlist);
-	
 	// make an appropriate sized new buckets list;
-	newbuckets = malloc(sizeof(bucket_t *) * (mask+1));
+	newbuckets = malloc(sizeof(bucket_t *) * (new_mask+1));
 	assert(newbuckets);
 	
 	// go through every hash for this mask.
-	for (i=0; i<=mask; i++) {
+	for (i=0; i<=new_mask; i++) {
 
 		// determine what the old index is.
-		index = i & _mask;
-		
-		// create the new hashmask entry for the new index.  Copy the strings from the old index.
-		newlist[i] = malloc(sizeof(hashmask_t));
-		assert(_mask == 0 || index < _mask);
-		if (oldlist[index]->primary) { newlist[i]->primary = strdup(oldlist[index]->primary); }
-		else { newlist[i]->primary = NULL; }
-		if (oldlist[index]->secondary) { newlist[i]->secondary = strdup(oldlist[index]->secondary); }
-		else { newlist[i]->primary = NULL; }
+		index = i & current_mask;
 		
 		// create the new bucket ONLY if we already have a bucket object for that index.
 		if (oldbuckets == NULL || oldbuckets[index] == NULL) {
@@ -282,35 +259,23 @@ void buckets_split_mask(hash_t mask)
 			newbuckets[i]->data->next = oldbuckets[index]->data;
 			oldbuckets[index]->data->ref ++;
 
-			assert(newbuckets[i]->hash == i);
+			assert(newbuckets[i]->hashmask == i);
 			newbuckets[i]->level = oldbuckets[index]->level;
 			
 			newbuckets[i]->source_node = oldbuckets[index]->source_node;
 			newbuckets[i]->backup_node = oldbuckets[index]->backup_node;
 			newbuckets[i]->logging_node = oldbuckets[index]->logging_node;
 			
+			newbuckets[i]->primary_node = oldbuckets[index]->primary_node;
+			newbuckets[i]->secondary_node = oldbuckets[index]->secondary_node;
+			
 			assert(data_in_transit() == 0);
 		}
 	}
 
-	
-	// ---------
-	
-	
-	// now we clean up the old hashmask list.
-	for (i=0; i<=_mask; i++) {
-		assert(oldlist[i]);
-		if (oldlist[i]->primary) {
-			free(oldlist[i]->primary);
-		}
-		if (oldlist[i]->secondary) {
-			free(oldlist[i]->secondary);
-		}
-		free(oldlist[i]);
-	}
-	free(oldlist);
-	oldlist = NULL;
-	
+	assert(_mask >= 0);
+	assert(new_mask > _mask);
+	_mask = new_mask;
 	
 	// clean up the old buckets list.
 	if (oldbuckets) {
@@ -328,13 +293,7 @@ void buckets_split_mask(hash_t mask)
 		}
 	}	
 	
-	_hashmasks = (void *) newlist;
 	_buckets = newbuckets;
-	_mask = mask;
-	
-	
-	assert(_mask > 0);
-	assert(_hashmasks);
 	assert(_buckets);
 }
 
@@ -365,26 +324,17 @@ static void bucket_free(bucket_t *bucket)
 }
 
 
-static void update_hashmasks(bucket_t *bucket)
+void update_hashmasks(bucket_t *bucket)
 {
-	int i;
-	
 	assert(bucket);
 	
-	assert(bucket->hash >= 0 && bucket->hash <= _mask);
+	assert(bucket->hashmask >= 0 && bucket->hashmask <= _mask);
 	assert(bucket->level == -1 || bucket->level == 0 || bucket->level == 1);
 
-	if (_clients) {
-		for (i=0; i<_client_count; i++) {
-			if (_clients[i]) {
-				if (_clients[i]->handle >= 0) {
-					// we have a client, that seems to be connected.
-					push_hashmask(_clients[i], bucket->hash, bucket->level);
-				}
-			}
-		}
-	}
+	client_update_hashmasks(_mask, bucket->hashmask, bucket->level);
 }
+
+
 
 
 static void bucket_shutdown_handler(evutil_socket_t fd, short what, void *arg) 
@@ -406,17 +356,15 @@ static void bucket_shutdown_handler(evutil_socket_t fd, short what, void *arg)
 		assert(bucket->level == 0);
 
 		// if the bucket is primary, but there are no nodes to send it to, then we destroy it.
-		if (_node_count == 0) {
+		if (node_active_count() == 0) {
 			done ++;
 		}
 		else {
-			assert(_node_count > 0);
-			
 			// If the backup node is connected, then we will tell that node, that it has been 
 			// promoted to be primary for the bucket.
 			if (bucket->backup_node) {
 				assert(bucket->backup_node->client);
-				push_promote(bucket->backup_node->client, bucket->hash);
+				push_promote(bucket->backup_node->client, bucket->hashmask);
 
 				assert(bucket->promoting == NOT_PROMOTING);
 				bucket->promoting = PROMOTING;
@@ -448,8 +396,8 @@ static void bucket_shutdown_handler(evutil_socket_t fd, short what, void *arg)
 		event_free(bucket->shutdown_event);
 		bucket->shutdown_event = NULL;
 
-		assert(_buckets[bucket->hash] == bucket);
-		_buckets[bucket->hash] = NULL;
+		assert(_buckets[bucket->hashmask] == bucket);
+		_buckets[bucket->hashmask] = NULL;
 		
 		bucket_free(bucket);
 		bucket = NULL;
@@ -468,34 +416,64 @@ void bucket_shutdown(bucket_t *bucket)
 {
 	assert(bucket);
 	
-	if (bucket->shutdown_event == NULL) {
-		printf("Bucket shutdown initiated: %#llx\n", bucket->hash);
-
-		assert(_evbase);
-		bucket->shutdown_event = evtimer_new(_evbase, bucket_shutdown_handler, bucket);
-		assert(bucket->shutdown_event);
-		evtimer_add(bucket->shutdown_event, &_timeout_now);
-	}
 }
 
 
 
-void buckets_init(void)
+int buckets_shutdown(void)
+{
+	int waiting = 0;
+	hash_t i;
+	bucket_t *bucket;
+	
+	if (_buckets) {
+		assert(_mask > 0);
+		for (i=0; i<=_mask; i++) {
+			assert(_buckets[i]);
+			bucket = _buckets[i];
+			
+			if (bucket->data) {
+			
+				waiting ++;
+				if (bucket->shutdown_event == NULL) {
+					printf("Bucket shutdown initiated: %#llx\n", bucket->hashmask);
+
+					assert(_evbase);
+					bucket->shutdown_event = evtimer_new(_evbase, bucket_shutdown_handler, bucket);
+					assert(bucket->shutdown_event);
+					evtimer_add(bucket->shutdown_event, &_timeout_now);
+				}
+			}
+		}
+	}
+
+	return(waiting);
+}
+
+
+
+// this is only used when this node is the first node in the cluster, and we need to create some new empty buckets.
+void buckets_init(hash_t mask, struct event_base *evbase)
 {
 	int i;
+
+	assert(_evbase == NULL);
+	assert(evbase);
+	_evbase = evbase;
+	
+	assert(_mask == 0);
+	assert(mask >= _mask);
+	_mask = mask;
 	
 	assert(_mask > 0);
-	
 	_buckets = calloc(_mask+1, sizeof(bucket_t *));
 	assert(_buckets);
 
 	assert(_primary_buckets == 0);
 	assert(_secondary_buckets == 0);
 	
-	assert(_hashmasks == NULL);
-	_hashmasks = calloc(_mask+1, sizeof(hashmask_t *));
-	assert(_hashmasks);
-
+	
+	
 	// for starters we will need to create a bucket for each hash.
 	for (i=0; i<=_mask; i++) {
 		_buckets[i] = bucket_new(i);
@@ -505,27 +483,17 @@ void buckets_init(void)
 
 		// send out a message to all connected clients, to let them know that the buckets have changed.
 		update_hashmasks(_buckets[i]); // all_hashmask(i, 0);
-		
-		_hashmasks[i] = calloc(1, sizeof(hashmask_t));
-		assert(_hashmasks[i]);
-
-		assert(_interface);
-		_hashmasks[i]->primary = strdup(_interface);
-		_hashmasks[i]->secondary = NULL;
 	}
 
 	// indicate that we have buckets that do not have backup copies on other nodes.
 	_nobackup_buckets = _mask + 1;
-	
-	// we should have hashmasks setup as well by this point.
-	assert(_hashmasks);
 }
 
 
 
-// we've been given a 'name' for a hash-key item, and so we lookup the bucket that is responsible 
+// we've been given a keyvalue for a hash-key item, and so we lookup the bucket that is responsible 
 // for that item.  the 'data' module will then find the data store within that handles that item.
-int buckets_store_name_str(hash_t key_hash, int length, char *name)
+int buckets_store_keyvalue_str(hash_t key_hash, int length, char *name)
 {
 	hash_t bucket_index;
 	bucket_t *bucket;
@@ -534,13 +502,14 @@ int buckets_store_name_str(hash_t key_hash, int length, char *name)
 	assert(length > 0);
 
 	// calculate the bucket that this item belongs in.
+	assert(_mask > 0);
 	bucket_index = _mask & key_hash;
 	assert(bucket_index <= _mask);
 	bucket = _buckets[bucket_index];
 
 	// if we have a record for this bucket, then we are either a primary or a backup for it.
 	if (bucket) {
-		assert(bucket->hash == bucket_index);
+		assert(bucket->hashmask == bucket_index);
 		
 		// make sure that this server is 'primary' or 'secondary' for this bucket.
 		assert(bucket->data);
@@ -558,19 +527,20 @@ int buckets_store_name_str(hash_t key_hash, int length, char *name)
 
 // we've been given a 'name' for a hash-key item, and so we lookup the bucket that is responsible 
 // for that item.  the 'data' module will then find the data store within that handles that item.
-int buckets_store_name_int(hash_t key_hash, long long int_key)
+int buckets_store_keyvalue_int(hash_t key_hash, long long int_key)
 {
 	hash_t bucket_index;
 	bucket_t *bucket;
 
 	// calculate the bucket that this item belongs in.
+	assert(_mask > 0);
 	bucket_index = _mask & key_hash;
 	assert(bucket_index <= _mask);
 	bucket = _buckets[bucket_index];
 
 	// if we have a record for this bucket, then we are either a primary or a backup for it.
 	if (bucket) {
-		assert(bucket->hash == bucket_index);
+		assert(bucket->hashmask == bucket_index);
 		
 		// make sure that this server is 'primary' or 'secondary' for this bucket.
 		assert(bucket->data);
@@ -584,6 +554,27 @@ int buckets_store_name_int(hash_t key_hash, long long int_key)
 }
 
 
+static void hashmasks_dump(void)
+{
+	hash_t i;
+
+	assert(_buckets);
+	
+	stat_dumpstr("HASHMASKS");
+	for (i=0; i<=_mask; i++) {
+		assert(_buckets[i]);
+		assert(_buckets[i]->primary_node);
+		assert(_buckets[i]->secondary_node);
+		const char *name_primary = node_name(_buckets[i]->primary_node);
+		const char *name_secondary = node_name(_buckets[i]->secondary_node);
+
+		stat_dumpstr("  Hashmask:%#llx, Primary:'%s', Secondary:'%s'", i, 
+					 name_primary ? name_primary : "",
+					 name_secondary ? name_secondary : "");
+	}
+	
+	stat_dumpstr(NULL);
+}
 
 
 
@@ -592,7 +583,7 @@ static void bucket_dump(bucket_t *bucket)
 	node_t *node;
 	char *mode = NULL;
 	char *altmode = NULL;
-	char *altnode = NULL;
+	const char *altnode = NULL;
 	
 	assert(bucket);
 	
@@ -601,8 +592,8 @@ static void bucket_dump(bucket_t *bucket)
 		altmode = "Backup";
 		assert(bucket->source_node == NULL);
 		if (bucket->backup_node) {
-			assert(bucket->backup_node->details.name);
-			altnode = bucket->backup_node->details.name;
+			assert(bucket->backup_node->conninfo);
+			altnode = conninfo_name(bucket->backup_node->conninfo);
 		}
 		else {
 			altnode = "";
@@ -612,9 +603,9 @@ static void bucket_dump(bucket_t *bucket)
 		mode = "Secondary";
 		assert(bucket->backup_node == NULL);
 		assert(bucket->source_node);
-		assert(bucket->source_node->details.name);
+		assert(bucket->source_node->conninfo);
 		altmode = "Source";
-		altnode = bucket->source_node->details.name;
+		altnode = conninfo_name(bucket->source_node->conninfo);
 	}
 	else {
 		mode = "Unknown";
@@ -625,7 +616,7 @@ static void bucket_dump(bucket_t *bucket)
 	assert(mode);
 	assert(altmode);
 	assert(altnode);
-	stat_dumpstr("    Bucket:%#llx, Mode:%s, %s Node:%s", bucket->hash, mode, altmode, altnode);
+	stat_dumpstr("    Bucket:%#llx, Mode:%s, %s Node:%s", bucket->hashmask, mode, altmode, altnode);
 	
 	assert(bucket->data);
 //	data_dump(bucket->data);
@@ -633,8 +624,10 @@ static void bucket_dump(bucket_t *bucket)
 	if (bucket->transfer_client) {
 		node = bucket->transfer_client->node;
 		assert(node);
-		assert(node->details.name);
-		stat_dumpstr("      Currently transferring to: %s", node->details.name);
+		assert(node->conninfo);
+		const char *name = conninfo_name(node->conninfo);
+		assert(name);
+		stat_dumpstr("      Currently transferring to: %s", name);
 		stat_dumpstr("      Transfer Mode: %d", bucket->transfer_mode_special);
 	}
 }
@@ -652,6 +645,8 @@ void buckets_dump(void)
 	stat_dumpstr("  Bucket currently transferring: %s", _bucket_transfer == 0 ? "no" : "yes");
 	stat_dumpstr("  Migration Sync Counter: %d", _migrate_sync);
 
+	hashmasks_dump();
+	
 	stat_dumpstr("  List of Buckets:");
 	
 	for (i=0; i<=_mask; i++) {
@@ -663,59 +658,23 @@ void buckets_dump(void)
 }
 
 
-void hashmasks_dump(void)
-{
-	hash_t i;
-
-// the list of hashmasks is to know which servers are responsible for which buckets.
-// this list of hashmasks will also replace the need to 'settle'.  Instead, a timed event will 
-// occur periodically that checks that the hashmask coverage is complete.
-// hashmask_t ** _hashmasks = NULL;
-
-	assert(_hashmasks);
-	
-	stat_dumpstr("HASHMASKS");
-	for (i=0; i<=_mask; i++) {
-		assert(_hashmasks[i]);
-
-		stat_dumpstr("  Hashmask:%#llx, Primary:'%s', Secondary:'%s'", i, 
-					 _hashmasks[i]->primary ? _hashmasks[i]->primary : "",
-					 _hashmasks[i]->secondary ? _hashmasks[i]->secondary : "");
-	}
-	
-	stat_dumpstr(NULL);
-}
-
-
-// if the buckets are moving from primary to secondary, or the other way round, then the hashmasks 
-// need to be switched to match it.
-void hashmask_switch(hash_t hash) 
-{
-	char *tmp;
-	
-	assert(_hashmasks);
-	assert(hash >= 0 && hash <= _mask);
-	assert(_hashmasks[hash]);
-	assert(_hashmasks[hash]->primary);
-	assert(_hashmasks[hash]->secondary);
-	
-	tmp = _hashmasks[hash]->primary;
-	_hashmasks[hash]->primary = _hashmasks[hash]->secondary;
-	_hashmasks[hash]->secondary = tmp;
-}
 
 
 
 
 
-// Get the primary node for an external bucket.  If the bucket is being handled by this instance, then this 
-// function will return NULL.  If it is being handled by another node, then it will return a string.
-const char * buckets_get_primary(hash_t key_hash) 
+
+
+// Get the primary node for an external bucket.  If the bucket is being handled by this instance, 
+// then this function will return NULL.  If it is being handled by another node, then it will return 
+// a node pointer.
+node_t * buckets_get_primary_node(hash_t key_hash) 
 {
 	int bucket_index;
 	bucket_t *bucket;
 
 	// calculate the bucket that this item belongs in.
+	assert(_mask > 0);
 	bucket_index = _mask & key_hash;
 	assert(bucket_index >= 0);
 	assert(bucket_index <= _mask);
@@ -725,10 +684,489 @@ const char * buckets_get_primary(hash_t key_hash)
 		return(NULL);
 	}
 	else {
-		assert(_hashmasks[bucket_index]);
-		assert(_hashmasks[bucket_index]->primary);
-		return(_hashmasks[bucket_index]->primary);
+		assert(bucket->primary_node);
+		return(bucket->primary_node);
 	}
 }
+
+
+int buckets_get_primary_count(void)
+{
+	assert(_primary_buckets >= 0);
+	return(_primary_buckets);
+}
+
+int buckets_get_secondary_count(void)
+{
+	assert(_secondary_buckets >= 0);
+	return(_secondary_buckets);
+}
+
+
+// return the number of buckets that are currently transferring (normally either 0 or 1).
+int buckets_transferring(void)
+{
+	assert(_bucket_transfer >= 0);
+	return(_bucket_transfer);
+}
+
+
+
+int buckets_accept_bucket(client_t *client, hash_t mask, hash_t hashmask)
+{
+	int accepted = -1;
+	
+	assert(client);
+	assert(_mask > 0);
+	
+	if (_bucket_transfer != 0) {
+		//  we are currently transferring another bucket, therefore we cannot accept another one.
+		logger(LOG_WARN, "cant accept bucket, already transferring one.");
+		accepted = 0;
+	}
+	else { 
+		assert(_bucket_transfer == 0);
+		if (mask != _mask) {
+			// the masks are different, we cannot accept a bucket unless our masks match... which should 
+			// balance out once hashmasks have proceeded through all the nodes.
+			logger(LOG_WARN, "cant accept bucket, masks are not compatible.");
+			accepted = 0;
+		}
+		else {
+			// now we need to check that this bucket isn't already handled by this server.
+
+			assert(hashmask <= mask);
+			assert(_mask == mask);
+			
+			// if we dont currently have a buckets list, we need to create one.
+			if (_buckets == NULL) {
+				_buckets = calloc(_mask + 1, sizeof(bucket_t *));
+				assert(_buckets);
+				assert(_buckets[0] == NULL);
+				assert(_primary_buckets == 0);
+				assert(_secondary_buckets == 0);
+			}
+			
+			assert(_buckets);
+			if (_buckets[hashmask]) {
+				logger(LOG_ERROR, "cant accept bucket, already have that bucket.");
+				accepted = 0;
+			}
+			else {
+				logger(LOG_INFO, "accepting bucket. (%#llx/%#llx)", mask, hashmask);
+				
+				assert(_bucket_transfer == 0);
+				_bucket_transfer = 1;
+				
+				// need to create the bucket, and mark it as in-transit.
+				bucket_t *bucket = bucket_new(hashmask);
+				_buckets[hashmask] = bucket;
+				assert(data_in_transit() == 0);
+				assert(bucket->transfer_client == NULL);
+				assert(client->node);
+				logger(LOG_DEBUG, "Setting transfer client ('%s') to bucket %#llx.", node_name(client->node), bucket->hashmask);
+				bucket->transfer_client = client;
+				assert(bucket->level < 0);
+				accepted = 1;
+			}
+		}
+	}
+
+	assert(accepted == 0 || accepted == 1);
+	return(accepted);
+}
+
+
+
+
+
+void buckets_control_bucket(client_t *client, hash_t mask, hash_t hashmask, int level)
+{
+	bucket_t *bucket = NULL;
+	
+	assert(client);
+	assert(_mask > 0);
+	assert(_mask == mask);
+	assert(level == 0 || level == 1);
+	
+	assert(_buckets);
+	assert(hashmask <= _mask);
+	assert(hashmask >= 0);
+
+	// ** some of these values should be checked at runtime
+	bucket = _buckets[hashmask];
+	assert(bucket);
+	assert(bucket->hashmask == hashmask);
+	assert(bucket->transfer_client == NULL);
+	assert(data_in_transit() == 0);
+	assert(bucket->transfer_event == NULL);
+	
+	// mark the bucket as ready for action.
+	if (level == 0) {
+		// we are switching a bucket from secondary to primary.
+		assert(bucket->level == 1);
+		assert(bucket->backup_node == NULL);
+		assert(bucket->source_node);
+		assert(bucket->source_node->client == client);
+		bucket->backup_node = bucket->source_node;
+		bucket->source_node = NULL;
+		
+		_primary_buckets ++;
+		_secondary_buckets --;
+		assert(_primary_buckets > 0);
+		assert(_secondary_buckets >= 0);
+	}
+	else if (level == 1)  {
+		// we are switching a bucket from primary to secondary.  
+		assert(bucket->level == 0);
+		
+		// we should be connected to this other node.
+		assert(bucket->source_node == NULL);
+		assert(bucket->backup_node);
+		assert(bucket->backup_node->client == client);
+		bucket->source_node = bucket->backup_node;
+		bucket->backup_node = NULL;
+		
+		_primary_buckets --;
+		_secondary_buckets ++;
+		assert(_primary_buckets >= 0);
+		assert(_secondary_buckets > 0);
+	}
+	else {
+		assert(level == -1);
+		
+		// the other node is telling us to destroy this copy of the bucket.
+		assert(0);
+	}
+	bucket->level = level;
+
+	assert(bucket->primary_node);
+	assert(bucket->secondary_node);
+	node_t *node = bucket->primary_node;
+	bucket->primary_node = bucket->secondary_node;
+	bucket->secondary_node = node;
+		
+	// since this node is receiving the 'switch' command, we should not have any buckets transferring.
+	assert(_bucket_transfer == 0);
+}
+
+
+
+
+
+void buckets_hashmasks_update(node_t *node, hash_t hashmask, int level)
+{
+	assert(node);
+	assert(level == 0 || level == 1);
+	
+	// verify that the hash provided actually describes a bucket.
+	assert((hashmask & _mask) == hashmask);	
+	
+	if (level == 0) {
+		_buckets[hashmask]->primary_node = node;
+		
+		logger(LOG_DEBUG, "Setting HASHMASK: Primary [%#llx] = '%s'",
+			hashmask, node_name(node)
+		);
+	}
+	else if (level == 1) {
+		_buckets[hashmask]->secondary_node = node;
+
+		logger(LOG_DEBUG, "Setting HASHMASK: Secondary [%#llx] = '%s'",
+			hashmask, node_name(node)
+		);
+	}
+	else {
+		assert(0);
+	}
+}
+
+
+// return the mask
+hash_t buckets_mask(void)
+{
+	assert(_mask > 0);
+	return(_mask);
+}
+
+
+
+bucket_t * buckets_find_switchable(node_t *node)
+{
+	int i;
+	bucket_t *bucket = NULL;
+	
+	assert(node);
+	assert(_buckets);
+	
+	// go through all the buckets.
+	for (i=0; i<=_mask && bucket == NULL; i++) {
+		
+		// do we have this bucket?
+		if (_buckets[i]) {
+			
+			// are we primary?
+			if (_buckets[i]->level == 0) {
+				
+				// is this client the backup node for this bucket?
+				if (_buckets[i]->backup_node == node) {
+					
+					// yes it is, we can promote this bucket.
+					bucket = _buckets[i];
+
+				}
+			}
+		}
+	}
+	
+	return(bucket);
+}
+
+
+
+
+
+void buckets_finalize_migration(client_t *client, hash_t hashmask, int level, const char *conninfo_str)
+{
+	bucket_t *bucket;
+	
+	assert(_mask > 0 && (hashmask >= 0 && hashmask <= _mask));
+	assert(client);
+	assert(level == 0 || level == 1);
+	assert(conninfo_str);
+	
+	// ** some of these valumes should be checked at runtime
+	bucket = _buckets[hashmask];
+	assert(bucket);
+	assert(bucket->hashmask == hashmask);
+	assert(bucket->level < 0);
+	assert(bucket->source_node == NULL);
+	assert(bucket->backup_node == NULL);
+	assert(data_in_transit() == 0);
+	assert(bucket->transfer_event == NULL);
+	assert(_bucket_transfer == 1);
+
+	assert(bucket->transfer_client == client);
+	assert(client);
+	assert(client->node);
+	logger(LOG_DEBUG, "Removing transfer client ('%s') from bucket %#llx.", node_name(client->node), bucket->hashmask);
+
+
+	bucket->transfer_client = NULL;
+		
+	// mark the bucket as ready for action.
+	bucket->level = level;
+	if (level == 0) {
+		// we are receiving a primary bucket.  
+		if (conninfo_str) {
+			assert(bucket->backup_node == NULL);
+			bucket->backup_node = node_find(conninfo_str);
+			assert(bucket->backup_node);
+			assert(bucket->backup_node->client);
+		}
+		else {
+			assert(bucket->backup_node == NULL);
+		}
+		assert(bucket->source_node == NULL);
+		
+		// if level is -1 then indicates bucket is not here.  bucket is here.
+		assert(bucket->level >= 0);	
+
+		// indicates buckets is hosted here if level is not -1.
+		bucket->primary_node = NULL;
+		
+		_primary_buckets ++;
+		assert(_primary_buckets > 0);
+	}
+	else {
+		// we are receiving a backup bucket.  
+		assert(conninfo_str);
+		bucket->source_node = node_find(conninfo_str);
+		assert(bucket->source_node);
+		assert(bucket->source_node->client);
+
+		// if level is -1 then indicates bucket is not here.  bucket is here.
+		assert(bucket->level >= 0);	
+		
+		// setting this to NULL while level is not -1 indicates that the bucket is here.
+		bucket->secondary_node = NULL;
+		
+		// we should be connected to this other node.
+		assert(bucket->backup_node == NULL);
+		
+		_secondary_buckets ++;
+		assert(_secondary_buckets > 0);
+	}
+}
+
+
+
+
+
+void buckets_set_transferring(bucket_t *bucket, client_t *client)
+{
+	assert(bucket);
+	assert(client);
+	assert(client->node);
+	
+	assert(bucket->transfer_client == NULL);
+	logger(LOG_DEBUG, "Setting transfer client ('%s') to bucket %#llx.", node_name(client->node), bucket->hashmask);
+	bucket->transfer_client = client;
+	
+	assert(_bucket_transfer == 0);
+	_bucket_transfer = 1;
+}
+
+void buckets_clear_transferring(bucket_t *bucket)
+{
+	assert(bucket);
+	
+	assert(_bucket_transfer == 1);
+	_bucket_transfer = 0;
+	
+	assert(bucket->transfer_client);
+	assert(bucket->transfer_client->node);
+	logger(LOG_DEBUG, "Finished transferring to client ('%s') of bucket %#llx.", 
+		   node_name(bucket->transfer_client->node), bucket->hashmask);
+	bucket->transfer_client = NULL;
+}
+
+
+
+
+
+// go through the list of buckets, and find one that doesn't have a backup copy.
+bucket_t * buckets_nobackup_bucket(void) 
+{
+	int i;
+	bucket_t *bucket = NULL;
+
+	assert(_mask > 0);
+	
+	for (i=0; i<=_mask && bucket == NULL; i++) {
+		if (_buckets[i]) {
+			if (_buckets[i]->level == 0) {
+				if (_buckets[i]->backup_node == NULL) {
+					bucket = _buckets[i];
+
+					logger(LOG_INFO, "Attempting to migrate bucket #%#llx that has no backup copy.", bucket->hashmask); 
+					
+					assert(bucket->hashmask == i);
+					assert(bucket->transfer_client == NULL);
+				}
+			}
+		}
+	}
+	
+	return(bucket);
+}
+
+
+
+
+
+static bucket_t * choose_bucket_for_migrate(client_t *client, int primary, int backups, int ideal) 
+{
+	bucket_t *bucket = NULL;
+	int send_level = 0;
+	int i;
+	
+	if (((primary+backups) < ideal) && ((_primary_buckets+_secondary_buckets) > ideal)) {
+		// we have more buckets than the target, and it needs one, so should send one.
+		
+		assert(bucket == NULL);
+						
+		// If we have more primary than secondary buckets, then we need to send a primary, 
+		// otherwise we need to send a secondary.
+		assert(send_level == 0);
+		if (_secondary_buckets >= _primary_buckets) {
+			send_level = 1;
+		}
+		
+		// simply go through the bucket list until we find the appropriate bucket.
+		for (i=0; i<=_mask && bucket == NULL; i++) {
+			if (_buckets[i]) {
+				if (_buckets[i]->level == send_level) {
+					
+					if (send_level == 0) {
+						assert(_buckets[i]->source_node == NULL);
+						assert(_buckets[i]->backup_node);
+						
+						if (_buckets[i]->backup_node != client->node) {
+							bucket = _buckets[i];
+						}
+					}
+					else {
+						assert(_buckets[i]->source_node);
+						assert(_buckets[i]->backup_node == NULL);
+						
+						if (_buckets[i]->source_node != client->node) {
+							bucket = _buckets[i];
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return(bucket);
+}
+
+
+
+bucket_t * buckets_check_loadlevels(client_t *client, int primary, int backups)
+{
+	bucket_t *bucket = NULL;
+	
+	assert(client);
+	assert(primary >= 0);
+	assert(backups >= 0);
+	
+	// if the target node is not currently transferring, and we are not currently transferring
+	if (_bucket_transfer == 0) {
+
+			
+		// we havent sent anything yet, so now we need to check to see if we have any buckets 
+		// that do not have backup copies (we do not care about the ideal number of buckets, we 
+		// just need to make it a priority to get a second copy of these buckets out quick).
+		assert(bucket == NULL);
+		if (buckets_nobackup_count() > 0 && (primary+backups < _mask+1)) {
+			assert(client);
+			assert(client->node);
+			bucket = buckets_find_switchable(client->node);
+			assert(_bucket_transfer == 0);
+		}
+	
+		if (bucket == NULL) {
+			// we didn't find any buckets with no backup copies, so we need to see if there are any 
+			// other buckets we should migrate.
+
+			// determine the 'ideal' number of buckets that each node should have.  Integer maths is 
+			// perfect here, because we treat this as a 'minimum' which means that if the ideal is 
+			// 10.66 (for 16*2/3), then we want to make sure that each node has at least 10, and if 
+			// two nodes have 11, then that is fine.
+			int active = node_active_count();
+			assert(active > 0);
+			int ideal = ((_mask+1) *2) / active;
+			assert(ideal > 0);
+					
+			if (ideal < MIN_BUCKETS) {
+				// the 'ideal' number of buckets for each node is less than the split threshold, so 
+				// we need to split our buckets to maintain integrity of the cluster.   
+				
+				assert(bucket == NULL);
+				assert(0);
+			}
+			else {
+				bucket = choose_bucket_for_migrate(client, primary, backups, ideal);
+			}
+		}	
+	}
+	
+	return(bucket);
+}
+
+
+
 
 

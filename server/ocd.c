@@ -3,9 +3,6 @@
 //	Enhanced hash-map storage cluster.
 //-----------------------------------------------------------------------------
 
-#define OCD_MAIN
-
-
 // So that this service can be used with libevent 1.x as well as 2.x, we have a compatibility 
 // wrapper.   It is only applied at COMPILE TIME.
 #include "event-compat.h"
@@ -13,31 +10,26 @@
 // includes
 #include "bucket.h"
 #include "constants.h"
+#include "daemon.h"
 #include "item.h"
 #include "logging.h"
 #include "params.h"
 #include "payload.h"
 #include "seconds.h"
 #include "server.h"
-#include "settle.h"
 #include "shutdown.h"
 #include "stats.h"
 #include "timeout.h"
 
 #include <assert.h>
-#include <fcntl.h>
-#include <pwd.h>
 #include <stdlib.h>
-#include <string.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
 
 
 
 //-----------------------------------------------------------------------------
 // Globals... for other objects in this project to access them, include "globals.h" which has all 
 // the externs defined.
+
 
 // event base for listening on the sockets, and timeout events.
 struct event_base *_evbase = NULL;
@@ -59,7 +51,7 @@ static void sigint_handler(evutil_socket_t fd, short what, void *arg)
 	assert(arg == NULL);
 
 #ifndef NDEBUG
- 	if (_verbose > 0 ) printf("\nSIGINT received.\n\n");
+ 	if (log_getlevel() > 0 ) printf("\nSIGINT received.\n\n");
 #endif
 	
 	// delete the signal events.
@@ -77,122 +69,14 @@ static void sigint_handler(evutil_socket_t fd, short what, void *arg)
 
 
 
-//-----------------------------------------------------------------------------
-// print some info to the user, so that they can know what the parameters do.
-static void usage(void) {
-	printf(
-		PACKAGE " " VERSION "\n"
-		"-l <file>          config file for listener details\n"
-		"-c <num>           max simultaneous connections, default is 1024\n"
-		"-n <file>          Other cluster node to connect to. Can be specified more than once.\n"
-		"\n"
-		"-d                 run as a daemon\n"
-		"-P <file>          save PID in <file>, only used with -d option\n"
-		"-u <username>      assume identity of <username> (only when run as root)\n"
-		"\n"
-		"-g <filemask>      Logfile location and prefix.  The actual logfile name will be\n"
-		"                   appended with a datestamp.\n"
-		"-m <mb>            mb limit before a new logfile is created.\n"
-		"-v                 verbose (print errors/warnings while in event loop)\n"
-		"                     eg, -vvv will set it to level 3 (WARN)\n"
-		"                       1 - FATAL\n"
-		"                       2 - ERROR\n"
-		"                       3 - WARN\n"
-		"                       4 - STATS\n"
-		"                       5 - INFO\n"
-		"                       6 - DEBUG\n"
-		"                       7 - EXTRA\n"
-		"\n"
-		"-h                 print this help and exit\n"
-	);
-	return;
-}
-
-
-
-// this is used to fork the process and run in the background as a different user.  
-void daemonize(const char *username, const char *pidfile, const int noclose)
+void create_new_cluster(void)
 {
-	struct passwd *pw;
-	struct sigaction sa;
-	int fd;
-	FILE *fp;
-	
-	if (getuid() == 0 || geteuid() == 0) {
-		if (username == 0 || *username == '\0') {
-			fprintf(stderr, "can't run as root without the -u switch\n");
-			exit(EXIT_FAILURE);
-		}
-		assert(username);
-		pw = getpwnam((const char *)username);
-		if (pw == NULL) {
-			fprintf(stderr, "can't find the user %s to switch to\n", username);
-			exit(EXIT_FAILURE);
-		}
-		if (setgid(pw->pw_gid) < 0 || setuid(pw->pw_uid) < 0) {
-			fprintf(stderr, "failed to assume identity of user %s\n", username);
-			exit(EXIT_FAILURE);
-		}
-	}
-	
-	sa.sa_handler = SIG_IGN;
-	sa.sa_flags = 0;
-	if (sigemptyset(&sa.sa_mask) == -1 || sigaction(SIGPIPE, &sa, 0) == -1) {
-		perror("failed to ignore SIGPIPE; sigaction");
-		exit(EXIT_FAILURE);
-	}
-	
-	switch (fork()) {
-		case -1:
-			exit(EXIT_FAILURE);
-		case 0:
-			break;
-		default:
-			_exit(EXIT_SUCCESS);
-	}
-	
-	if (setsid() == -1)
-		exit(EXIT_FAILURE);
-	
-	(void)chdir("/");
-	
-	if (noclose == 0 && (fd = open("/dev/null", O_RDWR, 0)) != -1) {
-		(void)dup2(fd, STDIN_FILENO);
-		(void)dup2(fd, STDOUT_FILENO);
-		(void)dup2(fd, STDERR_FILENO);
-		if (fd > STDERR_FILENO)
-			(void)close(fd);
-	}
-	
-	// save the PID in if we're a daemon, do this after thread_init due to a
-	// file descriptor handling bug somewhere in libevent
-	if (pidfile != NULL) {
-		if ((fp = fopen(pidfile, "w")) == NULL) {
-			fprintf(stderr, "Could not open the pid file %s for writing\n", pidfile);
-			exit(EXIT_FAILURE);
-		}
-		
-		fprintf(fp,"%ld\n", (long)getpid());
-		if (fclose(fp) == -1) {
-			fprintf(stderr, "Could not close the pid file %s.\n", pidfile);
-			exit(EXIT_FAILURE);
-		}
-	}
+	assert(_evbase);
+	buckets_init(STARTING_MASK, _evbase);
+	logger(LOG_INFO, "Created New Cluster: %d buckets", buckets_get_primary_count() + buckets_get_secondary_count());
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
-	
 
 
 //-----------------------------------------------------------------------------
@@ -210,14 +94,22 @@ int main(int argc, char **argv)
 /// Initialization.
 ///============================================================================
 
-	parse_params(argc, argv);
+	
+	params_parse_args(argc, argv);
 
-	// daemonize
-	if (_daemonize) {
-		daemonize(_username, _pid_file, _verbose);
+	const char *connfile = params_get_conninfo_file();
+	if (connfile == NULL) {
+		fprintf(stderr, "Connection Info file needs to be provided.\n");
+		exit(1);
 	}
-
-
+	
+	assert(connfile);
+	conninfo_t *conninfo = conninfo_load(connfile);
+	
+	// daemonize
+	if (params_get_daemonize()) {
+		daemonize(params_get_username(), params_get_pidfile(), 0);
+	}
 	
 	// create our event base which will be the pivot point for pretty much everything.
 #if ( _EVENT_NUMERIC_VERSION >= 0x02000000 )
@@ -233,25 +125,29 @@ int main(int argc, char **argv)
 	assert(_sigint_event);
 	event_add(_sigint_event, NULL);
 
-	log_init(_logfile, _verbose, _logfile_max);
+	log_init(params_get_logfile(), params_get_logfile_max(), _evbase);
 	
-	seconds_init();
+	seconds_init(_evbase);
 	
 	payload_init();
 	
-	// we need to set a timer to fire in 5 seconds to setup the cluster if no connections were made.
-	settle_init();
-
 	// statistics are generated every second, setup a timer that can fire and handle the stats.
-	stats_init();
+	stats_init(_evbase);
 
+	clients_set_evbase(_evbase);
 	client_init_commands(4096);
 	
 	// initialise the servers that we listen on.
-	server_listen();
+	server_listen(_evbase, conninfo);
 
 	// attempt to connect to the other known nodes in the cluster.
+	nodes_set_evbase(_evbase);
 	node_connect_all();
+
+	// If we dont have any nodes configured, then we must be starting a new cluster.
+	if (node_count() == 0) {
+		create_new_cluster();
+	}
 	
 
 ///============================================================================
@@ -285,19 +181,15 @@ int main(int argc, char **argv)
 // 	assert(_client_count == 0);
 
 
-	client_cleanup(void);	
+	client_cleanup();	
 	
 	// make sure signal handlers have been cleared.
 	assert(_sigint_event == NULL);
 
 	
 	payload_free();
-	
-	// we are done, cleanup what is left in the control structure.
-	_interface = NULL;
-	
-	if (_username) { free((void*)_username); _username = NULL; }
-	if (_pid_file) { free((void*)_pid_file); _pid_file = NULL; }
+
+	params_free();
 	
 // 	assert(_conncount == 0);
 	assert(_sigint_event == NULL);

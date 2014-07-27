@@ -4,8 +4,8 @@
 #define __CLIENT_H
 
 #include "event-compat.h"
+#include "hash.h"
 #include "header.h"
-#include "messages.h"
 
 
 
@@ -33,12 +33,9 @@ typedef struct {
 	int closing;
 
 	void *transfer_bucket;
-	
-	messages_t messages;
-
 } client_t;
 
-
+void clients_set_evbase(struct event_base *evbase);
 
 client_t * client_new(void);
 void client_free(client_t *client);
@@ -55,9 +52,15 @@ void client_add_cmd(int cmd, void *fn);
 void client_add_response(int cmd, int code, void *fn);
 void client_add_special(int code, void *fn);
 
+void client_update_hashmasks(hash_t mask, hash_t hashmask, int level);
+
 
 void client_init_commands(int max);
 void client_cleanup(void);
+
+int client_count(void);
+
+void clients_shutdown(void);
 
 
 
@@ -69,11 +72,6 @@ char * data_string_copy(char **data);
 char * data_string(char **data, int *length);
 
 
-
-#ifndef __CLIENT_C
-	extern client_t **_clients;
-	extern int _client_count;
-#endif
 
 
 #endif

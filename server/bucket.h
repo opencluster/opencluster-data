@@ -15,25 +15,27 @@
 
 
 
-
 typedef struct {
 
-	hash_t hash;
+	hash_t hashmask;
 	
 	//  0 indicates primary
 	//  1 or more indicate which level of indirection the backups go.
+	// -1 indicates that the bucket is not hosted here.
 	int level;	
 	
 	// tree that the maps containing the actual data is stored.
 	bucket_data_t *data;
 	
+	node_t *primary_node;		// NULL for hosted locally.
+	node_t *secondary_node;
+	
 	// if this bucket is not hosted here, then source is the server that it is hosted.
 	// NULL if it is hosted here.
-	node_t *source_node;
-	
-	// next node in the chain to send data to.
-	node_t *backup_node;
-	
+	// This, and backup_node are
+	node_t *source_node;	
+	node_t *backup_node;  	// next node in the chain to send data to.
+
 	// special 'logger' nodes can be added to the cluster.  They do not serve data, but instead 
 	// record changes to a transaction log which can be used to recover data.
 	node_t *logging_node;
@@ -61,53 +63,42 @@ typedef struct {
 } bucket_t;
 
 
-typedef struct {
-	// string of the primary node for this hashmask
-	char *primary;
-	
-	// string of the secondary node for this hashmask.
-	char *secondary;
-} hashmask_t;
-
-
-
-
-
-
-
 value_t * buckets_get_value(hash_t map_hash, hash_t key_hash);
 int buckets_store_value(hash_t map_hash, hash_t key_hash, int expires, value_t *value);
-void buckets_split_mask(hash_t mask);
-void buckets_init(void);
+void buckets_split_mask(hash_t current_mask, hash_t new_mask);
+void buckets_init(hash_t mask, struct event_base *evbase);
 int buckets_store_keyvalue_int(hash_t key_hash, long long int_key);
 int buckets_store_keyvalue_str(hash_t key_hash, int length, char *name);
 
 bucket_t * bucket_new(hash_t hash);
-void bucket_shutdown(bucket_t *bucket);
+int buckets_shutdown(void);
 
 int buckets_nobackup_count(void);
 void bucket_destroy_contents(bucket_t *bucket);
 
-const char * buckets_get_primary(hash_t key_hash);
+node_t * buckets_get_primary_node(hash_t key_hash);
+int buckets_get_migrate_sync(void);
 
 void buckets_dump(void);
-void hashmasks_dump(void);
 
-void hashmask_switch(hash_t hash);
+int buckets_get_primary_count(void);
+int buckets_get_secondary_count(void);
 
+int buckets_transferring(void);
+int buckets_accept_bucket(client_t *client, hash_t mask, hash_t hashmask);
+void buckets_control_bucket(client_t *client, hash_t mask, hash_t key_hash, int level);
 
-#ifndef __BUCKET_C
-	extern bucket_t ** _buckets;
-	extern int _migrate_sync;
-	extern int _primary_buckets;
-	extern int _secondary_buckets;
-	extern hashmask_t ** _hashmasks;
-	extern int _nobackup_buckets;
-	extern hash_t _mask;
-	extern int _bucket_transfer;
-#endif
+void buckets_hashmasks_update(node_t *node, hash_t hashmask, int level);
 
+hash_t buckets_mask(void);
+bucket_t * buckets_find_switchable(node_t *node);
+bucket_t * buckets_nobackup_bucket(void);
 
+void buckets_finalize_migration(client_t *client, hash_t hashmask, int level, const char *conninfo_str);
+bucket_t * buckets_check_loadlevels(client_t *client, int primary, int backups);
+
+void buckets_set_transferring(bucket_t *bucket, client_t *client);
+void buckets_clear_transferring(bucket_t *bucket);
 
 #endif
 

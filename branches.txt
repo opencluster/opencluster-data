@@ -140,6 +140,14 @@ pause_resume
 	In those cases, the node will tell all the other nodes, that they need to pause.
 	This could be when resuming all the nodes
 
+server-multi-node-params
+	Change the server param handling so that a user can specify multiple nodes to 
+	connect to.  The server would only attempt to connect to the first one, but if 
+	that fails, try the second, etc.
 	
+server-fail-startup-error
+	If the server fails to connect to the specified node on startup, it should fail 
+	immediately with a unique error code, so that wrapping scripts can then attempt to 
+	start the node connecting to different nodes.
 	
 	

@@ -1,15 +1,14 @@
 #ifndef __SECONDS_H
 #define __SECONDS_H
 
+#include "event-compat.h"
 
 
-void seconds_init(void);
+void seconds_init(struct event_base *evbase);
 void seconds_shutdown(void);
 
+unsigned int seconds_get(void);
 
-#ifndef __SECONDS_C
-	extern unsigned int _seconds;
-#endif
 
 
 #endif

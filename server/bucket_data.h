@@ -59,9 +59,9 @@ typedef struct {
 
 
 
-bucket_data_t * data_new(hash_t hashmask);
+bucket_data_t * data_new(hash_t mask, hash_t hashmask);
 void data_free(bucket_data_t *data);
-void data_destroy(bucket_data_t *data, hash_t hash);
+void data_destroy(bucket_data_t *data, hash_t mask, hash_t hashmask);
 
 value_t * data_get_value(hash_t map_hash, hash_t key_hash, bucket_data_t *ddata);
 void data_set_value(hash_t map_hash, hash_t key_hash, bucket_data_t *ddata, value_t *value, int expires, client_t *backup_client);

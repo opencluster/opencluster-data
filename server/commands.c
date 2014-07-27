@@ -3,7 +3,6 @@
 #include "bucket.h"
 #include "client.h"
 #include "commands.h"
-#include "globals.h"
 #include "hashfn.h"
 #include "header.h"
 #include "logging.h"
@@ -17,13 +16,6 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
-
-
-
-// external references...
-extern bucket_t ** _buckets;
-extern hashmask_t ** _hashmasks;
-
 
 
 
@@ -96,18 +88,18 @@ static void cmd_get_int(client_t *client, header_t *header, char *payload)
 		// the data they are looking for is not here.
 		// we need to check to make sure taht this instance is responsible for the bucket this item would be located.  If it this instance, then the item doesnt exist, but if this instance is not responsible, we need to reply with the primary server for that bucket.
 		
-		const char *server = buckets_get_primary(key_hash);
-		if (server == NULL) {
+		node_t *node = buckets_get_primary_node(key_hash);
+		if (node == NULL) {
 			// the server for the bucket is this one, so the key mustn't exit.
 			client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
 		}
 		else {
 			// The data is not here, but we know where the data is, so we need to make a request to the actual server that has it.
-
-			
-			assert(server);
-			assert(strlen(server) > 0);
-			logger(LOG_DEBUG, "CMD: Bucket %#llx not here, it is at '%s'", key_hash, server);
+	
+			assert(node->conninfo);
+			const char *server_name = conninfo_name(node->conninfo);
+			assert(server_name);
+			logger(LOG_DEBUG, "CMD: Bucket %#llx not here, it is at '%s'", key_hash, server_name);
 			
 			assert(0);
 
@@ -209,17 +201,19 @@ static void cmd_get_str(client_t *client, header_t *header, char *payload)
 			
 			
 			// the data they are looking for is not here.
-			const char *server = buckets_get_primary(key_hash);
-			if (server == NULL) {
+			node_t *node = buckets_get_primary_node(key_hash);
+			if (node == NULL) {
 				// the server for the bucket is this one, so the key mustn't exit.
 				client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
 			}
 			else {
 				// need to reply with the actual server that is responsible for this key.
 
-				assert(server);
-				assert(strlen(server) > 0);
-				logger(LOG_DEBUG, "CMD: Bucket %#llx not here, it is at '%s'", key_hash, server);
+				assert(node->conninfo);
+				const char *server_name = conninfo_name(node->conninfo);
+				assert(server_name);
+				assert(strlen(server_name) > 0);
+				logger(LOG_DEBUG, "CMD: Bucket %#llx not here, it is at '%s'", key_hash, server_name);
 				
 				// need to pass the request on to the appropriate server that has the data.
 				assert(0);
@@ -256,8 +250,8 @@ static void cmd_set_str(client_t *client, header_t *header, char *payload)
 	str = data_string(&next, &str_len);
 	
 	// first we need to check that this server is responsible for this data.  If not, we need to pass a message to the server that is.
-	const char *server = buckets_get_primary(key_hash);
-	if (server) {
+	node_t *node = buckets_get_primary_node(key_hash);
+	if (node) {
 		// this data is being served by another node... we need to relay the query.
 		assert(0);
 	}
@@ -302,21 +296,23 @@ static void cmd_loadlevels(client_t *client, header_t *header)
 
 	// the header shouldn't have any payload for this command.
 	assert(header->length == 0);
-	
 	assert(payload_length() == 0);
 	
-	assert(_primary_buckets >= 0);
-	assert(_secondary_buckets >= 0);
-	assert(_bucket_transfer >= 0);
-	payload_int(_primary_buckets);
-	payload_int(_secondary_buckets);
-	payload_int(_bucket_transfer);
+	int primary_count = buckets_get_primary_count();
+	int secondary_count = buckets_get_secondary_count();
+	int trans = buckets_transferring();
+
+	assert(primary_count >= 0);
+	assert(secondary_count >= 0);
+	assert(trans >= 0);
+	payload_int(primary_count);
+	payload_int(secondary_count);
+	payload_int(trans);
 	
 	// send the reply.
 	client_send_reply(client, header, RESPONSE_LOADLEVELS, payload_length(), payload_ptr());
 
 	payload_clear();
-	assert(_hashmasks);
 }
 
 
@@ -328,7 +324,6 @@ static void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
 	char *next;
 	hash_t mask;
 	hash_t key_hash;
-	bucket_t *bucket;
 	
 	assert(client);
 	assert(header);
@@ -340,59 +335,13 @@ static void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
 	
 	logger(LOG_INFO, "CMD: accept bucket (%#llx/%#llx)", mask, key_hash);
 
-	if (_bucket_transfer != 0) {
-		//  we are currently transferring another bucket, therefore we cannot accept another one.
-		logger(LOG_WARN, "cant accept bucket, already transferring one.");
+	int accepted = buckets_accept_bucket(client, mask, key_hash);
+	if (accepted == 0) {
+		// bucket was not accepted.
 		client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
 	}
-	else { 
-		assert(_bucket_transfer == 0);
-		if (mask != _mask) {
-			// the masks are different, we cannot accept a bucket unless our masks match... which should 
-			// balance out once hashmasks have proceeded through all the nodes.
-			logger(LOG_WARN, "cant accept bucket, masks are not compatible.");
-			client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
-		}
-		else {
-			// now we need to check that this bucket isn't already handled by this server.
-			assert(key_hash <= mask);
-			assert(_mask == mask);
-			
-			assert(_hashmasks);
-			
-			// if we dont currently have a buckets list, we need to create one.
-			if (_buckets == NULL) {
-				_buckets = calloc(_mask + 1, sizeof(bucket_t *));
-				assert(_buckets);
-				assert(_buckets[0] == NULL);
-				assert(_primary_buckets == 0);
-				assert(_secondary_buckets == 0);
-			}
-			
-			assert(_buckets);
-			if (_buckets[key_hash]) {
-				logger(LOG_ERROR, "cant accept bucket, already have that bucket.");
-				client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
-			}
-			else {
-				logger(LOG_INFO, "accepting bucket. (%#llx/%#llx)", mask, key_hash);
-				
-				assert(_bucket_transfer == 0);
-				_bucket_transfer = 1;
-				
-				// need to create the bucket, and mark it as in-transit.
-				bucket = bucket_new(key_hash);
-				_buckets[key_hash] = bucket;
-				assert(data_in_transit() == 0);
-				assert(bucket->transfer_client == NULL);
-				assert(client->node);
-				logger(LOG_DEBUG, "Setting transfer client ('%s') to bucket %#llx.", node_getname(client->node), bucket->hash);
-				bucket->transfer_client = client;
-				assert(bucket->level < 0);
-				
-				client_send_reply(client, header, RESPONSE_OK, 0, NULL);
-			}
-		}
+	else {
+		client_send_reply(client, header, RESPONSE_OK, 0, NULL);
 	}
 
 	// we did not create an outgoing payload, better check that it is still empty.
@@ -634,6 +583,7 @@ static void cmd_hashmask(client_t *client, header_t *header, char *payload)
 	hash_t hash;
 	int level;
 	node_t *node;
+	hash_t current_mask;
 	
 	assert(client);
 	assert(header);
@@ -648,6 +598,8 @@ static void cmd_hashmask(client_t *client, header_t *header, char *payload)
 	hash = data_long(&next);
 	level = data_int(&next);
 
+	current_mask = buckets_mask();
+	
 	// check integrity of the data provided.
 	assert(mask != 0);
 	assert(hash >= 0 && hash <= mask);
@@ -655,18 +607,17 @@ static void cmd_hashmask(client_t *client, header_t *header, char *payload)
 	
 	// check that the mask is the same as our existing mask... 
 
-	logger(LOG_DEBUG, "debug: cmd_hashmask.  orig mask:%#llx, new mask:%#llx", _mask, mask);
+	logger(LOG_DEBUG, "debug: cmd_hashmask.  orig mask:%#llx, new mask:%#llx", current_mask, mask);
 	
-	if (mask < _mask) {
+	if (mask < current_mask) {
 		// if the mask supplied is LESS than the mask we use, then when we read in the data, we need 
 		// to convert it to the new mask as we process it.
 		assert(0);
 	}
-	else if (mask > _mask) {
+	else if (mask > current_mask) {
 		// if the mask supplied is GREATER than the mask we use, we need to first permenantly update 
 		// our own mask to match the new one received.  Then process the incoming data.
-		buckets_split_mask(mask);
-		assert(_mask == mask);
+		buckets_split_mask(current_mask, mask);
 	}
 	else {
 		// the masks match, so the data should be ok.
@@ -681,33 +632,8 @@ static void cmd_hashmask(client_t *client, header_t *header, char *payload)
 	// these entries should only be coming from server nodes;
 	assert(client->node);
 	node = client->node;
-	assert(node->details.name);
-
-	if (level == 0) {
-		assert(_hashmasks);
-		assert(_hashmasks[hash]);
-		if (_hashmasks[hash]->primary) { free(_hashmasks[hash]->primary); }
-		assert(node->details.connectinfo);
-		_hashmasks[hash]->primary = strdup(node->details.connectinfo);
-		
-		logger(LOG_DEBUG, "Setting HASHMASK: Primary [%#llx] = '%s'",
-			hash, _hashmasks[hash]->primary
-		);
-	}
-	else if (level == 1) {
-		assert(_hashmasks);
-		assert(_hashmasks[hash]);
-		if (_hashmasks[hash]->secondary) { free(_hashmasks[hash]->secondary); }
-		assert(node->details.connectinfo);
-		_hashmasks[hash]->secondary = strdup(node->details.connectinfo);
-
-		logger(LOG_DEBUG, "Setting HASHMASK: Secondary [%#llx] = '%s'",
-			hash, _hashmasks[hash]->primary
-		);
-	}
-	else {
-		assert(0);
-	}
+	assert(node);
+	buckets_hashmasks_update(node, hash, level);
 
 	// send the ACK reply.
 	client_send_reply(client, header, RESPONSE_OK, 0, NULL);
@@ -715,7 +641,7 @@ static void cmd_hashmask(client_t *client, header_t *header, char *payload)
 
 
 // send message to all other connected clients and nodes alerting them to the change in buckets.
-static void hashmask_update(bucket_t *bucket)
+static void hashmask_send_update(bucket_t *bucket)
 {
 	assert(bucket);
 	assert(0);
@@ -728,92 +654,39 @@ static void hashmask_update(bucket_t *bucket)
 // telling the other to switch.
 static void cmd_control_bucket(client_t *client, header_t *header, char *payload)
 {
-	char *next;
-	hash_t mask;
-	hash_t key_hash;
-	int level;
 	bucket_t *bucket = NULL;
 	
 	assert(client);
 	assert(header);
 	assert(payload);
 
-	next = payload;
-	mask     = data_long(&next);
-	key_hash = data_long(&next);
-	level    = data_int(&next);
+	char * next = payload;
+	hash_t mask     = data_long(&next);
+	hash_t hashmask = data_long(&next);
+	int level       = data_int(&next);
 	
-	logger(LOG_INFO, "CMD: bucket control (%#llx/%#llx), level:%d", mask, key_hash, level);
+	logger(LOG_INFO, "CMD: bucket control (%#llx/%#llx), level:%d", mask, hashmask, level);
 
-	// make sure that the masks are the same.
-	if (mask != _mask) {
+	hash_t current_mask = buckets_mask();
+	assert(current_mask > 0);
+	
+	
+	if (client->node) {
+		// the client we received the command from, isnt even a node, we cannot accept it.
+	}
+	else if (mask != current_mask) {
+		// make sure that the masks are the same.
 		client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
-		assert(bucket == NULL);
 	}
 	else {
-		assert(_buckets);
-		assert(key_hash <= _mask);
-		assert(key_hash >= 0);
-
-		// ** some of these values should be checked at runtime
-		bucket = _buckets[key_hash];
-		assert(bucket);
-		assert(bucket->hash == key_hash);
-		assert(bucket->transfer_client == NULL);
-		assert(data_in_transit() == 0);
-		assert(bucket->transfer_event == NULL);
-		
-		// mark the bucket as ready for action.
-		if (level == 0) {
-			// we are switching a bucket from secondary to primary.
-			assert(bucket->level == 1);
-			assert(bucket->backup_node == NULL);
-			assert(bucket->source_node);
-			assert(bucket->source_node->client == client);
-			bucket->backup_node = bucket->source_node;
-			bucket->source_node = NULL;
-			
-			_primary_buckets ++;
-			_secondary_buckets --;
-			assert(_primary_buckets > 0);
-			assert(_secondary_buckets >= 0);
-		}
-		else if (level == 1)  {
-			// we are switching a bucket from primary to secondary.  
-			assert(bucket->level == 0);
-			
-			// we should be connected to this other node.
-			assert(bucket->source_node == NULL);
-			assert(bucket->backup_node);
-			assert(bucket->backup_node->client == client);
-			bucket->source_node = bucket->backup_node;
-			bucket->backup_node = NULL;
-			
-			_primary_buckets --;
-			_secondary_buckets ++;
-			assert(_primary_buckets >= 0);
-			assert(_secondary_buckets > 0);
-		}
-		else {
-			assert(level == -1);
-			
-			// the other node is telling us to destroy this copy of the bucket.
-			assert(0);
-		}
-		bucket->level = level;
-		
-		hashmask_switch(key_hash);
-		
+		buckets_control_bucket(client, mask, hashmask, level);
 		client_send_reply(client, header, RESPONSE_OK, 0, NULL);
 	}
 
-	// since this node is receiving the 'switch' command, we should not have any buckets transferring.
-	assert(_bucket_transfer == 0);
-	
 	if (bucket) {
 		// send message to all other connected clients and nodes alerting them to the change in buckets.
 		assert(bucket->level >= 0);
-		hashmask_update(bucket);
+		hashmask_send_update(bucket);
 	}
 
 	// outgoing payload should not be needed, better make sure that it is still empty.
@@ -829,10 +702,6 @@ static void cmd_control_bucket(client_t *client, header_t *header, char *payload
 // then the other node will finalize its part in the migration, and migration will be over.
 static void cmd_finalise_migration(client_t *client, header_t *header, char *payload)
 {
-	char *next;
-	hash_t mask;
-	hash_t key_hash;
-	int level;
 	char *remote_host = NULL;
 	bucket_t *bucket = NULL;
 	
@@ -840,94 +709,26 @@ static void cmd_finalise_migration(client_t *client, header_t *header, char *pay
 	assert(header);
 	assert(payload);
 
-	next = payload;
-	mask        = data_long(&next);
-	key_hash    = data_long(&next);
-	level       = data_int(&next);
-	remote_host = data_string_copy(&next);  // the connect_info for a particular node.
+	char *next = payload;
+	hash_t mask     = data_long(&next);
+	hash_t hashmask = data_long(&next);
+	int level       = data_int(&next);
+	remote_host     = data_string_copy(&next);  // the connect_info for a particular node.
 	
-	logger(LOG_INFO, "CMD: finalise migration (%#llx/%#llx), level:%d, remote:'%s'", mask, key_hash, level, remote_host);
+	logger(LOG_INFO, "CMD: finalise migration (%#llx/%#llx), level:%d, remote:'%s'", mask, hashmask, level, remote_host);
 
 	// regardless of the reply, the payload will be the same.
 	assert(payload_length() == 0);
 
+	hash_t current_mask = buckets_mask();
+	
 	// make sure that the masks are the same.
-	if (mask != _mask) {
+	if (mask != current_mask) {
 		assert(bucket == NULL);
 		client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
 	}
 	else {
-		
-		assert(_buckets);
-		assert(key_hash <= _mask);
-		assert(key_hash >= 0);
-
-		// ** some of these valumes should be checked at runtime
-		bucket = _buckets[key_hash];
-		assert(bucket);
-		assert(bucket->hash == key_hash);
-		assert(bucket->level < 0);
-		assert(bucket->source_node == NULL);
-		assert(bucket->backup_node == NULL);
-		assert(data_in_transit() == 0);
-		assert(bucket->transfer_event == NULL);
-		assert(_bucket_transfer == 1);
-
-		assert(bucket->transfer_client == client);
-		assert(client);
-		assert(client->node);
-		logger(LOG_DEBUG, "Removing transfer client ('%s') from bucket %#llx.", node_getname(client->node), bucket->hash);
-
-
-		bucket->transfer_client = NULL;
-		
-		// mark the bucket as ready for action.
-		bucket->level = level;
-		if (level == 0) {
-			// we are receiving a primary bucket.  
-			if (remote_host) {
-				assert(bucket->backup_node == NULL);
-				bucket->backup_node = node_find(remote_host);
-				assert(bucket->backup_node);
-				assert(bucket->backup_node->client);
-			}
-			else {
-				assert(bucket->backup_node == NULL);
-			}
-			assert(bucket->source_node == NULL);
-			
-			assert(_hashmasks);
-			assert(_hashmasks[key_hash]);
-			if (_hashmasks[key_hash]->primary) {
-				free(_hashmasks[key_hash]->primary);
-			}
-			_hashmasks[key_hash]->primary = strdup(_interface);
-			
-			_primary_buckets ++;
-			assert(_primary_buckets > 0);
-		}
-		else {
-			// we are receiving a backup bucket.  
-			assert(remote_host);
-			bucket->source_node = node_find(remote_host);
-			assert(bucket->source_node);
-			assert(bucket->source_node->client);
-
-			assert(_hashmasks);
-			assert(_hashmasks[key_hash]);
-			if (_hashmasks[key_hash]->secondary) {
-				free(_hashmasks[key_hash]->secondary);
-			}
-			_hashmasks[key_hash]->secondary = strdup(_interface);
-			assert(_hashmasks[key_hash]->primary);
-			
-			// we should be connected to this other node.
-			assert(bucket->backup_node == NULL);
-			
-			_secondary_buckets ++;
-			assert(_secondary_buckets > 0);
-		}
-		
+		buckets_finalize_migration(client, hashmask, level, remote_host);
 		client_send_reply(client, header, RESPONSE_OK, 0, NULL);
 	}
 	
@@ -935,20 +736,18 @@ static void cmd_finalise_migration(client_t *client, header_t *header, char *pay
 	assert(bucket->source_node || bucket->backup_node);
 
 	assert(bucket->transfer_client == NULL);
-	
-	assert(_bucket_transfer == 1);
-	_bucket_transfer = 0;
+
+	buckets_clear_transferring(bucket);
 
 	if (remote_host) {
 		free(remote_host);
 		remote_host = NULL;
 	}
-
 	
 	if (bucket) {
 		// send message to all other connected clients and nodes alerting them to the change in buckets.
 		assert(bucket->level >= 0);
-		hashmask_update(bucket);
+		hashmask_send_update(bucket);
 	}
 }
 
@@ -1008,9 +807,6 @@ static void cmd_sync_string(client_t *client, header_t *header, char *payload)
 	expires = data_int(&next);
 	str = data_string(&next, &str_len);
 	
-	assert(_hashmasks);
-
-	
 	// we cant treat the string as a typical C string, because it is actually a binary blob that may 
 	// contain NULL chars.
 	value->data.s.data = malloc(str_len + 1);
@@ -1018,7 +814,6 @@ static void cmd_sync_string(client_t *client, header_t *header, char *payload)
 	value->data.s.data[str_len] = 0;
 	value->data.s.length = str_len;
 	value->type = VALUE_STRING;
-	
 	
 	// store the value into the trees.  If a value already exists, it will get released and this one 
 	// will replace it, so control of this value is given to the tree structure.
@@ -1151,7 +946,7 @@ void cmd_init(void)
  	client_add_cmd(COMMAND_LOADLEVELS, cmd_loadlevels);
  	client_add_cmd(COMMAND_ACCEPT_BUCKET, cmd_accept_bucket);
  	client_add_cmd(COMMAND_CONTROL_BUCKET, cmd_control_bucket);
- 	client_add_cmd(COMMAND_FINALIZE_MIGRATION, cmd_finalise_migration);
+ 	client_add_cmd(COMMAND_FINALISE_MIGRATION, cmd_finalise_migration);
  	client_add_cmd(COMMAND_HASHMASK, cmd_hashmask);
  	client_add_cmd(COMMAND_HELLO, cmd_hello);
  	client_add_cmd(COMMAND_GOODBYE, cmd_goodbye);

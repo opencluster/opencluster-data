@@ -1,7 +1,6 @@
 // logging.c
 
 #include "logging.h"
-#include "globals.h"
 
 #include <assert.h>
 #include <event.h>
@@ -26,33 +25,33 @@
 #define DEFAULT_BUFFER_SIZE 2048
 #define DEFAULT_MAX_FILESIZE 50
 
-struct event *_log_event = NULL;
-struct event *_sigusr1_event = NULL;
-struct event *_sigusr2_event = NULL;
-char *_filename = NULL;
-short int _loglevel = 0;
-int _maxfilesize = 0;
-int _written = 0;
-FILE *_fp = NULL;
-int _verbose = 0;
+static struct event_base *_evbase = NULL;
+static struct event *_log_event = NULL;
+static struct event *_sigusr1_event = NULL;
+static struct event *_sigusr2_event = NULL;
+static char *_filename = NULL;
+static short int _loglevel = 0;
+static int _maxfilesize = 0;
+static int _written = 0;
+static FILE *_fp = NULL;
 
-char * _outbuf = NULL;
-int    _outbuf_len = 0;
-int    _outbuf_max = 0;
+static char * _outbuf = NULL;
+static int    _outbuf_len = 0;
+static int    _outbuf_max = 0;
 
-char *_level_strings[] = {"MINIMAL", "FATAL", "ERROR", "WARN", "STATS", "INFO", "DEBUG", "EXTRA"};
+static char *_level_strings[] = {"MINIMAL", "FATAL", "ERROR", "WARN", "STATS", "INFO", "DEBUG", "EXTRA"};
 
-struct timeval _timeout = {.tv_sec = DEFAULT_LOG_TIMER, .tv_usec = 0};
+static struct timeval _timeout = {.tv_sec = DEFAULT_LOG_TIMER, .tv_usec = 0};
 
 
 // we keep these variables as globals because we want the logger to have the least amount of impact 
 // as possible if logging levels are low.
-struct timeval _tv;
-time_t _curtime;
-va_list _ap;
-int _redo;
-int _result;
-int _avail;
+static struct timeval _tv;
+static time_t _curtime;
+static va_list _ap;
+static int _redo;
+static int _result;
+static int _avail;
 
 
 
@@ -140,16 +139,32 @@ static void loginc_handler(evutil_socket_t fd, short what, void *arg)
 }
 
 
+static void setup_sighandlers(void)
+{
+	// create the USR1 and USR2 signal listeners.
+	assert(_evbase);
+	assert(_sigusr1_event == NULL);
+	assert(_sigusr2_event == NULL);
+	_sigusr1_event = evsignal_new(_evbase, SIGUSR1, logdec_handler, NULL);
+	_sigusr2_event = evsignal_new(_evbase, SIGUSR2, loginc_handler, NULL);
+	assert(_sigusr1_event);
+	assert(_sigusr2_event);
+	event_add(_sigusr1_event, NULL);
+	event_add(_sigusr2_event, NULL);
+}
+
 
 // Initialise the logging system with all the info that we need,
-void log_init(const char *logfile, short int loglevel, int maxfilesize)
+void log_init(const char *logfile, int maxfilesize, struct event_base *evbase)
 {
-	assert(loglevel >= 0);
 	assert(maxfilesize >= 0);
 
-	assert(_evbase);
+	assert(_evbase == NULL);
 	assert(_log_event == NULL);
 
+	// if an evbase is supplied, then we use it now.  Otherwise, it should be supplied later.
+	if (evbase) { _evbase = evbase; }
+	
 	if (logfile) {
 		assert(_outbuf == NULL);
 		_outbuf = malloc(DEFAULT_BUFFER_SIZE);
@@ -157,7 +172,6 @@ void log_init(const char *logfile, short int loglevel, int maxfilesize)
 		assert(_outbuf_len == 0);
 		
 		_filename = strdup(logfile);
-		_loglevel = loglevel;
 		if (maxfilesize == 0) {
 			_maxfilesize = DEFAULT_MAX_FILESIZE * 1024 * 1024;
 		}
@@ -174,17 +188,22 @@ void log_init(const char *logfile, short int loglevel, int maxfilesize)
 		log_nextfile();
 		assert(_written == 0);
 
-		// create the USR1 and USR2 signal listeners.
-		assert(_evbase);
-		_sigusr1_event = evsignal_new(_evbase, SIGUSR1, logdec_handler, NULL);
-		_sigusr2_event = evsignal_new(_evbase, SIGUSR2, loginc_handler, NULL);
-		assert(_sigusr1_event);
-		assert(_sigusr2_event);
-		event_add(_sigusr1_event, NULL);
-		event_add(_sigusr2_event, NULL);
+		if (_evbase) {
+			setup_sighandlers();
+		}
 		
-		logger(LOG_MINIMAL, "Logging Started: Level %s, Max File Size=%d", levelstr(loglevel), _maxfilesize);
+		logger(LOG_MINIMAL, "Logging Started: Level %s, Max File Size=%d", levelstr(_loglevel), _maxfilesize);
 	}
+}
+
+void log_set_evbase(struct event_base *evbase)
+{
+	assert(_evbase == NULL);
+	assert(evbase);
+	_evbase = evbase;
+	
+	// now that we have an evbase, we need to setup the signal handlers.
+	setup_sighandlers();
 }
 
 

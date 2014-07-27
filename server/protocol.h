@@ -12,7 +12,7 @@
 #define COMMAND_LOADLEVELS                  0x0100
 #define COMMAND_ACCEPT_BUCKET               0x0110
 #define COMMAND_CONTROL_BUCKET              0x0120
-#define COMMAND_FINALIZE_MIGRATION          0x0130
+#define COMMAND_FINALISE_MIGRATION          0x0130
 #define COMMAND_GET_INT                     0x2010
 #define COMMAND_GET_STRING                  0x2020
 #define COMMAND_SET_INT                     0x2200
