@@ -15,11 +15,11 @@ DEBUG_LIBS=
 #DEBUG_LIBS=-lefence -lpthread
 
 ARGS=-Wall -O2
-LIBS=`pkg-config --libs libevent jansson glib-2.0` -lconninfo
+LIBS=`pkg-config --libs libevent jansson glib-2.0 conninfo`
 
 OBJS=\
 	bucket.o bucket_data.o \
-	client.o commands.o conninfo.o \
+	client.o commands.o \
 	daemon.o \
 	event-compat.o \
 	hashfn.o \
@@ -36,7 +36,6 @@ OBJS=\
 
 # we define the headers and their dependencies.
 H_USAGE=usage.h
-H_CONNINFO=conninfo.h
 H_DAEMON=daemon.h
 H_PARAMS=params.h
 H_LOGGING=logging.h
@@ -46,11 +45,11 @@ H_VALUE=value.h
 H_ITEM=item.h $(H_HASH) $(H_VALUE)
 H_PROTOCOL=protocol.h
 H_CONSTANTS=constants.h
-H_SERVER=server.h $(H_CONNINFO)
+H_SERVER=server.h
 H_HEADER=header.h
 H_CLIENT=client.h event-compat.h $(H_HEADER) $(H_HASH)
 H_MESSAGES=messages.h $(H_CLIENT)
-H_NODE=node.h $(H_CLIENT) $(H_HASH) $(H_CONNINFO)
+H_NODE=node.h $(H_CLIENT) $(H_HASH)
 H_BUCKET_DATA=bucket_data.h $(H_VALUE) $(H_HASH) $(H_ITEM) $(H_CLIENT) $(H_CONSTANTS) $(H_NODE)
 H_BUCKET=bucket.h $(H_HASH) $(H_NODE) $(H_BUCKET_DATA) $(H_VALUE)
 H_PUSH=push.h $(H_BUCKET) $(H_CLIENT) $(H_ITEM)
@@ -111,8 +110,6 @@ INC_COMMANDS= \
 	$(H_SERVER) \
 	$(H_TIMEOUT) \
 	$(H_VALUE) 
-	
-INC_CONNINFO=$(H_CONNINFO)
 	
 INC_DAEMON=$(H_DAEMON)
 
@@ -184,7 +181,6 @@ INC_SERVER= \
 	$(H_SERVER) \
 	event-compat.h \
 	$(H_CLIENT) \
-	$(H_CONNINFO) \
 	$(H_LOGGING)
 
 INC_SHUTDOWN= \
@@ -229,9 +225,6 @@ client.o: client.c $(INC_CLIENT)
 
 commands.o: commands.c $(INC_COMMANDS)
 	gcc `pkg-config --cflags glib-2.0` -c -o $@ commands.c $(DEBUG_ARGS) $(ARGS)
-
-conninfo.o: conninfo.c $(INC_CONNINFO)
-	gcc -c -o $@ conninfo.c $(DEBUG_ARGS) -ljansson $(ARGS)
 
 daemon.o: daemon.c $(INC_DAEMON)
 	gcc -c -o $@ daemon.c $(DEBUG_ARGS) $(ARGS)
