@@ -82,7 +82,8 @@ void server_listen(struct event_base *evbase, conninfo_t *conninfo)
 	// 	sin.sin_family = AF_INET;
 	len = sizeof(sin);
 	
-	assert(_conninfo);
+	assert(_conninfo == NULL);
+	_conninfo = conninfo;
 	const char *remote_addr = conninfo_remoteaddr(_conninfo);
 	assert(remote_addr);
 	

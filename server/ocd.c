@@ -105,6 +105,11 @@ int main(int argc, char **argv)
 	
 	assert(connfile);
 	conninfo_t *conninfo = conninfo_load(connfile);
+	if (conninfo == NULL) {
+		fprintf(stderr, "Unable to parse conninfo file: %s\n", connfile);
+		exit(1);
+	}
+	assert(conninfo);
 	
 	// daemonize
 	if (params_get_daemonize()) {
