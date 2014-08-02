@@ -20,4 +20,6 @@ utils/oc_set
 *.class
 conninfo/lib/libconninfo.o
 conninfo/lib/libconninfo.so.1.0.1
-
+conninfo/tools/conninfo_get
+conninfo/tools/conninfo_pack
+conninfo/tools/conninfo_set
