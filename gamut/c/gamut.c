@@ -17,25 +17,32 @@
 
 int main(int argc, char **argv)
 {
-	cluster_t *cluster;
+	OPENCLUSTER cluster;
 	GTimer *timer;
-	int data;
-	int result;
 	int nodes;
 	register int i;
 	gdouble sec;
 	gulong msec;
-	char *str;
-	int str_len;
 	char key_buffer[128];
+	conninfo_t *conninfo;
+
+	hash_t map_hash;
+	hash_t key_hash;
 
 	timer = g_timer_new();
 	
 	printf("Initialising the cluster library\n");
 	cluster = cluster_init();
 	
-	printf("Adding 127.0.0.1:13600 to the server list.\n");
-	cluster_addserver(cluster, "127.0.0.1:13600");
+	conninfo = conninfo_load("gamut.conninfo");
+	if (conninfo == NULL) {
+		printf("Unable to open gamut.conninfo file\n");
+		exit(1);
+	}
+	
+	assert(conninfo);
+	printf("Adding server to the server list.\n");
+	cluster_addserver(cluster, conninfo);
 	
 	nodes = cluster_connect(cluster);
 	printf("Connected servers: %d\n", nodes);
@@ -43,21 +50,38 @@ int main(int argc, char **argv)
 	if (nodes > 0) {
 	
 		// set an item in the cluster with some data.
-		printf("Setting data in the cluster (integer)\n");
-		cluster_setint(cluster, "testdata", 45, 0);
+		map_hash = cluster_hash_str("testdata");
+		key_hash = cluster_hash_str("testint");
+		
+		printf("Setting data in the cluster (integer) [%#llx/%#llx]\n", 
+			   (long long unsigned int) map_hash, 
+			   (long long unsigned int) key_hash);
+		cluster_setint(cluster, 
+					   map_hash, 
+					   key_hash, 
+					   45, 0);
 
 		// set an item in the cluster with some data.
-		printf("Setting data in the cluster (string)\n");
-		cluster_setstr(cluster, "clientname", "Bill Grady", 0);
+		
+		key_hash = cluster_hash_str("testint");
+		printf("Setting data in the cluster (string) [%#llx/%#llx]\n", 
+			   (long long unsigned int) map_hash, 
+			   (long long unsigned int) key_hash);
+		
+		cluster_setstr(cluster, 
+					   map_hash,
+					   key_hash, 
+					   "Bill Grady", 0);
 
-		printf("Getting str data from the cluster\n");
-		result = cluster_getstr(cluster, "clientname", &str, &str_len);
-		assert(result == 0);
-		assert(str);
-		assert(str_len > 0);
-		printf("result='%s'\n", str);
-		free(str);
-		str = NULL;
+		printf("Getting str data from the cluster [%#llx/%#llx]\n", 
+			   (long long unsigned int) map_hash, 
+			   (long long unsigned int) key_hash);
+		char *client_name = cluster_getstr(cluster, 
+										   map_hash,
+										   key_hash);
+		assert(client_name);
+		printf("result='%s'\n", client_name);
+		free(client_name);  client_name = NULL;
 		
 		// pull some data out of the cluster.
 // 		data = 0;
@@ -72,17 +96,20 @@ int main(int argc, char **argv)
 // 		sec = g_timer_elapsed(timer, &msec);
 // 		printf("Timing of %d gets. %f\n", GET_LIMIT, sec);
 		
-		printf("Setting 6000 items of data\n");
-		g_timer_start(timer);
-		for (i=0; i<6000; i++) {
-			sprintf(key_buffer, "client:%d", i);
-			cluster_setstr(cluster, key_buffer, "Bill Grady", 0);
-		}
-		g_timer_stop(timer);
-		sec = g_timer_elapsed(timer, &msec);
-		printf("Timing of 6000 sets. %lf\nSets per second: %0.2lf\n", sec, 6000 / sec);
-		
- 		sleep(1);
+// 		printf("Setting 6000 items of data\n");
+// 		g_timer_start(timer);
+// 		for (i=0; i<6000; i++) {
+// 			sprintf(key_buffer, "client:%d", i);
+// 			cluster_setstr(cluster, 
+// 						   map_hash, 
+// 						   cluster_hash_str(key_buffer), 
+// 						   "Bill Grady", 0);
+// 		}
+// 		g_timer_stop(timer);
+// 		sec = g_timer_elapsed(timer, &msec);
+// 		printf("Timing of 6000 sets. %lf\nSets per second: %0.2lf\n", sec, 6000 / sec);
+// 		
+//  		sleep(1);
 		
 		printf("Disconnecting from the cluster,\n");
 		cluster_disconnect(cluster);		

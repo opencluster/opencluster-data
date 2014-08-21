@@ -6,14 +6,14 @@ DEBUG_LIBS=
 #DEBUG_LIBS=-lefence -lpthread
 
 ARGS=-Wall -O2 -g $(DEBUG_LIBS)
-LIBS=-lopencluster
+LIBS=`pkg-config --libs opencluster`
 OBJS=
 
 
 
 
 gamut: gamut.c $(OBJS)
-	gcc `pkg-config --cflags --libs glib-2.0` -o $@ gamut.c $(OBJS) $(LIBS) $(ARGS)
+	gcc  -o $@ gamut.c $(OBJS) $(LIBS) `pkg-config --cflags --libs glib-2.0` $(ARGS)
 
 
 
