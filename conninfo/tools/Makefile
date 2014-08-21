@@ -30,7 +30,9 @@ conninfo_set: conninfo_set.c $(OBJS)
 
 
 install: $(ALL)
-	@for II in $(ALL); do cp \$II /usr/sbin/; done
+	@cp conninfo_pack /usr/sbin/
+	@cp conninfo_get  /usr/sbin/
+	@cp conninfo_set  /usr/sbin/
 	
 
 clean:

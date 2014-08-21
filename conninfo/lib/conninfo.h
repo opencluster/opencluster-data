@@ -35,6 +35,8 @@ int conninfo_compare_str(conninfo_t *conninfo, const char *str);
 
 char * conninfo_value_str(const conninfo_t *conninfo, const char *key); 
 
+int conninfo_compare(const conninfo_t *first, const conninfo_t *second);
+
 // return 0 if the conninfo details have not parsed completely or correctly
 // return 1 (non zero) if the conninfo parsed correctly.
 int conninfo_isvalid(conninfo_t *conninfo);

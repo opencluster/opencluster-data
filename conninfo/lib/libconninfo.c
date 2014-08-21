@@ -18,6 +18,7 @@ static conninfo_t * conninfo_new(void)
 	assert(conninfo);
 	assert(conninfo->conninfo_str == NULL);
 	assert(conninfo->valid == 0);
+	conninfo->refcount = 1;
 	return(conninfo);
 }
 
@@ -26,18 +27,22 @@ void conninfo_free(conninfo_t *conninfo)
 {
 	assert(conninfo);
 
-	if (conninfo->name) { free(conninfo->name); conninfo->name = NULL; }
-	if (conninfo->original) { free(conninfo->original); conninfo->original = NULL; }
-	if (conninfo->remote_addr) { free(conninfo->remote_addr); conninfo->remote_addr = NULL; }
-	if (conninfo->conninfo_str) { free(conninfo->conninfo_str); conninfo->conninfo_str = NULL; }
+	assert(conninfo->refcount > 0);
+	conninfo->refcount --;
 	
-	if (conninfo->root) {
-		// decrease the reference count to the root json object, which should free it since nothing else should be using it.
-		json_decref(conninfo->root);
-		conninfo->root = NULL;
+	if (conninfo->refcount == 0) {
+	
+		if (conninfo->name) { free(conninfo->name); conninfo->name = NULL; }
+		if (conninfo->original) { free(conninfo->original); conninfo->original = NULL; }
+		if (conninfo->remote_addr) { free(conninfo->remote_addr); conninfo->remote_addr = NULL; }
+		if (conninfo->conninfo_str) { free(conninfo->conninfo_str); conninfo->conninfo_str = NULL; }
+		
+		if (conninfo->root) {
+			// decrease the reference count to the root json object, which should free it since nothing else should be using it.
+			json_decref(conninfo->root);
+			conninfo->root = NULL;
+		}
 	}
-
-	assert(0);
 }
 
 
@@ -238,16 +243,12 @@ conninfo_t * conninfo_load(const char *connfile)
 	
 	if (conninfo->root == NULL) {
 		// something happened loading the file.
-		assert(0);
-		
 		conninfo_free(conninfo);
 		conninfo = NULL;
 	}
 	else {
 		// now we should have a loaded root file.
 		if (extract_data(conninfo) == 0) {
-			
-			assert(0);
 			// failed to extract the required data.
 			conninfo_free(conninfo);
 			conninfo = NULL;
@@ -309,7 +310,7 @@ const char * conninfo_name(const conninfo_t *info)
 conninfo_t * conninfo_dup(conninfo_t *info)
 {
 	assert(info);
-	assert(info->refcount >= 0);
+	assert(info->refcount > 0);
 	info->refcount ++;
 	return(info);
 }
@@ -353,5 +354,15 @@ int conninfo_isvalid(conninfo_t *conninfo)
 }
 
 
-
+// compare the two conninfo objects and determine if they are the same or not.
+int conninfo_compare(const conninfo_t *first, const conninfo_t *second)
+{
+	assert(first);
+	assert(second);
+	
+	assert(first->conninfo_str);
+	assert(second->conninfo_str);
+	
+	return(strcmp(first->conninfo_str, second->conninfo_str));
+}
 
