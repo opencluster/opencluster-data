@@ -12,7 +12,7 @@ install: install_lib install_dev
 
 
 libopencluster.o: libopencluster.c opencluster.h
-	gcc -c -fPIC libopencluster.c  -o $@ $(ARGS)
+	gcc `pkg-config --cflags conninfo` -c -fPIC libopencluster.c  -o $@ $(ARGS)
 
 
 libopencluster.a: $(OBJS)
@@ -37,6 +37,7 @@ install_lib: libopencluster.so.$(SO_VER)
 install_dev: opencluster.h install_lib
 	@-test -e /usr/include/opencluster.h && rm /usr/include/opencluster.h
 	cp opencluster.h /usr/include/
+	cp opencluster.pc /usr/lib/pkgconfig/
 #	@for i in manpages/*.3; do gzip -c $$i > $(MANPATH)/man3/$$i.gz; done
 
 
@@ -45,7 +46,6 @@ uninstall:
 	rm /usr/lib/libopencluster.so.$(SO_VER)
 	rm /usr/lib/libopencluster.so.1
 	rm /usr/lib/libopencluster.so
-	
 
 
 clean:

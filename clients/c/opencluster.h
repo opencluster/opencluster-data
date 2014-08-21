@@ -1,6 +1,29 @@
+/*
+ * Simplified Opencluster client library
+ * 
+ * This library is intended to be used by regular clients that need access to the cluster.  It does 
+ * not provide event-based activity, or low-latency connections.
+ * 
+ * It is simplified as much as possible for general use.
+ * 
+ * If you need a client library that connects to all servers and sends requests directly to the 
+ * server that has the data, then please use the libopencluster-ll library.
+ * 
+ * If you need a client library that is libevent based that calls callback routines when data 
+ * arrives, please check out the libopencluster-event library.
+ * 
+ * 
+ */
+
+
+
+
 #ifndef __OPENCLUSTER_H
 #define __OPENCLUSTER_H
 
+
+#include <conninfo.h>
+#include <stdint.h>
 
 // This version indicates the version of the library so that developers of
 // services can ensure that the correct version is installed.
@@ -11,71 +34,58 @@
 
 
 
-// Since we will be using a number of bit masks to check for data status's and
-// so on, we should include some macros to make it easier.
-#define BIT_TEST(arg,val) (((arg) & (val)) == (val))
-#define BIT_SET(arg,val) ((arg) |= (val))
-#define BIT_CLEAR(arg,val) ((arg) &= ~(val))
-#define BIT_TOGGLE(arg,val) ((arg) ^= (val))
-
+// // Since we will be using a number of bit masks to check for data status's and
+// // so on, we should include some macros to make it easier.
+// #define BIT_TEST(arg,val) (((arg) & (val)) == (val))
+// #define BIT_SET(arg,val) ((arg) |= (val))
+// #define BIT_CLEAR(arg,val) ((arg) &= ~(val))
+// #define BIT_TOGGLE(arg,val) ((arg) ^= (val))
 
 
 // global constants and other things go here.
 #define OPENCLUSTER_DEFAULT_PORT (13600)
 
-// start out with an 1kb buffer.  Whenever it is full, we will double the
-// buffer, so this is just a minimum starting point.
-#define OPENCLUSTER_DEFAULT_BUFFSIZE (1024)
 
 
-#define OC_BLOCKING      0
-#define OC_NON_BLOCKING  1
+// #define OC_BLOCKING      0
+// #define OC_NON_BLOCKING  1
+
+
+typedef uint64_t hash_t;
+typedef void * OPENCLUSTER;
 
 
 
 
-typedef struct {
-	
-	// initially we will be only doing one request at a time, but eventually 
-	// we will be doing async requests as well. so we will need a list of 
-	// replies.
-	int msg_count;
-	void **messages;
-	
-	int server_count;
-	void **servers;
+OPENCLUSTER cluster_init(void);
+void cluster_free(OPENCLUSTER cluster);
 
-	unsigned long long mask;
-	void **hashmasks;
-	
-	void *payload;
-	int payload_max;
-	int payload_length;
-	
-	int disconnecting;
-	short debug;
-	
-} cluster_t;
+// 'conninfo' is controlled by the cluster after this function.  If it is a duplicate of an existing entry, it will be discarded.
+void cluster_addserver(OPENCLUSTER cluster, conninfo_t *conninfo);
 
 
-cluster_t * cluster_init(void);
-void cluster_free(cluster_t *cluster);
+int cluster_connect(OPENCLUSTER cluster);
+void cluster_disconnect(OPENCLUSTER cluster);
+int cluster_servercount(OPENCLUSTER cluster);
 
-void cluster_addserver(cluster_t *cluster, const char *host);
-int cluster_connect(cluster_t *cluster);
-void cluster_disconnect(cluster_t *cluster);
-int cluster_servercount(cluster_t *cluster);
+void cluster_pending(OPENCLUSTER cluster);
 
-void cluster_pending(cluster_t *cluster, int blocking);
+void cluster_debug_on(OPENCLUSTER cluster);
+void cluster_debug_off(OPENCLUSTER cluster);
 
-void cluster_debug_on(cluster_t *cluster);
-void cluster_debug_off(cluster_t *cluster);
+void cluster_setkeyvalue(OPENCLUSTER cluster, hash_t key_hash, const char *name);
 
-int cluster_setint(cluster_t *cluster, const char *name, const int value, const int expires);
-int cluster_getint(cluster_t *cluster, const char *name, int *value);
+int cluster_setint(OPENCLUSTER cluster, hash_t map_hash, hash_t key_hash, const int value, const int expires);
+int cluster_getint(OPENCLUSTER cluster, hash_t map_hash, hash_t key_hash);
 
-int cluster_setstr(cluster_t *cluster, const char *name, const char *value, const int expires);
-int cluster_getstr(cluster_t *cluster, const char *name, char **value, int *length);
+int cluster_setstr(OPENCLUSTER cluster, hash_t map_hash, hash_t key_hash, const char *value, const int expires);
+int cluster_setbin(OPENCLUSTER cluster, hash_t map_hash, hash_t key_hash, const char *value, const int length, const int expires);
+char * cluster_getstr(OPENCLUSTER cluster, hash_t map_hash, hash_t key_hash);
+
+hash_t cluster_hash_str(const char *str);
+hash_t cluster_hash_bin(const char *str, const int length);
+hash_t cluster_hash_int(const int key);
+hash_t cluster_hash_long(const long long key);
 
 
 #endif
