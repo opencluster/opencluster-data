@@ -895,9 +895,10 @@ static int send_request(cluster_t *cluster)
 
 			if (check_server_active(cluster, server)) {
 				assert(server->handle > 0);
-			
-				log_data(0, "SEND ", cluster->message.out.data, cluster->message.out.length);
 
+				if (cluster->debug) {
+					log_data(0, "SEND ", cluster->message.out.data, cluster->message.out.length);
+				}
 				
 				// send the data
 				datasent = 0;
@@ -1045,7 +1046,9 @@ static int server_connect(cluster_t *cluster, server_t *server)
 			
 			printf("New message.  length = %d\n", cluster->message.out.length);
 
-			log_data(0, "output ", cluster->message.out.data, cluster->message.out.length);
+			if (cluster->debug) {
+				log_data(0, "output ", cluster->message.out.data, cluster->message.out.length);
+			}
 
 			// temporarily set the server as active.
 			server->active = 1;
