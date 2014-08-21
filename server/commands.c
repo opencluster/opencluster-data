@@ -249,6 +249,8 @@ static void cmd_set_str(client_t *client, header_t *header, char *payload)
 	expires = data_int(&next);
 	str = data_string(&next, &str_len);
 	
+	logger(LOG_DEBUG, "CMD: set (string): [%#llx/%#llx]", map_hash, key_hash);
+	
 	// first we need to check that this server is responsible for this data.  If not, we need to pass a message to the server that is.
 	node_t *node = buckets_get_primary_node(key_hash);
 	if (node) {
@@ -376,23 +378,36 @@ static void cmd_set_int(client_t *client, header_t *header, char *payload)
 	expires       = data_int(&next);
 	value->data.l = data_long(&next);
 	value->type = VALUE_LONG;
-	
-	logger(LOG_DEBUG, "CMD: set (integer): [%#llx/%#llx]=%d", map_hash, key_hash, value->data.l);
 
-	// store the value into the trees.  If a value already exists, it will get released and this one 
-	// will replace it, so control of this value is given to the tree structure.
-	// NOTE: value is controlled by the tree after this function call.
-	result = buckets_store_value(map_hash, key_hash, expires, value);
-	value = NULL;
-	
-	// send the ACK reply.
-	if (result == 0) {
-		client_send_reply(client, header, RESPONSE_OK, 0, NULL);
-		assert(payload_length() == 0);
-	}
-	else {
+	// first we need to check that this server is responsible for this data.  If not, we need to pass a message to the server that is.
+	node_t *node = buckets_get_primary_node(key_hash);
+	if (node) {
+		// this data is being served by another node... we need to relay the query.
 		assert(0);
 	}
+	else {
+	
+		
+		logger(LOG_DEBUG, "CMD: set (integer): [%#llx/%#llx]=%d", map_hash, key_hash, value->data.l);
+
+		// store the value into the trees.  If a value already exists, it will get released and this one 
+		// will replace it, so control of this value is given to the tree structure.
+		// NOTE: value is controlled by the tree after this function call.
+		result = buckets_store_value(map_hash, key_hash, expires, value);
+		value = NULL;
+		
+		// send the ACK reply.
+		if (result == 0) {
+			client_send_reply(client, header, RESPONSE_OK, 0, NULL);
+			assert(payload_length() == 0);
+		}
+		else {
+			assert(0);
+		}
+	}
+	
+	// if the value was not passed to the storage system, then we need to free it ourself.
+	if (value) { free(value); }
 	
 	assert(payload_length() == 0);
 }
@@ -764,7 +779,7 @@ static void cmd_hello(client_t *client, header_t *header, char *payload)
 	assert(client);
 	assert(header);
 
-	// there is no payload required for an ack.
+	// there is payload required for this command.
 	assert(header->length > 0);
 	
 	next = payload;

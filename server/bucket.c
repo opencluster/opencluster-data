@@ -228,6 +228,8 @@ void buckets_split_mask(hash_t current_mask, hash_t new_mask)
 	
 	assert(new_mask > current_mask);
 	
+	logger(LOG_INFO, "Splitting Mask: Old Mask: %#llx, New Mask; %#llx", current_mask, new_mask);
+	
 	// grab a copy of the existing buckets as the 'oldbuckets';
 	oldbuckets = _buckets;
 	_buckets = NULL;
@@ -563,10 +565,10 @@ static void hashmasks_dump(void)
 	stat_dumpstr("HASHMASKS");
 	for (i=0; i<=_mask; i++) {
 		assert(_buckets[i]);
-		assert(_buckets[i]->primary_node);
-		assert(_buckets[i]->secondary_node);
-		const char *name_primary = node_name(_buckets[i]->primary_node);
-		const char *name_secondary = node_name(_buckets[i]->secondary_node);
+		const char *name_primary = "Local";
+		const char *name_secondary = "None";
+		if (_buckets[i]->primary_node) { name_primary = node_name(_buckets[i]->primary_node); }
+		if (_buckets[i]->secondary_node) { name_secondary = node_name(_buckets[i]->secondary_node); }
 
 		stat_dumpstr("  Hashmask:%#llx, Primary:'%s', Secondary:'%s'", i, 
 					 name_primary ? name_primary : "",
@@ -678,9 +680,12 @@ node_t * buckets_get_primary_node(hash_t key_hash)
 	bucket_index = _mask & key_hash;
 	assert(bucket_index >= 0);
 	assert(bucket_index <= _mask);
+	
+	logger(LOG_DEBUG, "buckets_get_primary_node(): bucket_index=%d", bucket_index);
+	
 	bucket = _buckets[bucket_index];
-	if (bucket->source_node) {
-		// that bucket is being handled 
+	if (bucket->source_node == NULL) {
+		// that bucket is being handled locally.
 		return(NULL);
 	}
 	else {
@@ -824,6 +829,7 @@ void buckets_control_bucket(client_t *client, hash_t mask, hash_t hashmask, int 
 		assert(bucket->source_node == NULL);
 		assert(bucket->backup_node);
 		assert(bucket->backup_node->client == client);
+		logger(LOG_DEBUG, "Setting source_node to the backup_node [%d]", __LINE__);
 		bucket->source_node = bucket->backup_node;
 		bucket->backup_node = NULL;
 		
@@ -981,6 +987,8 @@ void buckets_finalize_migration(client_t *client, hash_t hashmask, int level, co
 	else {
 		// we are receiving a backup bucket.  
 		assert(conninfo_str);
+		
+		logger(LOG_DEBUG, "Setting source_node [%d]", __LINE__);
 		bucket->source_node = node_find(conninfo_str);
 		assert(bucket->source_node);
 		assert(bucket->source_node->client);

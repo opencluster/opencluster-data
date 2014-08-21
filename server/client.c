@@ -432,7 +432,7 @@ static int process_data(client_t *client)
 				header.response_code  = be16toh(raw->response_code);
 				header.userid  = be32toh(raw->userid);
 
-				logger(LOG_DEBUG, "New telegram: Command=%d, repcmd=%d, userid=%d, length=%d, buffer_length=%d", 
+				logger(LOG_DEBUG, "New telegram: Command=0x%X, repcmd=0x%X, userid=%d, length=%d, buffer_length=%d", 
 						header.command, header.response_code, 
 						header.userid, header.length, client->in.length);
 				
@@ -1039,7 +1039,7 @@ static void client_shutdown_handler(evutil_socket_t fd, short what, void *arg)
 				client_free(client);
 			} 
 			else {
-				printf("waiting to flush data to client:%d\n", client->handle);
+// 				printf("waiting to flush data to client:%d\n", client->handle);
 				assert(client->shutdown_event);
 				evtimer_add(client->shutdown_event, &_timeout_shutdown);
 			}

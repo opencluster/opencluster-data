@@ -140,6 +140,8 @@ int main(int argc, char **argv)
 	stats_init(_evbase);
 
 	clients_set_evbase(_evbase);
+	
+	// use a hint of 4096, so that it reserves space up to that ID number.  It will dynamically increase as needed, but will avoid some memory thrashing during startup.
 	client_init_commands(4096);
 	
 	// initialise the servers that we listen on.

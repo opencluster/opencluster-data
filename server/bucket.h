@@ -32,7 +32,6 @@ typedef struct {
 	
 	// if this bucket is not hosted here, then source is the server that it is hosted.
 	// NULL if it is hosted here.
-	// This, and backup_node are
 	node_t *source_node;	
 	node_t *backup_node;  	// next node in the chain to send data to.
 
