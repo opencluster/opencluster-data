@@ -1,0 +1,16 @@
+# opencluster pkg-config 
+
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: opencluster
+Description: libopencluster is an interface library to communicate with an opencluster network.
+Version: 0.1
+Requires:conninfo
+Conflicts:
+Libs: -L${libdir} -lopencluster
+Libs.private: 
+Cflags: -I${includedir}
+
