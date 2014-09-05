@@ -87,5 +87,8 @@ hash_t cluster_hash_bin(const char *str, const int length);
 hash_t cluster_hash_int(const int key);
 hash_t cluster_hash_long(const long long key);
 
+hash_t cluster_setlabel(OPENCLUSTER cluster_ptr, char *label, int expires);
+const char * cluster_getlabel(OPENCLUSTER cluster_ptr, hash_t hash);
+
 
 #endif

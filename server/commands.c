@@ -207,8 +207,6 @@ static void cmd_get_str(client_t *client, header_t *header, char *payload)
 				client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
 			}
 			else {
-				// need to reply with the actual server that is responsible for this key.
-
 				assert(node->conninfo);
 				const char *server_name = conninfo_name(node->conninfo);
 				assert(server_name);
@@ -288,6 +286,115 @@ static void cmd_set_str(client_t *client, header_t *header, char *payload)
 	
 	assert(payload_length() == 0);
 }
+
+
+
+
+// Set a value into the hash storage.
+static void cmd_set_keyvalue(client_t *client, header_t *header, char *payload)
+{
+	char *next;
+	hash_t hash;
+	int result;
+	
+	assert(client);
+	assert(header);
+	assert(payload);
+	
+	next = payload;
+	int expires = data_int(&next);
+	char *str = data_string_copy(&next);
+
+	// get the hash of the supplied string.
+	hash = generate_hash_str(str, strlen(str));
+
+	logger(LOG_DEBUG, "CMD: set_keyvalue (string): [%#llx/'%s']", hash, str);
+	
+	// first we need to check that this server is responsible for this data.  If not, we need to pass a message to the server that is.
+	node_t *node = buckets_get_primary_node(hash);
+	if (node) {
+		// this data is being served by another node... we need to relay the query.
+		assert(0);
+	}
+	else {
+		
+		// store the value into the trees.  If a value already exists, it will get released and this one 
+		// will replace it, so control of this value is given to the tree structure.
+		// NOTE: value is controlled by the tree after this function call.
+		result = buckets_store_keyvalue(hash, str, expires);
+		str = NULL;
+		
+		// send the ACK reply.
+		if (result == 0) {
+
+			logger(LOG_DEBUG, "CMD: set_keyvalue (string): [%#llx] - keyvalue stored successfully.", hash);
+
+			assert(payload_length() == 0);
+			payload_long(hash);
+			assert(payload_length() > 0);
+			client_send_reply(client, header, RESPONSE_KEYVALUE_HASH, payload_length(), payload_ptr());
+			payload_clear();
+		}
+		else {
+			assert(0);
+		}
+	}
+	
+	assert(payload_length() == 0);
+}
+
+
+// Get a value from storage.
+static void cmd_get_keyvalue(client_t *client, header_t *header, char *payload)
+{
+	assert(client);
+	assert(header);
+	assert(payload);
+
+	char *keyvalue = NULL;
+	
+	char *next = payload;
+	hash_t hash = data_long(&next);
+
+	// for this operation, we need to find the primary node for this data first.
+	node_t *node = buckets_get_primary_node(hash);
+	if (node) {
+		// if the node is not NULL, then it indicates that the data is here.
+		assert(node->conninfo);
+		const char *server_name = conninfo_name(node->conninfo);
+		assert(server_name);
+		assert(strlen(server_name) > 0);
+		logger(LOG_DEBUG, "CMD: Bucket %#llx not here, it is at '%s'", hash, server_name);
+		
+		// need to pass the request on to the appropriate server that has the data.
+		assert(0);
+	}
+	else {
+	
+		keyvalue = buckets_get_keyvalue(hash);
+		if (keyvalue) {
+			// everything is good, so build the reply.
+			assert(payload_length() == 0);
+			payload_data(strlen(keyvalue), keyvalue);
+			
+			assert(payload_length() > 0);
+			client_send_reply(client, header, RESPONSE_KEYVALUE, payload_length(), payload_ptr());
+			payload_clear();
+		}
+		else {
+		
+			assert(payload_length() > 0);
+			client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
+			payload_clear();
+		}
+	}
+
+	assert(payload_length() == 0);
+}
+
+
+
+
 
 
 
@@ -904,32 +1011,22 @@ static void cmd_sync_int(client_t *client, header_t *header, char *payload)
 // cmd_set_str, except the data received is slightly different.
 static void cmd_sync_keyvalue(client_t *client, header_t *header, char *payload)
 {
-	char *next;
-	hash_t key_hash;
 	int result;
-	char *str;
-	char *keyvalue;
-	int length;
 	
 	assert(client);
 	assert(header);
 	assert(payload);
 	
-	next = payload;
-	
-	key_hash = data_long(&next);
-	str = data_string(&next, &length);
-	assert(str);
-	assert(length > 0);
-
-	keyvalue = malloc(length + 1);
-	memcpy(keyvalue, str, length);
-	keyvalue[length] = 0;
+	char *next = payload;
+	hash_t key_hash = data_long(&next);
+	int expires = data_int(&next);
+	char * keyvalue = data_string_copy(&next);
+	assert(keyvalue);
 	
 	logger(LOG_DEBUG, "Received: CMD_SYNC_KEYVALUE: %#llx", key_hash);
 	
 	// NOTE: name is controlled by the tree after this function call.
-	result = buckets_store_keyvalue_str(key_hash, length, keyvalue);
+	result = buckets_store_keyvalue(key_hash, keyvalue, expires);
 	
 	// send the ACK reply.
 	if (result == 0) {
@@ -954,10 +1051,15 @@ void cmd_init(void)
  	client_add_cmd(COMMAND_GET_STRING, cmd_get_str);
  	client_add_cmd(COMMAND_SET_INT, cmd_set_int);
  	client_add_cmd(COMMAND_SET_STRING, cmd_set_str);
- 	client_add_cmd(COMMAND_SYNC_INT, cmd_sync_int);
+
+	client_add_cmd(COMMAND_SET_KEYVALUE, cmd_set_keyvalue);
+	client_add_cmd(COMMAND_GET_KEYVALUE, cmd_get_keyvalue);
+	
+	client_add_cmd(COMMAND_SYNC_INT, cmd_sync_int);
  	client_add_cmd(COMMAND_SYNC_KEYVALUE, cmd_sync_keyvalue);
  	client_add_cmd(COMMAND_SYNC_STRING, cmd_sync_string);
- 	client_add_cmd(COMMAND_PING, cmd_ping);
+
+	client_add_cmd(COMMAND_PING, cmd_ping);
  	client_add_cmd(COMMAND_LOADLEVELS, cmd_loadlevels);
  	client_add_cmd(COMMAND_ACCEPT_BUCKET, cmd_accept_bucket);
  	client_add_cmd(COMMAND_CONTROL_BUCKET, cmd_control_bucket);

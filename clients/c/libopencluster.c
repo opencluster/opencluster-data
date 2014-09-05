@@ -33,6 +33,8 @@
 
 #define REPLY_FAIL                          0x0003
 #define REPLY_OK                            0x0010
+#define REPLY_KEYVALUE_HASH                 0x001F
+#define REPLY_KEYVALUE                      0x0020
 #define REPLY_DATA_INT                      0x0110
 #define REPLY_DATA_STRING                   0x0120
 
@@ -42,7 +44,8 @@
 #define COMMAND_GET_STRING                  0x2020
 #define COMMAND_SET_INT                     0x2200
 #define COMMAND_SET_STRING                  0x2210
-
+#define COMMAND_SET_KEYVALUE                0x2500
+#define COMMAND_GET_KEYVALUE                0x2520
 
 // this structure is not packed on word boundaries, so it should represent the 
 // data received over the network.
@@ -401,7 +404,7 @@ static void server_closed(cluster_t *cluster, server_t *server)
 
 
 
-
+/*
 // When creating the header, we dont actually know the 'length' of the payload, so we will adjust 
 // that as we add data to it.   This payload will be used mostly just for returning ACK and NACK 
 // replies to the server.
@@ -425,7 +428,7 @@ static void payload_header(cluster_t *cluster, uint16_t command, uint16_t reply,
 	
 	cluster->payload_length = sizeof(raw_header_t);
 }
-
+*/
 
 
 /*
@@ -510,6 +513,7 @@ static void payload_string(cluster_t *cluster, const char *str)
 }
 */
 
+/*
 // assumes that the reply is already in the cluster->payload,
 static void send_reply(cluster_t *cluster, server_t *server)
 {
@@ -545,9 +549,9 @@ static void send_reply(cluster_t *cluster, server_t *server)
 	
 	assert(cluster->payload_length == 0);
 }
+*/
 
-
-
+/*
 static void reply_ok(cluster_t *cluster, server_t *server, short repcmd, int userid)
 {
 	assert(cluster);
@@ -560,6 +564,9 @@ static void reply_ok(cluster_t *cluster, server_t *server, short repcmd, int use
 	payload_header(cluster, repcmd, REPLY_OK, userid);
 	send_reply(cluster, server);
 }
+*/
+
+
 
 /*
 static void * data_int(void *data, int *value)
@@ -645,7 +652,6 @@ static void * data_string(void *data, int *length, char **ptr)
 // the connected servers.
 static void pending_server(cluster_t *cluster, server_t *server)
 {
-	int done = 0;
 	int offset = 0;
 	int avail;
 	int sent;
@@ -663,7 +669,7 @@ static void pending_server(cluster_t *cluster, server_t *server)
 	assert(server->in_length == 0);
 
 	// Outer loop that keeps looping until there are no messages that we are waiting to receive.
-	done = 0;
+	int done = 0;
 	while (done == 0) {
 	
 		assert(server->in_buffer);
@@ -682,12 +688,13 @@ static void pending_server(cluster_t *cluster, server_t *server)
 			avail = server->in_max - server->in_length;
 		}
 		
-		assert(avail > 0);
+		assert(avail >= DEFAULT_BUFFER_SIZE);
 		assert(offset >= 0);
+		assert(offset == 0 || offset < server->in_length);
 		
 // 		printf("recv: max=%d\n", avail);
 		
-		sent = recv(server->handle, server->in_buffer + offset + server->in_length, avail, 0);
+		sent = recv(server->handle, server->in_buffer + server->in_length, avail, 0);
 		if (sent <= 0) {
 			// socket has shutdown
 			assert(0);
@@ -703,7 +710,7 @@ static void pending_server(cluster_t *cluster, server_t *server)
 			while (inner == 0) {
 			
 				// now that we've got data, we need to make sure we have enough for the header.
-				if (server->in_length < sizeof(raw_header_t)) {
+				if ((server->in_length - offset) < sizeof(raw_header_t)) {
 					// we dont have enough data yet, so we need to break out of the inner loop.
 					inner ++;
 				}
@@ -725,7 +732,7 @@ static void pending_server(cluster_t *cluster, server_t *server)
 						assert(0);
 					}
 					
-					if (server->in_length >= sizeof(raw_header_t) + length) {
+					if ((server->in_length - offset) >= sizeof(raw_header_t) + length) {
 						// we have enough data to parse this entire message.
 						
 						command = ntohs(header->command);
@@ -750,6 +757,8 @@ static void pending_server(cluster_t *cluster, server_t *server)
 								assert(cluster->message.in.max > 0);
 								assert(cluster->message.in.payload);
 								memcpy(cluster->message.in.payload, ptr, length);
+								cluster->message.in.length = length;
+								assert(cluster->message.in.length <= cluster->message.in.max);
 							}
 							cluster->message.in.result = reply;
 							
@@ -777,12 +786,12 @@ static void pending_server(cluster_t *cluster, server_t *server)
 						// waiting for more data.
 						
 						offset += (sizeof(raw_header_t) + length);
-						server->in_length -= (sizeof(raw_header_t) + length);
 						assert(offset <= server->in_max);
 						
-						if (server->in_length == 0) {
+						if (offset == server->in_length) {
 							// we've processed all the messages in the buffer, and there are no more partial ones... so we are done.
 							offset = 0;
+							server->in_length = 0;
 							inner ++;
 							done = 1;
 						}
@@ -887,6 +896,11 @@ static int send_request(cluster_t *cluster)
 	assert(cluster->message.out.max >= cluster->message.out.length);
 	assert(cluster->message.out.data);
 	assert(cluster->message.in.result == 0);
+
+	// since we are sending a request, then the currently known incoming data, should be empty.
+	assert(cluster->message.in.length == 0);
+	assert(cluster->message.in.max >= 0);
+	cluster->message.in.offset = 0;
 	
 	status = 0;
 	for (server_entry = 0; status == 0 && server_entry < cluster->server_count; server_entry ++) {
@@ -970,6 +984,7 @@ static void message_done(cluster_t *cluster)
 	assert(cluster->message.out.command > 0);
 	cluster->message.out.command = 0;
 	cluster->message.in.result = 0;
+	cluster->message.in.length = 0;
 }
 
 
@@ -1040,12 +1055,9 @@ static int server_connect(cluster_t *cluster, server_t *server)
 		else {
 			assert(res < 0);
 
-			printf("sending HELLO(%X)\n", COMMAND_HELLO);
 			message_new(cluster, COMMAND_HELLO);
 			msg_setstr(cluster, NULL);
 			
-			printf("New message.  length = %d\n", cluster->message.out.length);
-
 			if (cluster->debug) {
 				log_data(0, "output ", cluster->message.out.data, cluster->message.out.length);
 			}
@@ -1390,7 +1402,7 @@ int cluster_setstr(OPENCLUSTER cluster_ptr, hash_t map_hash, hash_t key_hash, co
 }
 
 
-
+/*
 static void msg_getint(cluster_t *cluster, int *value)
 {
 	int *ptr;
@@ -1404,7 +1416,7 @@ static void msg_getint(cluster_t *cluster, int *value)
 
 	cluster->message.in.offset += sizeof(uint32_t);
 }
-
+*/
 
 static void msg_gethash(cluster_t *cluster, hash_t *value)
 {
@@ -1474,7 +1486,6 @@ int cluster_getint(OPENCLUSTER cluster_ptr, hash_t map_hash, hash_t key_hash)
 	int value=0;
 	
 	assert(cluster);
-	assert(value);
 	
 	// build the message and send it off.
 	message_new(cluster, COMMAND_GET_INT);
@@ -1488,8 +1499,8 @@ int cluster_getint(OPENCLUSTER cluster_ptr, hash_t map_hash, hash_t key_hash)
 	// now we've got a reply, we free the message, because there is no 
 	if (cluster->message.in.result == REPLY_DATA_INT) {
 		
-		hash_t in_keyhash;
 		hash_t in_maphash;
+		hash_t in_keyhash;
 		hash_t in_valuehash;
 		long long in_value;
 		
@@ -1589,3 +1600,79 @@ int cluster_servercount(OPENCLUSTER cluster_ptr)
 }
 
 
+
+hash_t cluster_setlabel(OPENCLUSTER cluster_ptr, char *label, int expires)
+{
+	cluster_t *cluster = cluster_ptr;
+	hash_t hash = 0;
+	
+	assert(cluster);
+	assert(label);
+	
+	// expiry should be 0 (never expires), or a positive number of seconds.
+	assert(expires >= 0);
+	if (expires < 0) { expires=0; }
+	
+	// build the message and send it off.
+	message_new(cluster, COMMAND_SET_KEYVALUE);
+	msg_setint(cluster, expires);
+	msg_setstr(cluster, label);
+
+	assert(cluster->message.out.length > 0);
+	send_request(cluster);
+	
+	if (cluster->message.in.result == REPLY_KEYVALUE_HASH) {
+		
+		assert(cluster->message.in.length > 0);
+		assert(cluster->message.in.payload);
+
+		msg_gethash(cluster, &hash);
+	}
+	else {
+		// how did we get a different result?
+		assert(0);
+	}
+	
+	message_done(cluster);
+	
+	return(hash);
+}
+
+
+const char * cluster_getlabel(OPENCLUSTER cluster_ptr, hash_t hash)
+{
+	char *str = NULL;
+	int str_len;
+	cluster_t *cluster = cluster_ptr;
+	
+	assert(cluster);
+	
+	// build the message and send it off.
+	message_new(cluster, COMMAND_GET_KEYVALUE);
+	msg_sethash(cluster, hash);
+	
+	assert(cluster->message.in.result == 0);
+	assert(cluster->message.out.length > 0);
+	send_request(cluster);
+		
+	// now we've got a reply, we free the message, because there is no 
+	if(cluster->message.in.result == REPLY_KEYVALUE) {
+		msg_getstr(cluster, &str, &str_len);
+
+		// we should not have an empty keyvalue.
+		assert(str);
+		assert(str_len > 0);
+		
+		if (cluster->debug) {
+			printf("=== hash=%#llx, keyvalue='%s'\n", (long long unsigned) hash, str);
+		}
+	}
+	else {
+		// the data was not available so we return a NULL result.
+		assert(str == NULL);
+	}
+	
+	message_done(cluster);
+	
+	return(str);
+}

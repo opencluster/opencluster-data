@@ -66,8 +66,9 @@ value_t * buckets_get_value(hash_t map_hash, hash_t key_hash);
 int buckets_store_value(hash_t map_hash, hash_t key_hash, int expires, value_t *value);
 void buckets_split_mask(hash_t current_mask, hash_t new_mask);
 void buckets_init(hash_t mask, struct event_base *evbase);
-int buckets_store_keyvalue_int(hash_t key_hash, long long int_key);
-int buckets_store_keyvalue_str(hash_t key_hash, int length, char *name);
+int buckets_store_keyvalue(hash_t key_hash, char *name, int expires);
+const char * buckets_get_keyvalue(hash_t hash_hash);
+
 
 bucket_t * bucket_new(hash_t hash);
 int buckets_shutdown(void);

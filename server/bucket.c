@@ -495,13 +495,15 @@ void buckets_init(hash_t mask, struct event_base *evbase)
 
 // we've been given a keyvalue for a hash-key item, and so we lookup the bucket that is responsible 
 // for that item.  the 'data' module will then find the data store within that handles that item.
-int buckets_store_keyvalue_str(hash_t key_hash, int length, char *name)
+int buckets_store_keyvalue(hash_t key_hash, char *name, int expires)
 {
 	hash_t bucket_index;
 	bucket_t *bucket;
 
 	assert(name);
-	assert(length > 0);
+	assert(name[0] != 0);
+	assert(expires >= 0);
+	if (expires < 0) { expires = 0; }
 
 	// calculate the bucket that this item belongs in.
 	assert(_mask > 0);
@@ -517,7 +519,7 @@ int buckets_store_keyvalue_str(hash_t key_hash, int length, char *name)
 		assert(bucket->data);
 		
 		// 'name' will be controlled by the keyvalue tree after this function.
-		data_set_keyvalue_str(key_hash, bucket->data, length, name);
+		data_set_keyvalue(key_hash, bucket->data, name, expires);
 		return(0);
 	}
 	else {
@@ -527,16 +529,17 @@ int buckets_store_keyvalue_str(hash_t key_hash, int length, char *name)
 }
 
 
-// we've been given a 'name' for a hash-key item, and so we lookup the bucket that is responsible 
-// for that item.  the 'data' module will then find the data store within that handles that item.
-int buckets_store_keyvalue_int(hash_t key_hash, long long int_key)
+const char * buckets_get_keyvalue(hash_t key_hash)
 {
-	hash_t bucket_index;
+	const char *keyvalue = NULL;
+	
+	int bucket_index;
 	bucket_t *bucket;
 
 	// calculate the bucket that this item belongs in.
 	assert(_mask > 0);
 	bucket_index = _mask & key_hash;
+	assert(bucket_index >= 0);
 	assert(bucket_index <= _mask);
 	bucket = _buckets[bucket_index];
 
@@ -544,16 +547,26 @@ int buckets_store_keyvalue_int(hash_t key_hash, long long int_key)
 	if (bucket) {
 		assert(bucket->hashmask == bucket_index);
 		
-		// make sure that this server is 'primary' or 'secondary' for this bucket.
-		assert(bucket->data);
-		data_set_keyvalue_int(key_hash, bucket->data, int_key);
-		return(0);
+		// make sure that this server is 'primary' for this bucket.
+		if (bucket->level != 0) {
+			// we need to reply with an indication of which server is actually responsible for this bucket.
+			assert(keyvalue == NULL);
+		}
+		else {
+			// search the btree in the bucket for this key.
+			assert(bucket->data);
+			keyvalue = data_get_keyvalue(key_hash, bucket->data);
+		}	
 	}
 	else {
-		// we dont have the bucket, we need to let the other node know that something has gone wrong.
-		return(-1);
+		assert(keyvalue == NULL);
 	}
+
+	return(keyvalue);
 }
+
+
+
 
 
 static void hashmasks_dump(void)

@@ -18,6 +18,9 @@
 #define COMMAND_SET_INT                     0x2200
 #define COMMAND_SET_STRING                  0x2210
 
+#define COMMAND_SET_KEYVALUE                0x2500
+#define COMMAND_GET_KEYVALUE                0x2520
+
 #define COMMAND_SYNC_INT                    0x3000
 #define COMMAND_SYNC_STRING                 0x3010
 #define COMMAND_SYNC_KEYVALUE               0x3060
@@ -31,6 +34,8 @@
 #define RESPONSE_TOOLARGE         0x0006
 
 #define RESPONSE_OK               0x0010
+#define RESPONSE_KEYVALUE_HASH    0x001F
+#define RESPONSE_KEYVALUE         0x0020
 #define RESPONSE_LOADLEVELS       0x0013
 #define RESPONSE_DATA_INT         0x0110
 #define RESPONSE_DATA_STRING      0x0120
