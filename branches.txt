@@ -1,33 +1,29 @@
 This file provides some information about active branches in the repository.
 
-protocol 
-	Change the protocol so that SET's do not include a textual name.  
-	The Names can be stored seperately (in the cluster).
-
-client-maps
-	The client library does not handle maps because it was originally written 
-	before maps were designed into the protocol.   
-
 client-connectivity
 	The client library does not handle multiple servers correctly.   It also 
 	does not handle recovery of a server connection.
 
+buffercheck
+	When parsing the commands, the server does not currently verify that the 
+	string lengths fit inside the data received.  Need to simply count-down 
+	the buffer length as parsing it.   As it is, a client could manipulate 
+	the packet sent to send less data than it says is in the string.  This 
+	could be used to set extra memory as a value, and retrieve it.   It might 
+	be able to get data from memory that it shouldn't be able to.
+	
+	Unlikely to be able to use this bug as a means of gaining control of the 
+	service, but it could leak data that is sensitive.
+	
+	If the server detects this kind of behaviour, it needs to either trim 
+	the data received, or close the connection.
+	
 check-and-set
 	When setting a value, the client returns the hash of the previous value 
 	also, and will not set if the value on the cluster has changed since the 
 	client got the value.  Basically it means that it will not over-write a 
 	change that another node has made in between the get and set.
 	This would require some additions to the protocol.
-
-node-start
-	When a node (server) is started but not given the address of another 
-	node to connect to, then it can assume that it is the first node in the 
-	cluster, and can begin creating the cluster straight away.   This is how 
-	admins can initiate the cluster. Start a single node without any node 
-	connection details, wait a few seconds, and then start up the other 
-	nodes.   If a node is given connection details, it will not start up a 
-	cluster unless given an option to specifically do so.  This makes the 
-	startup process a lot more predictable.
 
 shutdown
 	The system is not currently shutting down properly, because it is not 
@@ -65,10 +61,6 @@ savefile
 	file-save option would be present from start, but it will only write to 
 	the file if it is the last one in the cluster.   The daemon can inject 
 	the data into the cluster on startup.
-
-client-maps
-	The C client does not handle maps properly (or at all), so it needs to 
-	be able to use maps.
 
 client-disconnect
 	The C client is not handling things if it loses the connection to the 
