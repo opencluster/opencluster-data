@@ -15,6 +15,12 @@
 #include <unistd.h>
 
 
+typedef enum {
+	INIT
+} startup_state;
+
+static startup_state _startup = INIT;
+
 static node_t **_nodes = NULL;
 static int _node_count = 0;
 
@@ -28,15 +34,41 @@ static void node_loadlevel_handler(int fd, short int flags, void *arg);
 
 
 
-
-
-node_t * node_new(char *connect_info) 
+// get a new empty node object.
+static void node_alloc(node_t *node)
 {
-	node_t *node;
+	int entry = -1;
+
+	assert(node);
+	assert(node->state == INITIALIZED);
 	
+	// go through the nodes list to find an empty slot.
+	int i;
+	for (i=0; entry < 0 && i<_node_count; i++) {
+		if (_nodes[i] == NULL) { 
+			entry = i;
+		} 
+	}
 	
+	if (entry >= 0) {
+		// if no empty slots, make a new one.
+		assert((_nodes == NULL && _node_count == 0) || (_nodes && _node_count >= 0));
+		_nodes = realloc(_nodes, sizeof(node_t *) * (_node_count + 1));
+		assert(_nodes);
+		entry = _node_count;
+		_node_count ++;
+	}
+	assert(entry >= 0);
+
+	_nodes[_node_count] = node;
+}
+
+
+node_t * node_new(conninfo_t *conninfo) 
+{
+	assert(conninfo);
 	
-	node = calloc(1, sizeof(node_t));
+	node_t *node = calloc(1, sizeof(node_t));
 	assert(node);
 	node->nodehash = 0;
 	
@@ -45,14 +77,66 @@ node_t * node_new(char *connect_info)
 	node->loadlevel_event = NULL;
 	node->wait_event = NULL;
 	node->shutdown_event = NULL;
-
 	node->connect_attempts = 0;
+	node->conninfo = conninfo;
+	node->state = INITIALIZED;
 	
-	node->conninfo = conninfo_parse(connect_info);
-	assert(node->conninfo);
+	// add the node to the list of nodes, so that we can iterate through them when we need to.
+	node_alloc(node);
 
 	return(node);
 }
+
+
+
+node_t * node_new_file(const char *filename)
+{
+	node_t *node = NULL;
+	conninfo_t *conninfo;
+	
+	assert(filename);
+	
+	conninfo = conninfo_load(filename);
+	if (conninfo) {
+		node = node_new(conninfo);
+		assert(node);
+	}
+
+	assert((conninfo && node) || (conninfo==NULL && node==NULL));
+	return(node);
+}
+
+
+node_t * node_add(client_t *client, char *connect_info)
+{
+	node_t *node = NULL;
+
+	assert(client);
+	assert(connect_info);
+	
+	// first need to go through the list to find out if thise node is already there.
+	node = node_find(connect_info);
+	if (node == NULL) {
+		
+		conninfo_t *conninfo = conninfo_parse(connect_info);
+		if (conninfo) {
+		
+			node = node_new(conninfo);
+			assert(node);
+			node->client = client;
+			
+			assert(client->node == NULL);
+			client->node = node;
+				
+			_active_nodes ++;
+			assert(_active_nodes > 0);
+		}
+	}
+
+	assert(node);
+	return(node);
+}
+
 
 
 
@@ -79,6 +163,8 @@ static void node_connect_handler(int fd, short int flags, void *arg)
 {
 	node_t *node = (node_t *) arg;
 	int error;
+	
+	assert(node->state == CONNECTING);
 	
 	assert(fd >= 0 && flags != 0 && node);
 	logger(LOG_INFO, "CONNECT: handle=%d", fd);
@@ -115,12 +201,14 @@ static void node_connect_handler(int fd, short int flags, void *arg)
 			assert(_evbase);
 			node->wait_event = evtimer_new(_evbase, node_wait_handler, (void *) node);
 			evtimer_add(node->wait_event, &_timeout_node_wait);
+			
+			node->state = UNKNOWN;
 		}
 		else {
 			logger(LOG_INFO, "Connected to node: %s", name);
 			
 			// we've connected to another server.... 
-			// TODO: we still dont know if its a valid connection, but we can delay the _settling event.
+			// NOTE: we still dont know if its a valid connection.
 
 			assert(node->connect_event == NULL);
 			assert(node->wait_event == NULL);
@@ -129,13 +217,15 @@ static void node_connect_handler(int fd, short int flags, void *arg)
 			client_attach_node(node->client, node, fd);
 			
 			// set an event to start asking for load levels.
-			// --- 
 			assert(node->loadlevel_event == NULL);
 			assert(_evbase);
 			node->loadlevel_event = evtimer_new(_evbase, node_loadlevel_handler, (void *) node);
 			assert(node->loadlevel_event);
 			evtimer_add(node->loadlevel_event, &_timeout_node_loadlevel);
 
+			assert(node->state == CONNECTING);
+			node->state = AUTHENTICATING;
+			
 			// should send a SERVERHELLO command to the server we've connected to.
 			assert(node->conninfo);
 			push_serverhello(node->client, conninfo_str(node->conninfo));
@@ -155,6 +245,10 @@ static void node_connect(node_t *node)
 	int sock;
 	struct sockaddr saddr;
 
+	assert(node);
+	
+	assert(node->state == INITIALIZED);
+	
 	// create standard network socket.
 	sock = socket(AF_INET,SOCK_STREAM,0);
 	assert(sock >= 0);
@@ -193,6 +287,8 @@ static void node_connect(node_t *node)
 
 	assert(node->wait_event == NULL);
 	assert(node->connect_event);
+	
+	node->state = CONNECTING;
 }
 
 
@@ -270,35 +366,6 @@ node_t * node_find(const char *conninfo_str)
 
 
 
-node_t * node_add(client_t *client, char *connect_info)
-{
-	node_t *node = NULL;
-
-	assert(client);
-	assert(connect_info);
-	
-	// first need to go through the list to find out if thise node is already there.
-	node = node_find(connect_info);
-	if (node == NULL) {
-		assert((_nodes == NULL && _node_count == 0) || (_nodes && _node_count >= 0));
-		_nodes = realloc(_nodes, sizeof(node_t *) * (_node_count + 1));
-		assert(_nodes);
-		_nodes[_node_count] = node_new(connect_info);
-		_nodes[_node_count]->client = client;
-		
-		node = _nodes[_node_count];
-		
-		assert(client->node == NULL);
-		client->node = _nodes[_node_count];
-		_node_count ++;
-			
-		_active_nodes ++;
-		assert(_active_nodes > 0);
-	}
-
-	assert(node);
-	return(node);
-}
 
 
 
@@ -349,10 +416,10 @@ int node_active_count(void)
 
 
 
-// the nodes array should already be initialised, and there should already be an entry for each node 
-// in the command-line params, we need to initiate a connection attempt (which will then need to be 
+// the nodes array should already be initialised, and there should already be some nodes in the 
+// list, from the command-line params, we need to initiate a connection attempt (which will then need to be 
 // handled through the event system)
-void node_connect_all(void)
+void node_connect_start(void)
 {
 	int i;
 	

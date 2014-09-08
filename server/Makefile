@@ -146,6 +146,7 @@ INC_OCD= \
 INC_PARAMS= \
 	$(H_PARAMS) \
 	$(H_LOGGING) \
+	$(H_NODE) \
 	$(H_USAGE)
 	
 INC_PAYLOAD=$(H_PAYLOAD)

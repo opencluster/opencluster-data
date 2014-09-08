@@ -20,6 +20,15 @@
 #include "conninfo.h"
 #include "hash.h"
 
+typedef enum {
+	UNKNOWN,
+	INITIALIZED,
+	CONNECTING,
+	AUTHENTICATING,
+	AUTHENTICATED,
+	READY
+} node_state_e;
+
 
 typedef struct {
 	hash_t nodehash;
@@ -30,17 +39,22 @@ typedef struct {
 	struct event *wait_event;
 	struct event *shutdown_event;
 	int connect_attempts;
+	node_state_e state;
 } node_t;
 
 void nodes_set_evbase(struct event_base *evbase);
 
-void node_connect_all(void);
+// create new nodes... from different sources.
+node_t * node_new(conninfo_t *conninfo);
+node_t * node_new_file(const char *filename);
+node_t * node_add(client_t *client, char *connect_info);
+
+void node_connect_start(void);
 void node_detach_client(node_t *node);
 void node_retry(node_t *node);
-node_t * node_find(const char *conninfo_str);
-node_t * node_add(client_t *client, char *connect_info);
 void node_shutdown(node_t *node);
 
+node_t * node_find(const char *conninfo_str);
 
 int node_active_inc(void);
 int node_active_dec(void);
