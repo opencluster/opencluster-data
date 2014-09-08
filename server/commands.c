@@ -351,7 +351,7 @@ static void cmd_get_keyvalue(client_t *client, header_t *header, char *payload)
 	assert(header);
 	assert(payload);
 
-	char *keyvalue = NULL;
+	const char *keyvalue = NULL;
 	
 	char *next = payload;
 	hash_t hash = data_long(&next);
@@ -375,7 +375,7 @@ static void cmd_get_keyvalue(client_t *client, header_t *header, char *payload)
 		if (keyvalue) {
 			// everything is good, so build the reply.
 			assert(payload_length() == 0);
-			payload_data(strlen(keyvalue), keyvalue);
+			payload_string(keyvalue);
 			
 			assert(payload_length() > 0);
 			client_send_reply(client, header, RESPONSE_KEYVALUE, payload_length(), payload_ptr());
@@ -892,7 +892,7 @@ static void cmd_hello(client_t *client, header_t *header, char *payload)
 	next = payload;
 	auth = data_string(&next, &auth_len);
 	
-// TODO: Need to actually parse the authentication information and compare against teh server's authentication methods to determine if there is a match.
+// TODO: Need to actually parse the authentication information and compare against the server's authentication methods to determine if there is a match.
 	
 	// send the ACK reply.
 	client_send_reply(client, header, RESPONSE_OK, 0, NULL);
