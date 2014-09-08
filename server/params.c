@@ -3,6 +3,7 @@
 #include "params.h"
 
 #include "logging.h"
+#include "node.h"
 #include "usage.h"
 
 #include <assert.h>
@@ -11,6 +12,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#define MAX_NODE_FILES   16
 
 
 static int         _daemonize = 0;
@@ -20,8 +22,6 @@ static const char *_pid_file = NULL;
 static const char *_logfile = NULL;
 static int         _logfile_max = 50;
 static const char *_conninfo_file = NULL;
-static const char *_node_file = NULL;
-
 
 
 // parses the command-line parameters, and returns a params structure.  Do not necessarily process the information provided, other than applying defaults for params not supplied.
@@ -83,14 +83,8 @@ void params_parse_args(int argc, char **argv)
 				break;
 			case 'n':
 				// disabled for now, because only single-node is working,
-				assert(0);
 				
-				// and we should support receiving more than one node file in the params
-				assert(0);
 				
-				assert(_node_file == NULL);
-				_node_file = strdup(optarg);
-				assert(_node_file);
 				break;
 				
 			case 'g':
@@ -108,8 +102,7 @@ void params_parse_args(int argc, char **argv)
 			default:
 				fprintf(stderr, "Illegal argument \"%c\"\n", c);
 				return;
-				
-		}	
+		}
 	}
 }
 
@@ -149,6 +142,12 @@ int params_get_logfile_max(void)
 // free the resources used by the parameters object.
 void params_free(void)
 {
+	int i;
+	for (i=0; i<_node_file_count; i++) {
+		assert(_node_files[i]);
+		free(_node_files[i]);
+	}
+	
 	if (_username) { free((void*)_username); _username = NULL; }
 	if (_pid_file) { free((void*)_pid_file); _pid_file = NULL; }
 	if (_conninfo_file) { free((void*)_conninfo_file); _conninfo_file = NULL; }
