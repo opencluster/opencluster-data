@@ -149,7 +149,7 @@ int main(int argc, char **argv)
 
 	// attempt to connect to the other known nodes in the cluster.
 	nodes_set_evbase(_evbase);
-	node_connect_all();
+	node_connect_start();
 
 	// If we dont have any nodes configured, then we must be starting a new cluster.
 	if (node_count() == 0) {
