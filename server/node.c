@@ -50,7 +50,7 @@ static void node_alloc(node_t *node)
 		} 
 	}
 	
-	if (entry >= 0) {
+	if (entry < 0) {
 		// if no empty slots, make a new one.
 		assert((_nodes == NULL && _node_count == 0) || (_nodes && _node_count >= 0));
 		_nodes = realloc(_nodes, sizeof(node_t *) * (_node_count + 1));
@@ -58,20 +58,20 @@ static void node_alloc(node_t *node)
 		entry = _node_count;
 		_node_count ++;
 	}
-	assert(entry >= 0);
+	assert(entry >= 0 && entry < _node_count);
 
-	_nodes[_node_count] = node;
+	_nodes[entry] = node;
 }
 
 
-node_t * node_new(conninfo_t *conninfo) 
+static node_t * node_new(conninfo_t *conninfo) 
 {
 	assert(conninfo);
 	
 	node_t *node = calloc(1, sizeof(node_t));
 	assert(node);
 	node->nodehash = 0;
-	
+
 	node->client = NULL;
 	node->connect_event = NULL;
 	node->loadlevel_event = NULL;
@@ -80,7 +80,7 @@ node_t * node_new(conninfo_t *conninfo)
 	node->connect_attempts = 0;
 	node->conninfo = conninfo;
 	node->state = INITIALIZED;
-	
+
 	// add the node to the list of nodes, so that we can iterate through them when we need to.
 	node_alloc(node);
 
@@ -100,8 +100,15 @@ node_t * node_new_file(const char *filename)
 	if (conninfo) {
 		node = node_new(conninfo);
 		assert(node);
+		assert(node->client == NULL);
+		logger(LOG_INFO, "Added new node from file: %s", conninfo_name(conninfo));
+	}
+	else {
+		logger(LOG_ERROR, "Unable to add new node from file: %s", filename);
 	}
 
+	assert(node->state == INITIALIZED);
+	
 	assert((conninfo && node) || (conninfo==NULL && node==NULL));
 	return(node);
 }
@@ -123,6 +130,7 @@ node_t * node_add(client_t *client, char *connect_info)
 		
 			node = node_new(conninfo);
 			assert(node);
+			assert(node->client == NULL);
 			node->client = client;
 			
 			assert(client->node == NULL);
@@ -130,6 +138,11 @@ node_t * node_add(client_t *client, char *connect_info)
 				
 			_active_nodes ++;
 			assert(_active_nodes > 0);
+			
+			logger(LOG_INFO, "Added new node from client: %s", conninfo_name(conninfo));
+		}
+		else {
+			logger(LOG_ERROR, "Unable to add new node from client: %s", connect_info);
 		}
 	}
 
@@ -151,7 +164,9 @@ void node_detach_client(node_t *node)
 		node->loadlevel_event = NULL;
 	}
 	
+	assert(node->client);
 	node->client = NULL;
+	assert(_active_nodes > 0);
 	_active_nodes --;
 	assert(_active_nodes >= 0);
 
@@ -174,7 +189,7 @@ static void node_connect_handler(int fd, short int flags, void *arg)
 	
 	if (flags & EV_TIMEOUT) {
 		// timeout on the connect.  Need to handle that somehow.
-		logger(LOG_WARN, "Timeout connecting to: %s", name);
+		logger(LOG_WARN, "NODE: Timeout connecting to: %s", name);
 		assert(0);
 	}
 	else {
@@ -202,6 +217,8 @@ static void node_connect_handler(int fd, short int flags, void *arg)
 			node->wait_event = evtimer_new(_evbase, node_wait_handler, (void *) node);
 			evtimer_add(node->wait_event, &_timeout_node_wait);
 			
+			assert(node->client == NULL);
+			
 			node->state = UNKNOWN;
 		}
 		else {
@@ -213,7 +230,9 @@ static void node_connect_handler(int fd, short int flags, void *arg)
 			assert(node->connect_event == NULL);
 			assert(node->wait_event == NULL);
 			
+			assert(node->client == NULL);
 			node->client = client_new();
+			assert(node->client);
 			client_attach_node(node->client, node, fd);
 			
 			// set an event to start asking for load levels.
@@ -277,7 +296,7 @@ static void node_connect(node_t *node)
 	assert(errno == EINPROGRESS);
 
 		
-	logger(LOG_INFO, "attempting to connect to node: %s", node_name(node));
+	logger(LOG_INFO, "Attempting to connect to node: %s", node_name(node));
 	
 	// set the connect event with a timeout.
 	assert(node->connect_event == NULL);
@@ -307,6 +326,9 @@ static void node_wait_handler(int fd, short int flags, void *arg)
 	
 	assert(node->connect_event == NULL);
 	assert(node->wait_event);
+	
+	// reset the node to merely an INITIALIZED state, since it didn't connect.
+	node->state = INITIALIZED;
 	
 	event_free(node->wait_event);
 	node->wait_event = NULL;
@@ -346,6 +368,7 @@ node_t * node_find(const char *conninfo_str)
 	for (i=0; i<_node_count && node == NULL; i++) {
 		
 		// at this point, every 'node' should have a client object attached.
+		// ** no it shouldn't.
 		if (_nodes[i]) {
 			assert(_nodes[i]);
 			assert(_nodes[i]->client);
@@ -416,21 +439,27 @@ int node_active_count(void)
 
 
 
-// the nodes array should already be initialised, and there should already be some nodes in the 
-// list, from the command-line params, we need to initiate a connection attempt (which will then need to be 
-// handled through the event system)
+// the nodes array should already be initialised, and there may already be some nodes in the 
+// list, from the command-line params, we need to initiate a connection attempt (which will then 
+// need to be handled through the event system)
 void node_connect_start(void)
 {
 	int i;
 	
+	assert(_startup == INIT);
+	
+	assert(_nodes);
 	assert(_node_count >= 0);
 	for (i=0; i<_node_count; i++) {
+		logger(LOG_DEBUG, "Starting connect for entry: %d/%d", i, _node_count);
 		assert(_nodes);
 		if (_nodes[i]) {
+			logger(LOG_DEBUG, "node exists: %d", i);
 			assert(_nodes[i]->conninfo);
-			if (_nodes[i]->client == NULL) {
-				node_connect(_nodes[i]);
-			}
+			assert(_nodes[i]->client == NULL);
+			assert(_nodes[i]->state == INITIALIZED);
+			logger(LOG_DEBUG, "Attempting connect: %d", i);
+			node_connect(_nodes[i]);
 		}
 	}
 }
@@ -447,6 +476,15 @@ static void node_free(node_t *node)
 	assert(node->loadlevel_event == NULL);
 	assert(node->wait_event == NULL);
 	assert(node->shutdown_event == NULL);
+
+	// remove the node from the list.
+	int i;
+	for (i=0; i<_node_count; i++) {
+		if (_nodes[i] == node) {
+			_nodes[i] = NULL;
+			break;
+		}
+	}
 	
 	if (node->conninfo) {
 		conninfo_free(node->conninfo);
@@ -486,14 +524,6 @@ static void node_shutdown_handler(evutil_socket_t fd, short what, void *arg)
 			// the client is still connected.  We need to wait for it to disconnect.
 		}
 		else {
-			
-			for (i=0; i<_node_count; i++) {
-				if (_nodes[i] == node) {
-					_nodes[i] = NULL;
-					break;
-				}
-			}
-			
 			node_free(node);
 		}
 	}

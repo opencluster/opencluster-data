@@ -45,7 +45,6 @@ typedef struct {
 void nodes_set_evbase(struct event_base *evbase);
 
 // create new nodes... from different sources.
-node_t * node_new(conninfo_t *conninfo);
 node_t * node_new_file(const char *filename);
 node_t * node_add(client_t *client, char *connect_info);
 

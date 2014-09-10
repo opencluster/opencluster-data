@@ -155,7 +155,6 @@ int main(int argc, char **argv)
 	if (node_count() == 0) {
 		create_new_cluster();
 	}
-	
 
 ///============================================================================
 /// Main Event Loop.
