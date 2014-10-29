@@ -4,53 +4,53 @@ package org.opencluster.util;
  * User: Brian Gorrie
  * Date: 3/01/12
  * Time: 1:19 PM
- * The commands are:
- * 10    hello         initiate communications.
- * 11    capabilities  determine if a command is accepted or not, without issuing the command.
- * 15    shuttingdown  tells the other node that this node is shutting down and not to send any
- * buckets to it, or other data.
- * 20    goodbye       terminate communications cleanly
- * 30    ping          check that the node is responding.
- * 50    serverhello   when a server is connecting to another server.
- * 100   server_info   sends a list of servers in the cluster.
- * 120   hashmask      when a set of hashes is being moved to a different server, let the clients and
- * other servers know.
- * 200   req_loadlevel nodes will ask other nodes how full they are.
- * 300   accept_bucket node telling another node to start accepting data for a bucket.
- * 1000  lock          obtain a cluster lock
- * 1010  unlock        release a cluster lock
- * 2000  set_int       set an integer (32-bit) key/value, overwriting if it exists.
- * 2010  set_long      set an long (64-bit) key/value, overwriting it it exists.
- * 2020  set_string    set a variable length string key/value.
- * 2100  get_int       get a integer (32-bit) key/value pair.
- * 2110  get_long      get a long (32-bit) key/value pair.
- * 2120  get_string    get a variable length string key/value.
- * 2200  get_type      get the type of the data.
+ *
+ * For more information on the commands head to https://github.com/hyper/opencluster/wiki/Client-Protocol
+ *
  */
 public enum ProtocolCommand {
 
     UNKNOWN_COMMAND(-1),
+    //Handshake
     NO_COMMAND(0),
-    ACK(1),
-    HELLO(10),
-    CAPABILITIES(11),
-    SHUTTING_DOWN(15),
-    GOODBYE(20),
-    PING(30),
-    SERVER_HELLO(50),
-    SERVER_INFO(100),
-    HASH_MASK(120),
-    REQ_LOAD_LEVEL(200),
-    ACCEPT_BUCKET(300),
-    LOCK(1000),
-    UNLOCK(1010),
-    SET_INT(2000),
-    SET_LONG(2010),
-    SET_STRING(2020),
-    GET_INT(2100),
-    GET_LONG(2110),
-    GET_STRING(2120),
-    GET_TYPE(2200);
+    HELLO(0x0010),
+    CAPABILITIES(0x0020),
+    SHUTTING_DOWN(0x0030),
+    GOODBYE(0x0040),
+    PING(0x0050),
+    REQUEST_SERVER_INFO(0x0070),
+    HASH_MASK(0x0080),
+    //Node Operations
+    CONTROL(0x0200),
+    SNAPSHOT_CONTROL(0x0210),
+    //Locking
+    LOCK(0x1000),
+    LOCK_WAIT(0x1010),
+    UNLOCK(0x1020),
+    LOCK_TOUCH(0x1030),
+    LOCK_EXPIRED(0x1040),
+    //Subscription Events
+    SUBSCRIBE(0x1100),
+    UNSUBSCRIBE(0x1110),
+    EVENT_ADDED(0x1200),
+    EVENT_DELETED(0x1210),
+    EVENT_MODIFIED(0x1220),
+    EVENT_EXPIRED(0x1230),
+    //Data Operations
+    GET_TYPE(0x2000),
+    GET_INT(0x2010),
+    GET_STRING(0x2020),
+    GET_STRING_SUBSTRING(0x2030),
+    GET_STRING_LENGTH(0x2040),
+    SET_INT(0x2200),
+    SET_STRING(0x2210),
+    SET_SUBSTRING(0x2220),
+    DELETE(0x2400),
+    SET_KEY_VALUE(0x2500),
+    GET_KEY_VALUE(0x2520),
+    DELETE_KEY_VALUE(0x2530),
+    INT_INCREMENT(0x2600),
+    INT_DECREMENT(0x2610);
 
     private short code;
 
@@ -64,9 +64,9 @@ public enum ProtocolCommand {
 
     public static ProtocolCommand fromCode(short code) {
         ProtocolCommand[] values = values();
-        for(int i = 0; i < values.length; i++) {
-            if(values[i].getCode() == code) {
-                return values[i];
+        for (ProtocolCommand value : values) {
+            if (value.getCode() == code) {
+                return value;
             }
         }
         return UNKNOWN_COMMAND;
