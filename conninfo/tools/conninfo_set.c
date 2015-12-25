@@ -53,7 +53,7 @@ int main(int argc, char **argv)
 
 			if (strcmp(argv[2], "remote_addr") == 0) {
 				// remote_addr is a special value that is a combination of other values, so cannot be set directly.
-				fprintf(stderr, "%s\n", "Unable to set remote_addr directly, as it is a combination of other settings.");
+				fprintf(stderr, "%s\n", "Unable to set remote_addr directly, as it is a combination of the 'ip' and 'port' settings.");
 				assert(found == 0);
 			}
 			else {
@@ -87,6 +87,7 @@ int main(int argc, char **argv)
 				char *output = json_dumps(conninfo->root, JSON_COMPACT | JSON_SORT_KEYS);
 				assert(output);
 				printf("%s\n", output);
+				found++;
 			}
 		}
 	}

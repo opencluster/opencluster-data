@@ -18,6 +18,10 @@
 // this is used to fork the process and run in the background as a different user.  
 void daemonize(const char *username, const char *pidfile, const int noclose)
 {
+	
+#error "re-write to handle things better.   should return info, rather than exiting directly.  pidfile should be written before the fork."
+	
+	
 	struct passwd *pw;
 	struct sigaction sa;
 	int fd;

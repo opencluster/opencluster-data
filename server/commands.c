@@ -1,5 +1,6 @@
 // commands.c
 
+#include "auth.h"
 #include "bucket.h"
 #include "client.h"
 #include "commands.h"
@@ -31,95 +32,106 @@ static void cmd_get_int(client_t *client, header_t *header, char *payload)
 	assert(header);
 	assert(payload);
 
+	int avail = header->length;
+	assert(avail > 0);
+	
 	next = payload;
-	map_hash = data_long(&next);
-	key_hash = data_long(&next);
-	
-	logger(LOG_INFO, "CMD: get (integer) [%#llx/%#llx]", map_hash, key_hash);
+	map_hash = data_long(&next, &avail);
+	assert(avail > 0);
+	key_hash = data_long(&next, &avail);
+	assert(avail >= 0);
 
-	/* First we will blindly attempt to get the data from this node.   If this data is not primarily 
-	 * stored on this server, it is rather quick to exit.   Since we need to cater for clients that 
-	 * connect directly to each node for super fast response, we need to treat that method the 
-	 * quickest.  Therefore it is assumed that if the client is asking this node for the data, then 
-	 * there is a good change the data is on this server.
-	 * 
-	 * The function will return NULL even if the data is there but this server is a backup node.  
-	 * Since the source of truth is the primary store, it will not grab the data from the backup 
-	 * node.
-	 */
-	value = buckets_get_value(map_hash, key_hash);
-	
-	if (value) {
-		if (value->type != VALUE_LONG) {
-			// need to indicate stored value is a different type.
-			assert(0);
-		}
-		else {
-			// we have the data, build the reply.
-			assert(payload_length() == 0);
-			payload_long(map_hash);
-			payload_long(key_hash);
-			payload_long(value->valuehash);
-			payload_long(value->data.l);
-
-			assert(payload_length() > 0);
-			client_send_reply(client, header, RESPONSE_DATA_INT, payload_length(), payload_ptr());
-			payload_clear();
-		}
+	if (avail < 0) {
+		// The data was invalid and the connection needs to be dropped.
+		assert(0);
 	}
 	else {
 		
+		// check payload meets protocol specifications.
+		assert(0);
+
+		logger(LOG_INFO, "CMD: get (integer) [%#llx/%#llx]", map_hash, key_hash);
+
+		/* First we will blindly attempt to get the data from this node.   If this data is not primarily 
+		* stored on this server, it is rather quick to exit.   Since we need to cater for clients that 
+		* connect directly to each node for super fast response, we need to treat that method the 
+		* quickest.  Therefore it is assumed that if the client is asking this node for the data, then 
+		* there is a good change the data is on this server.
+		* 
+		* The function will return NULL even if the data is there but this server is a backup node.  
+		* Since the source of truth is the primary store, it will not grab the data from the backup 
+		* node.
+		*/
+		value = buckets_get_value(map_hash, key_hash);
 		
-		/* NOTE:
-		 * 
-		 * For this function, we are assuming that the majority of requests will be correctly 
-		 * allocated to the correct server, and would likely result in an item being found.   
-		 * That is why we first just blindly attempt to find the item in the maps, rather than first 
-		 * checking that this key belongs on this server.   If we are unable to find the item, then 
-		 * we check to see if the client should be looking on a different server.
-		 * 
-		 * You may be tempted to do those checks first, but then you are penalizing the 99% of 
-		 * requests that return an item.  So you better make sure that's actually what you want to 
-		 * do.
-		 */
-		
-		
-		logger(LOG_DEBUG, "CMD: get (integer) FAILED [%#llx/%#llx]", map_hash, key_hash);
-		// the data they are looking for is not here.
-		// we need to check to make sure taht this instance is responsible for the bucket this item would be located.  If it this instance, then the item doesnt exist, but if this instance is not responsible, we need to reply with the primary server for that bucket.
-		
-		node_t *node = buckets_get_primary_node(key_hash);
-		if (node == NULL) {
-			// the server for the bucket is this one, so the key mustn't exit.
-			client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
+		if (value) {
+			if (value->type != VALUE_LONG) {
+				// need to indicate stored value is a different type.
+				assert(0);
+			}
+			else {
+				// we have the data, build the reply.
+				PAYLOAD payload = payload_new_reply();
+				payload_long(payload, map_hash);
+				payload_long(payload, key_hash);
+				payload_long(payload, value->valuehash);
+				payload_long(payload, value->data.l);
+
+				client_send_reply(client, header, RESPONSE_DATA_INT, payload);
+			}
 		}
 		else {
-			// The data is not here, but we know where the data is, so we need to make a request to the actual server that has it.
-	
-			assert(node->conninfo);
-			const char *server_name = conninfo_name(node->conninfo);
-			assert(server_name);
-			logger(LOG_DEBUG, "CMD: Bucket %#llx not here, it is at '%s'", key_hash, server_name);
-			
-			assert(0);
-
-			// create a structure with the data we will need when the response comes back.
-
-			// The data is no
 			
 			
+			/* NOTE:
+			* 
+			* For this function, we are assuming that the majority of requests will be correctly 
+			* allocated to the correct server, and would likely result in an item being found.   
+			* That is why we first just blindly attempt to find the item in the maps, rather than first 
+			* checking that this key belongs on this server.   If we are unable to find the item, then 
+			* we check to see if the client should be looking on a different server.
+			* 
+			* You may be tempted to do those checks first, but then you are penalizing the 99% of 
+			* requests that return an item.  So you better make sure that's actually what you want to 
+			* do.
+			*/
 			
-// 			assert(payload_length() == 0);
-// 			payload_string(server);
+			
+			logger(LOG_DEBUG, "CMD: get (integer) FAILED [%#llx/%#llx]", map_hash, key_hash);
+			// the data they are looking for is not here.
+			// we need to check to make sure taht this instance is responsible for the bucket this item would be located.  If it this instance, then the item doesnt exist, but if this instance is not responsible, we need to reply with the primary server for that bucket.
+			
+			node_t *node = buckets_get_primary_node(key_hash);
+			if (node == NULL) {
+				// the server for the bucket is this one, so the key mustn't exit.
+				client_send_reply(client, header, RESPONSE_FAIL, NO_PAYLOAD);
+			}
+			else {
+				// The data is not here, but we know where the data is, so we need to make a request to the actual server that has it.
+		
+				assert(node->conninfo);
+				const char *server_name = conninfo_name(node->conninfo);
+				assert(server_name);
+				logger(LOG_DEBUG, "CMD: Bucket %#llx not here, it is at '%s'", key_hash, server_name);
+				
+				assert(0);
 
-// 			assert(payload_length() > 0);
-// 			client_send_message(client, header, REPLY_TRYELSEWHERE, payload_length(), payload_ptr());
-// 			payload_clear();
+				// create a structure with the data we will need when the response comes back.
 
+				// The data is no
+				
+				
+				
+	// 			assert(payload_length() == 0);
+	// 			payload_string(server);
+
+	// 			assert(payload_length() > 0);
+	// 			client_send_message(client, header, REPLY_TRYELSEWHERE, payload_length(), payload_ptr());
+	// 			payload_clear();
+
+			}
 		}
 	}
-	
-	assert(payload_length() == 0);
 }
 
 
@@ -141,9 +153,12 @@ static void cmd_get_str(client_t *client, header_t *header, char *payload)
 	key_hash = data_long(&next);
 	max_length = data_int(&next);
 	
+	// check payload meets protocol specifications.
+	assert(0);
+
 	if (max_length < 0) {
 		// the client gave a negative number which is invalid.
-		client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
+		client_send_reply(client, header, RESPONSE_FAIL, NO_PAYLOAD);
 	}
 	else {
 
@@ -162,25 +177,23 @@ static void cmd_get_str(client_t *client, header_t *header, char *payload)
 		if (value) {
 			if (value->type != VALUE_STRING) {
 				// need to indicate stored value is a different type.
-				client_send_reply(client, header, RESPONSE_WRONGTYPE, 0, NULL);
+				client_send_reply(client, header, RESPONSE_WRONGTYPE, NO_PAYLOAD);
 			}
 			else {
 				
 				// the value is a string, but is it within the max length specified?
 				if (max_length > 0 && value->data.s.length > max_length) {
-					client_send_reply(client, header, RESPONSE_TOOLARGE, 0, NULL);
+					client_send_reply(client, header, RESPONSE_TOOLARGE, NO_PAYLOAD);
 				}
 				else {
 					// everything is goog, so build the reply.
-					assert(payload_length() == 0);
-					payload_long(map_hash);
-					payload_long(key_hash);
-					payload_long(value->valuehash);
-					payload_data(value->data.s.length, value->data.s.data);
+					PAYLOAD out = payload_new_reply();
+					payload_long(out, map_hash);
+					payload_long(out, key_hash);
+					payload_long(out, value->valuehash);
+					payload_data(out, value->data.s.length, value->data.s.data);
 					
-					assert(payload_length() > 0);
-					client_send_reply(client, header, RESPONSE_DATA_STRING, payload_length(), payload_ptr());
-					payload_clear();
+					client_send_reply(client, header, RESPONSE_DATA_STRING, out);
 				}
 			}
 		}
@@ -204,7 +217,7 @@ static void cmd_get_str(client_t *client, header_t *header, char *payload)
 			node_t *node = buckets_get_primary_node(key_hash);
 			if (node == NULL) {
 				// the server for the bucket is this one, so the key mustn't exit.
-				client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
+				client_send_reply(client, header, RESPONSE_FAIL, NO_PAYLOAD);
 			}
 			else {
 				assert(node->conninfo);
@@ -219,8 +232,6 @@ static void cmd_get_str(client_t *client, header_t *header, char *payload)
 			}
 		}
 	}
-
-	assert(payload_length() == 0);
 }
 
 
@@ -247,6 +258,9 @@ static void cmd_set_str(client_t *client, header_t *header, char *payload)
 	expires = data_int(&next);
 	str = data_string(&next, &str_len);
 	
+	// check payload meets protocol specifications.
+	assert(0);
+
 	logger(LOG_DEBUG, "CMD: set (string): [%#llx/%#llx]", map_hash, key_hash);
 	
 	// first we need to check that this server is responsible for this data.  If not, we need to pass a message to the server that is.
@@ -276,15 +290,12 @@ static void cmd_set_str(client_t *client, header_t *header, char *payload)
 		
 		// send the ACK reply.
 		if (result == 0) {
-			client_send_reply(client, header, RESPONSE_OK, 0, NULL);
-			payload_clear();
+			client_send_reply(client, header, RESPONSE_OK, NO_PAYLOAD);
 		}
 		else {
 			assert(0);
 		}
 	}
-	
-	assert(payload_length() == 0);
 }
 
 
@@ -329,18 +340,15 @@ static void cmd_set_keyvalue(client_t *client, header_t *header, char *payload)
 
 			logger(LOG_DEBUG, "CMD: set_keyvalue (string): [%#llx] - keyvalue stored successfully.", hash);
 
-			assert(payload_length() == 0);
-			payload_long(hash);
-			assert(payload_length() > 0);
-			client_send_reply(client, header, RESPONSE_KEYVALUE_HASH, payload_length(), payload_ptr());
-			payload_clear();
+			PAYLOAD out = payload_new_reply();
+			payload_long(out, hash);
+
+			client_send_reply(client, header, RESPONSE_KEYVALUE_HASH, out);
 		}
 		else {
 			assert(0);
 		}
 	}
-	
-	assert(payload_length() == 0);
 }
 
 
@@ -374,28 +382,16 @@ static void cmd_get_keyvalue(client_t *client, header_t *header, char *payload)
 		keyvalue = buckets_get_keyvalue(hash);
 		if (keyvalue) {
 			// everything is good, so build the reply.
-			assert(payload_length() == 0);
-			payload_string(keyvalue);
+			PAYLOAD out = payload_new_reply();
+			payload_string(out, keyvalue);
 			
-			assert(payload_length() > 0);
-			client_send_reply(client, header, RESPONSE_KEYVALUE, payload_length(), payload_ptr());
-			payload_clear();
+			client_send_reply(client, header, RESPONSE_KEYVALUE, out);
 		}
 		else {
-		
-			assert(payload_length() > 0);
-			client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
-			payload_clear();
+			client_send_reply(client, header, RESPONSE_FAIL, NO_PAYLOAD);
 		}
 	}
-
-	assert(payload_length() == 0);
 }
-
-
-
-
-
 
 
 static void cmd_loadlevels(client_t *client, header_t *header)
@@ -405,7 +401,6 @@ static void cmd_loadlevels(client_t *client, header_t *header)
 
 	// the header shouldn't have any payload for this command.
 	assert(header->length == 0);
-	assert(payload_length() == 0);
 	
 	int primary_count = buckets_get_primary_count();
 	int secondary_count = buckets_get_secondary_count();
@@ -414,14 +409,14 @@ static void cmd_loadlevels(client_t *client, header_t *header)
 	assert(primary_count >= 0);
 	assert(secondary_count >= 0);
 	assert(trans >= 0);
-	payload_int(primary_count);
-	payload_int(secondary_count);
-	payload_int(trans);
+	
+	PAYLOAD out = payload_new_reply();
+	payload_int(out, primary_count);
+	payload_int(out, secondary_count);
+	payload_int(out, trans);
 	
 	// send the reply.
-	client_send_reply(client, header, RESPONSE_LOADLEVELS, payload_length(), payload_ptr());
-
-	payload_clear();
+	client_send_reply(client, header, RESPONSE_LOADLEVELS, out);
 }
 
 
@@ -430,31 +425,32 @@ static void cmd_loadlevels(client_t *client, header_t *header)
 // Get a value from storage.
 static void cmd_accept_bucket(client_t *client, header_t *header, char *payload)
 {
-	char *next;
-	hash_t mask;
-	hash_t key_hash;
-	
 	assert(client);
 	assert(header);
 	assert(payload);
 
-	next = payload;
-	mask = data_long(&next);
-	key_hash = data_long(&next);
+	char *next = payload;
+	hash_t mask = data_long(&next);
+	hash_t hashmask = data_long(&next);
 	
-	logger(LOG_INFO, "CMD: accept bucket (%#llx/%#llx)", mask, key_hash);
-
-	int accepted = buckets_accept_bucket(client, mask, key_hash);
-	if (accepted == 0) {
-		// bucket was not accepted.
-		client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
+	if (mask == 0) {
+		// cannot accept a bucket with a mask of zero.
+		logger(LOG_ERROR, "Received an invalid CMD_ACCEPT_BUCKET command from client (%d)", client->handle);
+		client_send_reply(client, header, RESPONSE_FAIL, NO_PAYLOAD);
 	}
 	else {
-		client_send_reply(client, header, RESPONSE_OK, 0, NULL);
-	}
+	
+		logger(LOG_INFO, "CMD: accept bucket (%#llx/%#llx)", mask, hashmask);
 
-	// we did not create an outgoing payload, better check that it is still empty.
-	assert(payload_length() == 0);
+		int accepted = buckets_accept_bucket(client, mask, hashmask);
+		if (accepted == 0) {
+			// bucket was not accepted.
+			client_send_reply(client, header, RESPONSE_FAIL, NO_PAYLOAD);
+		}
+		else {
+			client_send_reply(client, header, RESPONSE_OK, NO_PAYLOAD);
+		}
+	}
 }
 
 
@@ -486,6 +482,9 @@ static void cmd_set_int(client_t *client, header_t *header, char *payload)
 	value->data.l = data_long(&next);
 	value->type = VALUE_LONG;
 
+	// check payload meets protocol specifications.
+	assert(0);
+
 	// first we need to check that this server is responsible for this data.  If not, we need to pass a message to the server that is.
 	node_t *node = buckets_get_primary_node(key_hash);
 	if (node) {
@@ -505,8 +504,7 @@ static void cmd_set_int(client_t *client, header_t *header, char *payload)
 		
 		// send the ACK reply.
 		if (result == 0) {
-			client_send_reply(client, header, RESPONSE_OK, 0, NULL);
-			assert(payload_length() == 0);
+			client_send_reply(client, header, RESPONSE_OK, NO_PAYLOAD);
 		}
 		else {
 			assert(0);
@@ -515,8 +513,6 @@ static void cmd_set_int(client_t *client, header_t *header, char *payload)
 	
 	// if the value was not passed to the storage system, then we need to free it ourself.
 	if (value) { free(value); }
-	
-	assert(payload_length() == 0);
 }
 
 
@@ -530,7 +526,7 @@ static void cmd_ping(client_t *client, header_t *header)
 	assert(header->length == 0);
 	
 	// send the ACK reply.
-	client_send_reply(client, header, RESPONSE_OK, 0, NULL);
+	client_send_reply(client, header, RESPONSE_OK, NO_PAYLOAD);
 }
 
 
@@ -541,107 +537,113 @@ static void cmd_goodbye(client_t *client, header_t *header)
 
 	logger(LOG_INFO, "CMD: goodbye");
 	
+	// check payload meets protocol specifications.
+	assert(0);
+
 	client_closing(client);
 	
 	// send the ACK reply.
-	client_send_reply(client, header, RESPONSE_OK, 0, NULL);
+	client_send_reply(client, header, RESPONSE_OK, NO_PAYLOAD);
 }
 
 
-/*
+
 static void cmd_serverhello(client_t *client, header_t *header, char *payload)
 {
-	char *next;
-	char *name = NULL;
-	node_t *node = NULL;
-	
 	assert(client);
 	assert(header);
 	assert(payload);
-
-	next = payload;
 	
 	assert(client->node == NULL);
 	
-	// the only parameter is a string indicating the servers connection data.  
-	// Normally an IP and port.
-	name = data_string_copy(&next);
-	assert(name);
-
+	int avail = header.length;
+	assert(avail > 0);
 	
-	// we have a server name.  We need to check it against our node list.  If it is there, then we 
-	// dont do anything.  If it is not there, then we need to add it.
-	node = node_find(name);
-	if (node == NULL) {
-		// the node was not found in the list.  We need to add it to the list, and add this client 
-		// to the node.
+	char *next = payload;
+	char *conninfo_str = data_string_copy(&next, &avail);
+	assert(avail > 0);
+	char *auth = data_string_copy(&next, &avail);
+	assert(avail >= 0);
+	assert(auth);
 
-		node = node_add(client, name);
-		assert(node);
-
-		// need to send to the node, the list of hashmasks.
-		push_hashmasks(client);
-		
-		// this is a new server we didn't know about, so we need to send this info to our connected 
-		// clients as well.
-		push_all_newserver(name, client);
-		
-		logger(LOG_INFO, "Adding '%s' as a New Node.", name);
+	if (avail < 0) {
+		client_fail(client);
+	}
+	
+	// need to verify the supplied authentication.
+	if (auth_compare(auth) == 0) {
+		// authorization failed.
+		client_send_reply(client, header, RESPONSE_FAIL, NO_PAYLOAD);
 	}
 	else {
-		
-		// the node was found in the list.  Now we need to remove the existing one, and replace it 
-		// with this new one.
-		assert(node->client);
-		if (node->client == client) {
-			// is this even possible?
-			assert(0);
+		conninfo_t *conninfo = conninfo_parse(conninfo_str);
+		if (conninfo == NULL) {
+			// the conninfo details supplied must have been invalid.
+			client_send_reply(client, header, RESPONSE_FAIL, NO_PAYLOAD);
 		}
 		else {
 			
-			if (node->client->read_event) {
-				// this client object already exists and is reading data.  We need to close this.
-				assert(0);
+			logger(LOG_DEBUG, "Received Server Hello from node claiming to be '%s'", conninfo_name(conninfo));
+			
+			// we have a server conninfo.  We need to check it against our node list.  If it is 
+			// there, then we dont do anything.  If it is not there, then we need to add it.
+			node_t *node = node_find(conninfo);
+			if (node == NULL) {
+				// the node was not found in the list.  We need to add it to the list, and add this 
+				// client to the node.
+
+				node = node_add(client, conninfo);
+				assert(node);
+				
+				logger(LOG_INFO, "Added '%s' as a New Node.", conninfo_name(conninfo));
 			}
 			else {
-				if (node->connect_event) {
-					assert(node->client->handle > 0);
-					assert(node->wait_event == NULL);
-					
-					// this client is in the middle of connecting, and we've received a connection 
-					// at the same time.
+				
+				// the node was found in the list.  Now we need to remove the existing one, and replace it 
+				// with this new one.
+				assert(node->client);
+				if (node->client == client) {
+					// is this even possible?
 					assert(0);
 				}
 				else {
-					assert(node->connect_event == NULL);
-					assert(node->wait_event);
-					assert(node->client->read_event == NULL);
-					assert(node->client->handle == -1);
 					
-					// need to send to the node, the list of hashmasks.
-					push_hashmasks(client);
-					
-					// the client is waiting to connect, so we can break it down.
-					client_free(node->client);
-					assert(node->client == NULL);
-					client->node = node;
-	}	}	}	}
+					if (node->client->read_event) {
+						// this client object already exists and is reading data.  We need to close this.
+						assert(0);
+					}
+					else {
+						if (node->connect_event) {
+							assert(node->client->handle > 0);
+							assert(node->wait_event == NULL);
+							
+							// this client is in the middle of connecting, and we've received a connection 
+							// at the same time.
+							assert(0);
+						}
+						else {
+							assert(node->connect_event == NULL);
+							assert(node->wait_event);
+							assert(node->client->read_event == NULL);
+							assert(node->client->handle == -1);
+							
+							// the client is waiting to connect, so we can break it down.
+							client_free(node->client);
+							assert(node->client == NULL);
+							client->node = node;
+			}	}	}	}
 
-	// since this connection is a client, we need to set a 'loadlevel' timer.
-	assert(node);
-	assert(node->loadlevel_event == NULL);
-	assert(_evbase);
-	node->loadlevel_event = evtimer_new(_evbase, node_loadlevel_handler, (void *) node);
-	assert(node->loadlevel_event);
-	evtimer_add(node->loadlevel_event, &_timeout_node_loadlevel);
+			// since this connection is a node, we need to set a 'loadlevel' timer.
+			node_start_loadlevel(node);
 
-	// send the ACK reply.
-	client_send_message(client, header, REPLY_ACK, 0, NULL);
+			// send the ACK reply.
+			client_send_reply(client, header, RESPONSE_OK, NO_PAYLOAD);
+		}
+	}
 	
-	free(name);
-	name=NULL;
+	free(conninfo_str); conninfo_str=NULL;
+	free(auth); auth=NULL;
 }
-*/
 
 /*
 static void cmd_serverinfo(client_t *client, header_t *header, char *payload)
@@ -720,6 +722,9 @@ static void cmd_hashmask(client_t *client, header_t *header, char *payload)
 	hash = data_long(&next);
 	level = data_int(&next);
 
+	// check payload meets protocol specifications.
+	assert(0);
+
 	current_mask = buckets_mask();
 	
 	// check integrity of the data provided.
@@ -758,7 +763,7 @@ static void cmd_hashmask(client_t *client, header_t *header, char *payload)
 	buckets_hashmasks_update(node, hash, level);
 
 	// send the ACK reply.
-	client_send_reply(client, header, RESPONSE_OK, 0, NULL);
+	client_send_reply(client, header, RESPONSE_OK, NO_PAYLOAD);
 }
 
 
@@ -787,6 +792,9 @@ static void cmd_control_bucket(client_t *client, header_t *header, char *payload
 	hash_t hashmask = data_long(&next);
 	int level       = data_int(&next);
 	
+	// check payload meets protocol specifications.
+	assert(0);
+
 	logger(LOG_INFO, "CMD: bucket control (%#llx/%#llx), level:%d", mask, hashmask, level);
 
 	hash_t current_mask = buckets_mask();
@@ -798,11 +806,11 @@ static void cmd_control_bucket(client_t *client, header_t *header, char *payload
 	}
 	else if (mask != current_mask) {
 		// make sure that the masks are the same.
-		client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
+		client_send_reply(client, header, RESPONSE_FAIL, NO_PAYLOAD);
 	}
 	else {
 		buckets_control_bucket(client, mask, hashmask, level);
-		client_send_reply(client, header, RESPONSE_OK, 0, NULL);
+		client_send_reply(client, header, RESPONSE_OK, NO_PAYLOAD);
 	}
 
 	if (bucket) {
@@ -810,10 +818,6 @@ static void cmd_control_bucket(client_t *client, header_t *header, char *payload
 		assert(bucket->level >= 0);
 		hashmask_send_update(bucket);
 	}
-
-	// outgoing payload should not be needed, better make sure that it is still empty.
-	assert(payload_length() == 0);
-
 }
 
 
@@ -837,34 +841,40 @@ static void cmd_finalise_migration(client_t *client, header_t *header, char *pay
 	int level       = data_int(&next);
 	remote_host     = data_string_copy(&next);  // the connect_info for a particular node.
 	
-	logger(LOG_INFO, "CMD: finalise migration (%#llx/%#llx), level:%d, remote:'%s'", mask, hashmask, level, remote_host);
+	// check payload meets protocol specifications.
+	assert(0);
 
-	// regardless of the reply, the payload will be the same.
-	assert(payload_length() == 0);
-
-	hash_t current_mask = buckets_mask();
-	
-	// make sure that the masks are the same.
-	if (mask != current_mask) {
-		assert(bucket == NULL);
-		client_send_reply(client, header, RESPONSE_FAIL, 0, NULL);
+	conninfo_t *conninfo = conninfo_parse(remote_host);
+	if (conninfo == NULL) {
+		client_send_reply(client, header, RESPONSE_FAIL, NO_PAYLOAD);
 	}
 	else {
-		buckets_finalize_migration(client, hashmask, level, remote_host);
-		client_send_reply(client, header, RESPONSE_OK, 0, NULL);
+	
+		logger(LOG_INFO, "CMD: finalise migration (%#llx/%#llx), level:%d, remote:'%s'", mask, hashmask, level, conninfo_name(conninfo));
+
+		hash_t current_mask = buckets_mask();
+		
+		// make sure that the masks are the same.
+		if (mask != current_mask) {
+			assert(bucket == NULL);
+			client_send_reply(client, header, RESPONSE_FAIL, NO_PAYLOAD);
+		}
+		else {
+			buckets_finalize_migration(client, hashmask, level, conninfo);
+			client_send_reply(client, header, RESPONSE_OK, NO_PAYLOAD);
+		}
+		
+		// at this point, the bucket should have at least a source node, or a backup node listed.
+		assert(bucket->source_node || bucket->backup_node);
+
+		assert(bucket->transfer_client == NULL);
+
+		buckets_clear_transferring(bucket);
+		
+		conninfo_free(conninfo);
 	}
 	
-	// at this point, the bucket should have at least a source node, or a backup node listed.
-	assert(bucket->source_node || bucket->backup_node);
-
-	assert(bucket->transfer_client == NULL);
-
-	buckets_clear_transferring(bucket);
-
-	if (remote_host) {
-		free(remote_host);
-		remote_host = NULL;
-	}
+	if (remote_host) { free(remote_host); remote_host = NULL; }
 	
 	if (bucket) {
 		// send message to all other connected clients and nodes alerting them to the change in buckets.
@@ -879,23 +889,20 @@ static void cmd_finalise_migration(client_t *client, header_t *header, char *pay
 // However, it triggers a servermap, and a hashmasks command to follow it.
 static void cmd_hello(client_t *client, header_t *header, char *payload)
 {
-	char *auth;
-	int auth_len;
-	char *next;
-	
 	assert(client);
 	assert(header);
 
 	// there is payload required for this command.
 	assert(header->length > 0);
 	
-	next = payload;
-	auth = data_string(&next, &auth_len);
-	
+	char *next = payload;
+	char *auth = data_string_copy(&next);
+
 // TODO: Need to actually parse the authentication information and compare against the server's authentication methods to determine if there is a match.
+	if (auth) { free(auth); }
 	
 	// send the ACK reply.
-	client_send_reply(client, header, RESPONSE_OK, 0, NULL);
+	client_send_reply(client, header, RESPONSE_OK, NO_PAYLOAD);
 }
 
 
@@ -929,6 +936,9 @@ static void cmd_sync_string(client_t *client, header_t *header, char *payload)
 	expires = data_int(&next);
 	str = data_string(&next, &str_len);
 	
+	// check payload meets protocol specifications.
+	assert(0);
+
 	// we cant treat the string as a typical C string, because it is actually a binary blob that may 
 	// contain NULL chars.
 	value->data.s.data = malloc(str_len + 1);
@@ -946,13 +956,11 @@ static void cmd_sync_string(client_t *client, header_t *header, char *payload)
 	
 	// send the ACK reply.
 	if (result == 0) {
-		client_send_reply(client, header, RESPONSE_OK, 0, NULL);
+		client_send_reply(client, header, RESPONSE_OK, NO_PAYLOAD);
 	}
 	else {
 		assert(0);
 	}
-	
-	assert(payload_length() == 0);
 }
 
 
@@ -985,6 +993,9 @@ static void cmd_sync_int(client_t *client, header_t *header, char *payload)
 	value->data.l = data_long(&next);
 	value->type = VALUE_LONG;
 	
+	// check payload meets protocol specifications.
+	assert(0);
+
 	// store the value into the trees.  If a value already exists, it will get released and this one 
 	// will replace it, so control of this value is given to the tree structure.
 	// NOTE: value is controlled by the tree after this function call.
@@ -994,13 +1005,11 @@ static void cmd_sync_int(client_t *client, header_t *header, char *payload)
 	
 	// send the ACK reply.
 	if (result == 0) {
-		client_send_reply(client, header, RESPONSE_OK, 0, NULL);
+		client_send_reply(client, header, RESPONSE_OK, NO_PAYLOAD);
 	}
 	else {
 		assert(0);
 	}
-	
-	assert(payload_length() == 0);
 }
 
 
@@ -1019,10 +1028,13 @@ static void cmd_sync_keyvalue(client_t *client, header_t *header, char *payload)
 	
 	char *next = payload;
 	hash_t key_hash = data_long(&next);
-	int expires = data_int(&next);
+	int expires     = data_int(&next);
 	char * keyvalue = data_string_copy(&next);
 	assert(keyvalue);
 	
+	// check payload meets protocol specifications.
+	assert(0);
+
 	logger(LOG_DEBUG, "Received: CMD_SYNC_KEYVALUE: %#llx", key_hash);
 	
 	// NOTE: name is controlled by the tree after this function call.
@@ -1030,13 +1042,11 @@ static void cmd_sync_keyvalue(client_t *client, header_t *header, char *payload)
 	
 	// send the ACK reply.
 	if (result == 0) {
-		client_send_reply(client, header, RESPONSE_OK, 0, NULL);
+		client_send_reply(client, header, RESPONSE_OK, NO_PAYLOAD);
 	}
 	else {
 		assert(0);
 	}
-	
-	assert(payload_length() == 0);
 }
 
 
@@ -1044,9 +1054,8 @@ static void cmd_sync_keyvalue(client_t *client, header_t *header, char *payload)
 
 void cmd_init(void)
 {
-	// add the commands to the client processing code.   It doesn't really matter which order they 
-	// are set.  Previous versions used an array so it was beneficial to have the most common ones 
-	// added first.
+	// add the commands to the client processing code.   
+	// It doesn't really matter which order they are set.  
 	client_add_cmd(COMMAND_GET_INT, cmd_get_int);
  	client_add_cmd(COMMAND_GET_STRING, cmd_get_str);
  	client_add_cmd(COMMAND_SET_INT, cmd_set_int);
@@ -1067,7 +1076,7 @@ void cmd_init(void)
  	client_add_cmd(COMMAND_HASHMASK, cmd_hashmask);
  	client_add_cmd(COMMAND_HELLO, cmd_hello);
  	client_add_cmd(COMMAND_GOODBYE, cmd_goodbye);
-//  	client_add_cmd(COMMAND_SERVERHELLO, cmd_serverhello);
+ 	client_add_cmd(COMMAND_SERVERHELLO, cmd_serverhello);
 }
 
 

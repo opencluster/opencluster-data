@@ -1,145 +1,64 @@
 This file provides some information about active branches in the repository.
 
-client-connectivity
-	The client library does not handle multiple servers correctly.   It also 
-	does not handle recovery of a server connection.
+node-sync
+	Split the client and node operations into seperate protocols, handled by seperate code.
 
-buffercheck
-	When parsing the commands, the server does not currently verify that the 
-	string lengths fit inside the data received.  Need to simply count-down 
-	the buffer length as parsing it.   As it is, a client could manipulate 
-	the packet sent to send less data than it says is in the string.  This 
-	could be used to set extra memory as a value, and retrieve it.   It might 
-	be able to get data from memory that it shouldn't be able to.
-	
-	Unlikely to be able to use this bug as a means of gaining control of the 
-	service, but it could leak data that is sensitive.
-	
-	If the server detects this kind of behaviour, it needs to either trim 
-	the data received, or close the connection.
-	
+client-connectivity
+	The client library does not handle multiple servers correctly.   It also does not handle recovery of a server connection.
+
 check-and-set
-	When setting a value, the client returns the hash of the previous value 
-	also, and will not set if the value on the cluster has changed since the 
-	client got the value.  Basically it means that it will not over-write a 
-	change that another node has made in between the get and set.
-	This would require some additions to the protocol.
+	When setting a value, the client returns the hash of the previous value also, and will not set if the value on the cluster has changed since the client got the value.  Basically it means that it will not over-write a change that another node has made in between the get and set. This would require some additions to the protocol.
 
 shutdown
-	The system is not currently shutting down properly, because it is not 
-	releasing the buckets correctly.  Goal for this branch is to have a 
-	completely orderly shutdown when only one node has been started and then 
-	stopped.  With and without data being pumped into it.
+	The system is not currently shutting down properly, because it is not releasing the buckets correctly.  Goal for this branch is to have a completely orderly shutdown when only one node has been started and then stopped.  With and without data being pumped into it.
 
 shutdown-migrate
-	When a node is being shutdown, it needs to send the buckets to another node.
-
-	Create a tool that will connect to the cluster as a client, set a 
-	certain number of entries in the cluster, and then continuously read 
-	those values back from the cluster to make sure that it will always get 
-	back the data it expected.   When that tool has started, start cycling 
-	the cluster nodes randomly to ensure that no matter what, the data is 
-	always consistant. Let it run for hours.
+	When a node is being shutdown, it needs to send the buckets to another node. Create a tool that will connect to the cluster as a client, set a certain number of entries in the cluster, and then continuously read those values back from the cluster to make sure that it will always get back the data it expected.   When that tool has started, start cycling the cluster nodes randomly to ensure that no matter what, the data is always consistant. Let it run for hours.
 
 goodbye
-	When a client or node sends the 'goodbye' command, the server needs to 
-	send a reply and close the connection properly. Current tests are 
-	showing the client is still staying connected and the goodbye command is 
-	not being processed properly because it keeps getting logged, but the 
-	client doesn't disconnect.
+	When a client or node sends the 'goodbye' command, the server needs to send a reply and close the connection properly. Current tests are showing the client is still staying connected and the goodbye command is not being processed properly because it keeps getting logged, but the client doesn't disconnect.
 
 data-logging
-	A special node can connect to the cluster that logs all the updates that 
-	occur.  It logs the output to a series of files. It can also be used to 
-	re-inject that logged data into a cluster.
+	A special node can connect to the cluster that logs all the updates that occur.  It logs the output to a series of files. It can also be used to re-inject that logged data into a cluster.
 
 savefile
-	when a node is shutting down, it will normally attempt to send the 
-	buckets it has to another node in the cluster.  If there are no other 
-	nodes, the data should instead be saved to a file, that can then be used 
-	to inject the data back in when the cluster is restarted.   The 
-	file-save option would be present from start, but it will only write to 
-	the file if it is the last one in the cluster.   The daemon can inject 
-	the data into the cluster on startup.
+	when a node is shutting down, it will normally attempt to send the buckets it has to another node in the cluster.  If there are no other nodes, the data should instead be saved to a file, that can then be used to inject the data back in when the cluster is restarted.   The file-save option would be present from start, but it will only write to the file if it is the last one in the cluster.   The daemon can inject the data into the cluster on startup.
 
 client-disconnect
-	The C client is not handling things if it loses the connection to the 
-	server.  Now that we have implemented the GOODBYE command, we lose 
-	connection to the server when the server closes it. The client needs to 
-	be able to mark it as failed, and re-connect when needed.
+	The C client is not handling things if it loses the connection to the server.  Now that we have implemented the GOODBYE command, we lose connection to the server when the server closes it. The client needs to be able to mark it as failed, and re-connect when needed.
 
 Reconnecting Nodes
-	If a node is known, but it connects, the server is failing because it is 
-	adding the node name to the list again.  This is incorrect.  It needs to 
-	look at the list to see if the node is already in there.  If it is, it 
-	doesnt need to be added again.
+	If a node is known, but it connects, the server is failing because it is adding the node name to the list again.  This is incorrect.  It needs to look at the list to see if the node is already in there.  If it is, it doesnt need to be added again.
 
 client-timeout
-	When performing options, the client should be able to be set with a 
-	general timeout... then, if connecting takes longer than that time, then 
-	it stops connecting and the function returns.  We should probably set 
-	different timeouts, like a connect timeout and a wait_for_data timeout.
+	When performing options, the client should be able to be set with a general timeout... then, if connecting takes longer than that time, then it stops connecting and the function returns.  We should probably set different timeouts, like a connect timeout and a wait_for_data timeout.
 
 data-events
 	clients request to be notified when particular data is updated. 
 
 logging-split
-	Currently the log file continues to grow until it hits the maximum and then 
-	a new logfile is created.  We need to modify it so that when the time rolls 
-	over to a new day, it closes off the current log and starts a new one.   
-	This means that if the maximums are high enough, there should only be one 
-	log per day.
+	Currently the log file continues to grow until it hits the maximum and then a new logfile is created.  We need to modify it so that when the time rolls over to a new day, it closes off the current log and starts a new one.   This means that if the maximums are high enough, there should only be one log per day.
 
 shutdown-persist
-	When a server node is being shutdown and it is the last node in the cluster,
-	it should persist all the data that it has (which it should now have all of it).  
-	This is a command line argument.  Once the server is running, may be able to 
-	turn on this activity with a Server Command.
-
+	When a server node is being shutdown and it is the last node in the cluster, it should persist all the data that it has (which it should now have all of it).  This is a command line argument.  Once the server is running, may be able to turn on this activity with a Server Command.
 
 append-log
-	As the server is running, all changes to the cluster components that it 
-	controls, will be written to a file.  This transaction log can be used to 
-	replay activity if there is a crash.  It must do this log writing in a way 
-	that least impacts performance of the server node.   It might have to do 
-	the writing in a different thread.   The changes would be added a pending buffer.  
-	Each server in the node will need to write to a log, and may also need some 
-	synchronisation parts in there as well for it to be effective (so that the logs 
-	can be replayed with a semblance of synchronisation, but not a big deal if 
-	it cant).
+	As the server is running, all changes to the cluster components that it controls, will be written to a file.  This transaction log can be used to replay activity if there is a crash.  It must do this log writing in a way that least impacts performance of the server node.   It might have to do the writing in a different thread.   The changes would be added a pending buffer.  Each server in the node will need to write to a log, and may also need some synchronisation parts in there as well for it to be effective (so that the logs can be replayed with a semblance of synchronisation, but not a big deal if it cant).
 	
-
 buffer-overrun
-	When processing parameters from the payloads, we need to verify that we got 
-	exactly what we expected.  These checks were not done during initial development 
-	because they are specific to the protocol and it is expected that the protocol 
-	will change a lot through the initial development while we discover flaws or 
-	improvements.   All the places where commands or replies are processed, need to 
-	verfiy that the length of the payload is correct for the message type.  
-	specifically strings.   
-	This is because we are given the length from the client connection.   
+	When processing parameters from the payloads, we need to verify that we got exactly what we expected.  These checks were not done during initial development because they are specific to the protocol and it is expected that the protocol will change a lot through the initial development while we discover flaws or improvements.   All the places where commands or replies are processed, need to verfiy that the length of the payload is correct for the message type.  specifically strings.   This is because we are given the length from the client connection.   
 	
 memory-chunks
-	When starting the cluster nodes, it should have an option to limit the 
-	amount of memory that it will use for data.  This memory will be pre-allocated 
-	into chunks and will be managed by the server to ensure that fragmentation does 
-	not occur.  To do this, we set aside chunks for similar sized objects.  
-	Memcached does a similar thing.   Every malloc and free should be examined to 
-	see if it is possible to use memory pools, or pre-allocated chunks instead.
+	When starting the cluster nodes, it should have an option to limit the amount of memory that it will use for data.  This memory will be pre-allocated into chunks and will be managed by the server to ensure that fragmentation does not occur.  To do this, we set aside chunks for similar sized objects.  Memcached does a similar thing.   Every malloc and free should be examined to see if it is possible to use memory pools, or pre-allocated chunks instead.
 	
 pause_resume
-	There may be certain instances where the entire cluster needs to be paused.
-	In those cases, the node will tell all the other nodes, that they need to pause.
-	This could be when resuming all the nodes
+	There may be certain instances where the entire cluster needs to be paused. In those cases, the node will tell all the other nodes, that they need to pause. This could be when resuming all the nodes
 
 server-multi-node-params
-	Change the server param handling so that a user can specify multiple nodes to 
-	connect to.  The server would only attempt to connect to the first one, but if 
-	that fails, try the second, etc.
+	Change the server param handling so that a user can specify multiple nodes to connect to.  The server would only attempt to connect to the first one, but if that fails, try the second, etc.
 	
 server-fail-startup-error
-	If the server fails to connect to the specified node on startup, it should fail 
-	immediately with a unique error code, so that wrapping scripts can then attempt to 
-	start the node connecting to different nodes.
+	If the server fails to connect to the specified node on startup, it should fail immediately with a unique error code, so that wrapping scripts can then attempt to start the node connecting to different nodes.
 	
-	
+delete-node
+	A cluster command (using command-control) to delete a node might be useful.  This should force teh node to exit the cluster (pushing all its buckets to the rest of the nodes, and when it no longer has any buckets, exit.  It should then force all the other nodes to forget about that node.	

@@ -28,9 +28,7 @@ static struct evconnlistener *_listener = NULL;
 
 
 
-//-----------------------------------------------------------------------------
-// accept an http connection.  Create the client object, and then attach the
-// file handle to it.
+// Accept a connection.  Create the client object, and then attach the socket handle to it.
 static void accept_conn_cb(
 	struct evconnlistener *listener,
 	evutil_socket_t fd,
@@ -54,6 +52,14 @@ static void accept_conn_cb(
 }
 
 
+// When a connection is made to another node, we need to increment this counter... even though the connection was not made through a listening socket.  This is because the server listener will reject new connections if our maximum connection count is reached.   This code should all be seperated or put in the 'client' codebase.
+void server_conn_inc(void)
+{
+	assert(_conncount >= 0);
+	_conncount ++;
+	assert(_conncount > 0);
+}
+
 // the server is being told that a client connection was closed, so that it can update its counters.
 void server_conn_closed(void)
 {
@@ -63,7 +69,6 @@ void server_conn_closed(void)
 }
 
 
-//-----------------------------------------------------------------------------
 // Listen for socket connections on a particular interface.
 void server_listen(struct event_base *evbase, conninfo_t *conninfo)
 {
@@ -128,17 +133,6 @@ void server_shutdown(void)
 		logger(LOG_INFO, "Stopping listening on: %s", remote_addr);
 	}
 }
-
-
-
-// void server_set_conninfo(conninfo_t *conninfo)
-// {
-// 	assert(_conninfo == NULL);
-// 	assert(conninfo);
-// 	
-// 	_conninfo = conninfo;
-// }
-
 
 
 conninfo_t * server_conninfo(void)

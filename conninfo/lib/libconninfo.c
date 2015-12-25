@@ -8,7 +8,7 @@
 
 
 char const *KEY_NAME = "name";
-char const *KEY_IP = "ip";
+char const *KEY_IP   = "ip";
 char const *KEY_PORT = "port";
 
 
@@ -18,6 +18,8 @@ static conninfo_t * conninfo_new(void)
 	assert(conninfo);
 	assert(conninfo->conninfo_str == NULL);
 	assert(conninfo->valid == 0);
+	assert(conninfo->name == NULL);
+	assert(conninfo->client_extract == NULL);
 	conninfo->refcount = 1;
 	return(conninfo);
 }
@@ -26,14 +28,11 @@ static conninfo_t * conninfo_new(void)
 void conninfo_free(conninfo_t *conninfo)
 {
 	assert(conninfo);
-
 	assert(conninfo->refcount > 0);
 	conninfo->refcount --;
 	
 	if (conninfo->refcount == 0) {
-	
 		if (conninfo->name) { free(conninfo->name); conninfo->name = NULL; }
-		if (conninfo->original) { free(conninfo->original); conninfo->original = NULL; }
 		if (conninfo->remote_addr) { free(conninfo->remote_addr); conninfo->remote_addr = NULL; }
 		if (conninfo->conninfo_str) { free(conninfo->conninfo_str); conninfo->conninfo_str = NULL; }
 		
@@ -66,6 +65,9 @@ char * conninfo_value_str(const conninfo_t *conninfo, const char *key)
 				value = strdup(data); 
 				assert(value);
 			}
+			else {
+				assert(value == NULL);
+			}
 		}
 		else if (json_is_integer(js)) {
 			// since we are after a string, we need to convert the integer to a string value.
@@ -86,9 +88,8 @@ char * conninfo_value_str(const conninfo_t *conninfo, const char *key)
 
 
 
-// return a string (that needs to be freed by the caller), that represents a raw lookup of the json 
-// data.  Only goes one level deep, anything trickier will need to be parsed from the json data 
-// itself externally.
+// return an integer that represents a raw lookup of the json data.  Only goes one level deep, 
+// anything trickier will need to be parsed from the json data itself externally.
 int conninfo_value_int(const conninfo_t *conninfo, const char *key)
 {
 	int value = 0;
@@ -132,7 +133,7 @@ static int extract_name(conninfo_t *conninfo)
 	return(valid);
 }
 
-
+// The remoteaddr entry is a virtual one, made up of two different entries.
 static int extract_remoteaddr(conninfo_t *conninfo)
 {
 	int valid = 0;
@@ -209,15 +210,28 @@ conninfo_t * conninfo_parse(const char *conninfo_str)
 	conninfo_t *conninfo = NULL;
 	
 	assert(conninfo_str);
+
+	conninfo = conninfo_new();
+	assert(conninfo);
 	
 	// load the string into a root json object.
-	assert(0);
-	
-	if (extract_data(conninfo) == 0) {
-		assert(0);
-		// the extraction failed.
+	assert(conninfo->root == NULL);
+	json_error_t error;
+	conninfo->root = json_loads(conninfo_str, 0, &error);
+
+	if (conninfo->root == NULL) {
+		// something happened loading the file.
 		conninfo_free(conninfo);
 		conninfo = NULL;
+	}
+	else {
+	
+		if (extract_data(conninfo) == 0) {
+			assert(0);
+			// the extraction failed.
+			conninfo_free(conninfo);
+			conninfo = NULL;
+		}
 	}
 	
 	return(conninfo);
@@ -247,6 +261,7 @@ conninfo_t * conninfo_load(const char *connfile)
 		conninfo = NULL;
 	}
 	else {
+		
 		// now we should have a loaded root file.
 		if (extract_data(conninfo) == 0) {
 			// failed to extract the required data.
@@ -293,8 +308,6 @@ conninfo_t * conninfo_loadf(FILE *fp)
 }
 
 
-
-
 // return the name of the node.   If no name was specified when the connect info was loaded, then 
 // it should have generated a hash of the details and used that.
 const char * conninfo_name(const conninfo_t *info)
@@ -303,7 +316,6 @@ const char * conninfo_name(const conninfo_t *info)
 	assert(info->name);
 	return(info->name);
 }
-
 
 
 // act like it is safely duplicating the conninfo object, but what it is really doing is simply increasing the refcount.
@@ -319,8 +331,8 @@ conninfo_t * conninfo_dup(conninfo_t *info)
 const char * conninfo_str(const conninfo_t *conninfo)
 {
 	assert(conninfo);
-	assert(conninfo->original);
-	return((const char *) conninfo->original);
+	assert(conninfo->conninfo_str);
+	return((const char *) conninfo->conninfo_str);
 }
 
 
@@ -339,9 +351,9 @@ int conninfo_compare_str(conninfo_t *conninfo, const char *str)
 {
 	assert(conninfo);
 	assert(str);
-	assert(conninfo->original);
+	assert(conninfo->conninfo_str);
 	
-	return(strcmp(conninfo->original, str));
+	return(strcmp(conninfo->conninfo_str, str));
 }
 
 
@@ -365,4 +377,36 @@ int conninfo_compare(const conninfo_t *first, const conninfo_t *second)
 	
 	return(strcmp(first->conninfo_str, second->conninfo_str));
 }
+
+
+// return a client version of the conninfo.  This is used by server nodes, to extract just the 
+// information that clients need to connect to the server.
+const char * conninfo_extract_client(conninfo_t *info)
+{
+	assert(info);
+
+	// verify the integrityof the conninfo_t instance we were given.
+	assert(0);
+	
+	// if extracted client data doesn't already exist, we need to generate it.
+	if (info->client_extract == NULL) {
+	
+		// make sure the conninfo is loaded.
+		assert(0);
+		
+		// create new json object.
+		assert(0);
+		
+		// extract the client side conninfo details and put into new json structure.  name, port, ip, public-key.
+		assert(0);
+		
+		// dump the json structure to a string that we store 
+		assert(0);
+	}
+	
+	// by now, we should have the client_extract.
+	assert(info->client_extract);
+	return(info->client_extract);
+}
+
 

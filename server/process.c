@@ -19,25 +19,7 @@
 
 
 
-/*
-static void process_ack(client_t *client, header_t *header)
-{
-	int active;
-	
-	assert(client);
-	assert(header);
-	
-	// if there are any special repcmds that we need to process, then we would add them here.  
 
-	if (header->repcmd == CMD_SERVERHELLO) {
-		active = node_active_inc();
-		logger(LOG_INFO, "Active cluster node connections: %d", active);
-	}
-}
-*/
-
-
-/*
 // check to see if this client has buckets we should promote.  
 // Return 0 if we did not switch, 1 if we did.
 static int attempt_switch(client_t *client) 
@@ -57,7 +39,7 @@ static int attempt_switch(client_t *client)
 		buckets_set_transferring(bucket, client);
 		
 		// we found a bucket we can promote, so we send out the command to start it.
-		push_control_bucket(client, bucket->hashmask, bucket->level);
+		push_control_bucket(client, buckets_mask(), bucket->hashmask, bucket->level);
 		
 		return(1);
 	}
@@ -65,44 +47,89 @@ static int attempt_switch(client_t *client)
 		return(0);
 	}
 }
-*/
 
 
 
 
+// generic function that accepts an OK response but doesn't have to do anything with it.
+static void process_quiet_ok(client_t *client, header_t *header, void *ptr, payload_t *request)
+{
+	assert(header->response_code == RESPONSE_OK);
+	assert(ptr == NULL);
+	assert(request);
+	
+	assert(request->length == 0);
+}
 
 
 
 
+static void process_serverhello_ok(client_t *client, header_t *header, void *ptr, payload_t *request)
+{
+	assert(header->command == COMMAND_SERVERHELLO);
+	assert(header->response_code == RESPONSE_OK);
+	assert(ptr == NULL);
+	assert(request);
+	assert(request->length == 0);
 
-/*
+	// Need to find the node that this client is referring to, so that we can mark it as active.
+	node_t *node = client->node;
+	assert(node);
+	
+	// Since we were sending a SERVER_HELLO to the node, it should be in a specific state.
+	assert(node->state == AUTHENTICATING);
+	
+	// Since we got an OK, then we change the state to READY.
+	node->state = READY;
+	
+	logger(LOG_INFO, "Active cluster node connections: %d", node_active_count());
+}
+
+
+
+static void process_serverhello_fail(client_t *client, header_t *header, void *ptr, payload_t *request)
+{
+	assert(header->command == COMMAND_SERVERHELLO);
+	assert(header->response_code == RESPONSE_FAIL);
+	assert(ptr == NULL);
+	assert(request);
+	assert(request->length == 0);
+
+	// the server responded with a fail.  Could be the 'auth' is wrong.  What do we do?   
+	// Might need to figure out which node this is (from the client), and then remove it from the list.
+	assert(0);
+}
+
+
+
 // this function is called when it receives a LOADLEVELS reply from a server node.  Based on that 
 // reply, and the state of this currrent node, we determine if we are going to try and send a bucket 
 // to that node or not.  If we are going to send the bucket to the node, we will send out a message 
 // to the node, indicating what we are going to do, and then we wait for a reply back.  Once we 
 // decide to send a bucket, we do not attempt to send buckets to any other node.
-static void process_loadlevels(client_t *client, header_t *header, void *ptr)
+static void process_loadlevels(client_t *client, header_t *header, void *ptr, payload_t *request)
 {
-	char *next;
-	int primary;
-	int backups;
-	int transferring;
-	bucket_t *bucket = NULL;
-	int switching = 0;
-	
 	assert(client);
 	assert(header);
 	assert(ptr);
+	assert(request);
 	
 	assert(client->node);
+	node_t *node = client->node;
+	assert(node->client == client);
 	
-	// point to the begining of the payload data.
-	next = ptr;
+	// we wouldn't have stored any extra data for this request, so original payload should be empty.
+	assert(request->length == 0);
 
 	// need to get the data out of the payload.
-	primary = data_int(&next);
-	backups = data_int(&next);
-	transferring = data_int(&next);
+	char *next = ptr;
+	int primary = data_int(&next);
+	int backups = data_int(&next);
+	int transferring = data_int(&next);
+
+	logger(LOG_DEBUG, "Received LoadLevel data from '%s'.  Primary:%d, Backups:%d, Transferring:%d", node_name(node), primary, backups, transferring); 
+	
+	int switching = 0;
 	
 	if (transferring == 0) {
 
@@ -111,7 +138,6 @@ static void process_loadlevels(client_t *client, header_t *header, void *ptr)
 		if ((buckets_get_primary_count()-1 >= buckets_get_secondary_count()+1) && (backups > primary)) {
 			if (attempt_switch(client) == 1) {
 				// we started a promotion process, so we dont need to continue.
-				assert(payload_length() == 0);
 				assert(switching == 0);
 				switching = 1;
 			}
@@ -120,50 +146,49 @@ static void process_loadlevels(client_t *client, header_t *header, void *ptr)
 		if (switching == 0) {
 		
 			assert(client->node);
-			logger(LOG_DEBUG, "Processing loadlevel data from: '%s'", node_name(client->node)); 
+			logger(LOG_DEBUG, "Processing loadlevel data from: '%s' (%d/%d)", node_name(node), primary, backups); 
 			
-			bucket = buckets_check_loadlevels(client, primary, backups);
+			bucket_t *bucket = buckets_check_loadlevels(client, primary, backups);
 				
 			if (bucket) {
-				// indicate which client is currently receiving a transfer.  This can be used if we 
-				// need to cancel the transfer for some reason (either shutting down, or we are 
-				// splitting the buckets)
-				assert(bucket->transfer_client == NULL);
-				bucket->transfer_client = client;
-				assert(client);
-
+				
 				assert(bucket->hashmask >= 0);
 				assert(client->node);
 				logger(LOG_DEBUG, "Migrating bucket #%#llx to '%s'", bucket->hashmask, node_name(client->node)); 
 
+				// indicate which client is currently receiving a transfer.  This can be used if we 
+				// need to cancel the transfer for some reason (either shutting down, or we are 
+				// splitting the buckets)
 				buckets_set_transferring(bucket, client);
 				
 				// We know what level this bucket is, but we dont need to tell the target node yet 
 				// because they dont need to know.  When we finalise the bucket migration we will 
 				// tell them what it is and what the other (backup or source)nodes are.
 				// So we dont tell them yet, we just send them the details of the bucket.
-				push_accept_bucket(client, bucket->hashmask);
+				push_accept_bucket(client, buckets_mask(), bucket->hashmask);
 			}
 		}
 	}
 }
-*/
 
 
 
 
-/*
+
+
 // the migration of the actual data for the bucket is complete, but now we need to complete the meta 
 // process as well.  If this bucket is a primary bucket with no backups, then we tell the client 
 // that it is a backup.   If we are a primary with backups, we need to tell the backup server that 
 // this client will be its new source.  If it is a backup copy, then we tell the primary to send 
 // backup data here.   Once we have started this process, we ignore any future SYNC data for this 
 // bucket, and we do not send out SYNC data to the backup nodes.
-static void finalize_migration(client_t *client, bucket_t *bucket) 
+static void finalize_migration(client_t *client) 
 {
 	conninfo_t *conninfo=NULL;
 	
 	assert(client);
+	
+	bucket_t *bucket = buckets_current_transfer();
 	assert(bucket);
 
 	if (bucket->level == 0) {
@@ -201,7 +226,7 @@ static void finalize_migration(client_t *client, bucket_t *bucket)
 			}
 			
 			assert(conninfo);
-			push_finalise_migration(client, bucket->hashmask, conninfo_str(conninfo), 1);
+			push_finalise_migration(client, buckets_mask(), bucket->hashmask, conninfo_str(conninfo), 1);
 		}
 		else if (bucket->backup_node) {
 			// we are sending a primary bucket.  
@@ -235,40 +260,24 @@ static void finalize_migration(client_t *client, bucket_t *bucket)
 	// when we get the appropriate replies:
 	// update the local hashmasks so we can inform clients who send data.
 	// Dont destroy the bucket until the new node has indicatedestroy the bucket.
+	assert(0);
 }
-*/
 
 
-/*
-static void send_transfer_items(bucket_t *bucket)
+
+
+static void send_transfer_items(client_t *client)
 {
-	int avail;
-	int items;
+	assert(client);
 	
-	assert(bucket);
-	assert(data_in_transit() >= 0);
-	assert(data_in_transit() <= TRANSIT_MIN);
-	assert(bucket->transfer_client);
-	assert(TRANSIT_MAX >= TRANSIT_MIN);
-	assert(TRANSIT_MIN >= 0);
-
-	avail = TRANSIT_MAX - data_in_transit();
-	
-	logger(LOG_DEBUG, "Requesting %d items to migrate.", avail);
-	
-	// ask the data system for a certain number of migrate items.
-	assert(bucket->data);
-	assert(avail > 0);
-	items = data_migrate_items(bucket->transfer_client, bucket->data, bucket->hashmask, avail);
-	if (items <= 0) {
+	int items = buckets_transfer_items(client);
+	assert(items >= 0);
+	if (items == 0) {
 		// there are no more items to migrate.
-		assert(bucket);
-		assert(bucket->transfer_client);
-		assert(data_in_transit() == 0);
-		finalize_migration(bucket->transfer_client, bucket);
+		finalize_migration(client);
 	}
 }
-*/
+
 
 
 /*
@@ -276,51 +285,61 @@ static void send_transfer_items(bucket_t *bucket)
  * this client.  This means that we first need to make a list of all the items that need to be sent.  
  * Then we need to send the first X messages (we send them in blocks).
  */
-/*
-static void process_accept_bucket(client_t *client, header_t *header, void *ptr)
+static void process_acceptbucket_ok(client_t *client, header_t *header, void *ptr, payload_t *request)
 {
-	char *next;
-	hash_t mask;
-	hash_t hash;
-	bucket_t *bucket;
-	
-	assert(client && header && ptr);
+	assert(client && header);
 	assert(client->node);
 	
-	next = ptr;
-
-	// need to get the data out of the payload.
-	mask = data_long(&next);
-	hash = data_long(&next);
-
-	logger(LOG_DEBUG, "Accept Bucket: current mask=%#llx, bucket mask=%#llx", _mask, mask);
+	// this command doesn't have any arguments provided in the message, so ptr should be NULL
+	assert(ptr == NULL);
 	
-	// get the bucket.
-	assert(_buckets);
-	assert(mask == _mask);
-	bucket = _buckets[hash];
-	assert(bucket);
-
-	assert(bucket->transfer_client == client);
-
-	// increment the migrate_sync counter which will help indicate which items have already been 
-	// sent or not.
-	assert(_migrate_sync >= 0);
-	_migrate_sync ++;
-	assert(_migrate_sync > 0);
+	// We need look at the original request to determine what this reply is about.
+	assert(request);
+	assert(request->length > 0);
+	assert(request->buffer);
 	
-	logger(LOG_DEBUG, "Setting Migration SYNC counter to: %d", _migrate_sync);
-
-	assert(data_in_transit() == 0);
+	char *next = request->buffer;
+	hash_t mask = data_long(&next);
+	hash_t hashmask = data_long(&next);
 	
-	// send the first queued item.
-	send_transfer_items(bucket);
+
+	if (buckets_send_bucket(client, mask, hashmask) == 1) {
+		// bucket is ok to send.
+		// send the first queued item.
+		send_transfer_items(client);
+	}
 }
-*/
+
+
+
+static void process_acceptbucket_fail(client_t *client, header_t *header, void *ptr, payload_t *request)
+{
+	assert(client && header);
+
+	assert(client && header);
+	assert(client->node);
+	
+	// this command doesn't have any arguments provided in the message, so ptr should be NULL
+	assert(ptr == NULL);
+	
+	// We need look at the original request to determine what this reply is about.
+	assert(request);
+	assert(request->length > 0);
+	assert(request->buffer);
+	
+	char *next = request->buffer;
+	hash_t mask = data_long(&next);
+	hash_t hashmask = data_long(&next);
+	
+
+	// what do we do if the bucket transfer failed?
+	assert(0);	
+}
+
 
 
 /*
-static void process_control_bucket_complete(client_t *client, header_t *header, void *ptr)
+static void process_control_bucket_complete(client_t *client, header_t *header, payload_t *request)
 {
 	char *next;
 	hash_t mask;
@@ -407,7 +426,7 @@ static void process_control_bucket_complete(client_t *client, header_t *header, 
  * The other node now has control of the bucket, so we can clean it up and remove it completely..
  */
 /*
-static void process_migration_ack(client_t *client, header_t *header, void *ptr)
+static void process_migration_ack(client_t *client, header_t *header, void *ptr, payload_t *request)
 {
 	char *next;
 	hash_t mask;
@@ -476,7 +495,7 @@ static void process_migration_ack(client_t *client, header_t *header, void *ptr)
 
 
 
-static void process_unknown(client_t *client, header_t *header)
+static void process_unknown(client_t *client, header_t *header, void *ptr, payload_t *request)
 {
 	assert(client);
 	assert(header);
@@ -496,7 +515,7 @@ static void process_unknown(client_t *client, header_t *header)
 
 
 /*
-static void process_sync_name_ack(client_t *client, header_t *header, void *ptr)
+static void process_sync_name_ack(client_t *client, header_t *header, void *ptr, payload_t *request)
 {
 	char *next;
 	hash_t hash;
@@ -528,7 +547,7 @@ static void process_sync_name_ack(client_t *client, header_t *header, void *ptr)
 
 
 /*
-static void process_sync_ack(client_t *client, header_t *header, void *ptr)
+static void process_sync_ack(client_t *client, header_t *header, void *ptr, payload_t *request)
 {
 	char *next;
 	hash_t hash;
@@ -563,7 +582,7 @@ static void process_sync_ack(client_t *client, header_t *header, void *ptr)
 
 
 /*
-static void process_migrate_name_ack(client_t *client, header_t *header, void *ptr)
+static void process_migrate_name_ack(client_t *client, header_t *header, void *ptr, payload_t *request)
 {
 	char *next;
 	hash_t hash;
@@ -594,7 +613,7 @@ static void process_migrate_name_ack(client_t *client, header_t *header, void *p
 */
 
 /*
-static void process_migrate_ack(client_t *client, header_t *header, void *ptr)
+static void process_migrate_ack(client_t *client, header_t *header, void *ptr, payload_t *request)
 {
 	char *next;
 	hash_t map;
@@ -635,13 +654,22 @@ static void process_migrate_ack(client_t *client, header_t *header, void *ptr)
 // Add the reply processor callbacks to the client list.
 void process_init(void) 
 {
-// 	client_add_reply(REPLY_ACK, process_ack);
+
+	client_add_response(COMMAND_LOADLEVELS,    RESPONSE_LOADLEVELS, process_loadlevels);
+	client_add_response(COMMAND_SERVERHELLO,   RESPONSE_OK,         process_serverhello_ok);
+	client_add_response(COMMAND_SERVERHELLO,   RESPONSE_FAIL,       process_serverhello_fail);
+
+	client_add_response(COMMAND_PING,          RESPONSE_OK,         process_quiet_ok);
+
+	client_add_response(COMMAND_ACCEPT_BUCKET, RESPONSE_OK,         process_acceptbucket_ok);
+	client_add_response(COMMAND_ACCEPT_BUCKET, RESPONSE_FAIL,       process_acceptbucket_fail);
+	
+	
+	
 // 	client_add_reply(REPLY_SYNC_NAME_ACK, process_sync_name_ack);
 // 	client_add_(REPLY_SYNC_ACK, process_sync_ack);
 // 	client_add_cmd(REPLY_MIGRATE_NAME_ACK, process_migrate_name_ack);
 // 	client_add_cmd(REPLY_MIGRATE_ACK, process_migrate_ack);
-// 	client_add_cmd(REPLY_LOADLEVELS, process_loadlevels);
-// 	client_add_cmd(REPLY_ACCEPTING_BUCKET, process_accept_bucket);
 // 	client_add_cmd(REPLY_CONTROL_BUCKET_COMPLETE, process_control_bucket_complete);
 // 	client_add_cmd(REPLY_MIGRATION_ACK, process_migration_ack);
 

@@ -6,7 +6,6 @@
 
 #include "constants.h"
 #include "item.h"
-#include "logging.h"
 #include "push.h"
 #include "server.h"
 #include "stats.h"
@@ -39,7 +38,7 @@ int _secondary_buckets = 0;
 
 // 0 if no buckets are currently being transferred, 1 if there is.  There can only be one transfer 
 // at a time.
-int _bucket_transfer = 0;
+bucket_t * _bucket_transfer = NULL;
 
 
 
@@ -657,7 +656,7 @@ void buckets_dump(void)
 	stat_dumpstr("  Buckets without backups: %d", _nobackup_buckets);
 	stat_dumpstr("  Primary Buckets: %d", _primary_buckets);
 	stat_dumpstr("  Secondary Buckets: %d", _secondary_buckets);
-	stat_dumpstr("  Bucket currently transferring: %s", _bucket_transfer == 0 ? "no" : "yes");
+	stat_dumpstr("  Bucket currently transferring: %s", _bucket_transfer == NULL ? "no" : "yes");
 	stat_dumpstr("  Migration Sync Counter: %d", _migrate_sync);
 
 	hashmasks_dump();
@@ -721,11 +720,11 @@ int buckets_get_secondary_count(void)
 }
 
 
-// return the number of buckets that are currently transferring (normally either 0 or 1).
+// return the number of buckets that are currently transferring.
 int buckets_transferring(void)
 {
-	assert(_bucket_transfer >= 0);
-	return(_bucket_transfer);
+	// return 0 if NULL.  non-zero if something is transferring.
+	return(_bucket_transfer != NULL);
 }
 
 
@@ -735,15 +734,15 @@ int buckets_accept_bucket(client_t *client, hash_t mask, hash_t hashmask)
 	int accepted = -1;
 	
 	assert(client);
-	assert(_mask > 0);
+	assert(mask > 0);
 	
-	if (_bucket_transfer != 0) {
+	if (_bucket_transfer) {
 		//  we are currently transferring another bucket, therefore we cannot accept another one.
 		logger(LOG_WARN, "cant accept bucket, already transferring one.");
 		accepted = 0;
 	}
 	else { 
-		assert(_bucket_transfer == 0);
+		assert(_bucket_transfer == NULL);
 		if (mask != _mask) {
 			// the masks are different, we cannot accept a bucket unless our masks match... which should 
 			// balance out once hashmasks have proceeded through all the nodes.
@@ -773,11 +772,9 @@ int buckets_accept_bucket(client_t *client, hash_t mask, hash_t hashmask)
 			else {
 				logger(LOG_INFO, "accepting bucket. (%#llx/%#llx)", mask, hashmask);
 				
-				assert(_bucket_transfer == 0);
-				_bucket_transfer = 1;
-				
 				// need to create the bucket, and mark it as in-transit.
 				bucket_t *bucket = bucket_new(hashmask);
+				assert(bucket);
 				_buckets[hashmask] = bucket;
 				assert(data_in_transit() == 0);
 				assert(bucket->transfer_client == NULL);
@@ -786,12 +783,53 @@ int buckets_accept_bucket(client_t *client, hash_t mask, hash_t hashmask)
 				bucket->transfer_client = client;
 				assert(bucket->level < 0);
 				accepted = 1;
+				
+				assert(_bucket_transfer == NULL);
+				_bucket_transfer = bucket;
 			}
 		}
 	}
 
 	assert(accepted == 0 || accepted == 1);
 	return(accepted);
+}
+
+
+// The client has accepted to receive the bucket.  Return 1, if this is acceptable.
+int buckets_send_bucket(client_t *client, hash_t mask, hash_t hashmask)
+{
+	int ok = 0;
+	
+	assert(client);
+
+	
+	if (hashmask > 0 && hashmask <= mask && mask == _mask) {
+	
+		// get the bucket.
+		assert(_buckets);
+		bucket_t *bucket = _buckets[hashmask];
+		assert(bucket);
+
+		if (bucket->level == 0 || bucket->level == 1) {
+			if (bucket->transfer_client == client) {
+
+				assert(data_in_transit() == 0);
+				
+				// increment the migrate_sync counter which will help indicate which items have already been 
+				// sent or not.
+				assert(_migrate_sync >= 0);
+				_migrate_sync ++;
+				assert(_migrate_sync > 0);
+				
+				logger(LOG_DEBUG, "Setting Migration SYNC counter to: %d", _migrate_sync);
+				
+				ok = 1;
+			}
+		}
+	}
+	
+	logger(LOG_DEBUG, "Accept Bucket: current mask=%#llx, bucket mask=%#llx, result=%d", _mask, mask, ok);
+	return(ok);
 }
 
 
@@ -866,7 +904,7 @@ void buckets_control_bucket(client_t *client, hash_t mask, hash_t hashmask, int 
 	bucket->secondary_node = node;
 		
 	// since this node is receiving the 'switch' command, we should not have any buckets transferring.
-	assert(_bucket_transfer == 0);
+	assert(_bucket_transfer == NULL);
 }
 
 
@@ -918,17 +956,28 @@ bucket_t * buckets_find_switchable(node_t *node)
 	assert(node);
 	assert(_buckets);
 	
+	logger(LOG_DEBUG, "buckets_find_switchable()");
+	
 	// go through all the buckets.
 	for (i=0; i<=_mask && bucket == NULL; i++) {
 		
+		logger(LOG_DEBUG, "buckets_find_switchable(): Checking bucket: %d", i);
+
 		// do we have this bucket?
 		if (_buckets[i]) {
+			
+			logger(LOG_DEBUG, "buckets_find_switchable(): Bucket Exists: %d", i);
 			
 			// are we primary?
 			if (_buckets[i]->level == 0) {
 				
+				logger(LOG_DEBUG, "buckets_find_switchable(): We are primary of: %d, backup_node=%#llx, node=%#llx", 
+					   i, _buckets[i]->backup_node, node );
+
 				// is this client the backup node for this bucket?
 				if (_buckets[i]->backup_node == node) {
+					assert(0);
+					logger(LOG_DEBUG, "buckets_find_switchable(): not backup node for the client: %d", i);
 					
 					// yes it is, we can promote this bucket.
 					bucket = _buckets[i];
@@ -937,6 +986,9 @@ bucket_t * buckets_find_switchable(node_t *node)
 			}
 		}
 	}
+
+	if (bucket == NULL) { logger(LOG_DEBUG, "buckets_find_switchable(): no buckets found"); }
+	
 	
 	return(bucket);
 }
@@ -945,14 +997,14 @@ bucket_t * buckets_find_switchable(node_t *node)
 
 
 
-void buckets_finalize_migration(client_t *client, hash_t hashmask, int level, const char *conninfo_str)
+void buckets_finalize_migration(client_t *client, hash_t hashmask, int level, conninfo_t *conninfo)
 {
 	bucket_t *bucket;
 	
 	assert(_mask > 0 && (hashmask >= 0 && hashmask <= _mask));
 	assert(client);
 	assert(level == 0 || level == 1);
-	assert(conninfo_str);
+	assert(conninfo);
 	
 	// ** some of these valumes should be checked at runtime
 	bucket = _buckets[hashmask];
@@ -963,13 +1015,12 @@ void buckets_finalize_migration(client_t *client, hash_t hashmask, int level, co
 	assert(bucket->backup_node == NULL);
 	assert(data_in_transit() == 0);
 	assert(bucket->transfer_event == NULL);
-	assert(_bucket_transfer == 1);
+	assert(_bucket_transfer);
 
 	assert(bucket->transfer_client == client);
 	assert(client);
 	assert(client->node);
 	logger(LOG_DEBUG, "Removing transfer client ('%s') from bucket %#llx.", node_name(client->node), bucket->hashmask);
-
 
 	bucket->transfer_client = NULL;
 		
@@ -977,9 +1028,9 @@ void buckets_finalize_migration(client_t *client, hash_t hashmask, int level, co
 	bucket->level = level;
 	if (level == 0) {
 		// we are receiving a primary bucket.  
-		if (conninfo_str) {
+		if (conninfo) {
 			assert(bucket->backup_node == NULL);
-			bucket->backup_node = node_find(conninfo_str);
+			bucket->backup_node = node_find(conninfo);
 			assert(bucket->backup_node);
 			assert(bucket->backup_node->client);
 		}
@@ -999,10 +1050,10 @@ void buckets_finalize_migration(client_t *client, hash_t hashmask, int level, co
 	}
 	else {
 		// we are receiving a backup bucket.  
-		assert(conninfo_str);
+		assert(conninfo);
 		
 		logger(LOG_DEBUG, "Setting source_node [%d]", __LINE__);
-		bucket->source_node = node_find(conninfo_str);
+		bucket->source_node = node_find(conninfo);
 		assert(bucket->source_node);
 		assert(bucket->source_node->client);
 
@@ -1034,16 +1085,16 @@ void buckets_set_transferring(bucket_t *bucket, client_t *client)
 	logger(LOG_DEBUG, "Setting transfer client ('%s') to bucket %#llx.", node_name(client->node), bucket->hashmask);
 	bucket->transfer_client = client;
 	
-	assert(_bucket_transfer == 0);
-	_bucket_transfer = 1;
+	assert(_bucket_transfer == NULL);
+	_bucket_transfer = bucket;
 }
 
 void buckets_clear_transferring(bucket_t *bucket)
 {
 	assert(bucket);
 	
-	assert(_bucket_transfer == 1);
-	_bucket_transfer = 0;
+	assert(_bucket_transfer == bucket);
+	_bucket_transfer = NULL;
 	
 	assert(bucket->transfer_client);
 	assert(bucket->transfer_client->node);
@@ -1134,7 +1185,8 @@ static bucket_t * choose_bucket_for_migrate(client_t *client, int primary, int b
 }
 
 
-
+// This function checks the list of buckets to find a suitable one to transfer if any need to be 
+// transferred to keep balance between this node, and the other node.
 bucket_t * buckets_check_loadlevels(client_t *client, int primary, int backups)
 {
 	bucket_t *bucket = NULL;
@@ -1143,21 +1195,30 @@ bucket_t * buckets_check_loadlevels(client_t *client, int primary, int backups)
 	assert(primary >= 0);
 	assert(backups >= 0);
 	
+	logger(LOG_DEBUG, "buckets_check_loadlevels(%d,%d): transferring=%s, mask=%#llx, no_backup_count=%d", 
+		   primary, backups, 
+		   _bucket_transfer == NULL ? "no" : "yes", 
+		   _mask, buckets_nobackup_count()); 
+	
 	// if the target node is not currently transferring, and we are not currently transferring
-	if (_bucket_transfer == 0) {
+	if (_bucket_transfer == NULL && _mask > 0) {
 
-			
 		// we havent sent anything yet, so now we need to check to see if we have any buckets 
 		// that do not have backup copies (we do not care about the ideal number of buckets, we 
 		// just need to make it a priority to get a second copy of these buckets out quick).
 		assert(bucket == NULL);
-		if (buckets_nobackup_count() > 0 && (primary+backups < _mask+1)) {
+		if (buckets_nobackup_count() > 0) {
+			bucket = buckets_nobackup_bucket();
+			assert(_bucket_transfer == NULL);
+		}
+
+		if (bucket == NULL) {
 			assert(client);
 			assert(client->node);
 			bucket = buckets_find_switchable(client->node);
-			assert(_bucket_transfer == 0);
+			assert(_bucket_transfer == NULL);
 		}
-	
+		
 		if (bucket == NULL) {
 			// we didn't find any buckets with no backup copies, so we need to see if there are any 
 			// other buckets we should migrate.
@@ -1170,10 +1231,12 @@ bucket_t * buckets_check_loadlevels(client_t *client, int primary, int backups)
 			assert(active > 0);
 			int ideal = ((_mask+1) *2) / active;
 			assert(ideal > 0);
-					
+
+			logger(LOG_DEBUG, "Checking bucket loadlevels.  mask:%d, active_nodes:%d, MIN_BUCKETS:%d, ideal:%d, Other Node(primary:%d, backups:%d)", _mask, active, MIN_BUCKETS, ideal, primary, backups); 
+			
 			if (ideal < MIN_BUCKETS) {
 				// the 'ideal' number of buckets for each node is less than the split threshold, so 
-				// we need to split our buckets to maintain integrity of the cluster.   
+				// we need to split our buckets to maintain integrity of the cluster.   However, 
 				
 				assert(bucket == NULL);
 				assert(0);
@@ -1189,5 +1252,31 @@ bucket_t * buckets_check_loadlevels(client_t *client, int primary, int backups)
 
 
 
+int buckets_transfer_items(client_t *client)
+{
+	assert(client);
+	assert(_bucket_transfer);
+	assert(_bucket_transfer->transfer_client == client);
+	
+	assert(TRANSIT_MAX >= TRANSIT_MIN && TRANSIT_MIN >= 0);
+	assert(data_in_transit() >= 0);
+	assert(data_in_transit() <= TRANSIT_MIN);
+
+	int avail = TRANSIT_MAX - data_in_transit();
+	
+	logger(LOG_DEBUG, "Requesting %d items to migrate.", avail);
+	
+	// ask the data system for a certain number of migrate items.
+	assert(_bucket_transfer->data);
+	assert(avail > 0);
+	int items = data_migrate_items(_bucket_transfer->transfer_client, _bucket_transfer->data, _bucket_transfer->hashmask, avail);
+	assert(items >= 0);
+	return(items);
+}
 
 
+
+bucket_t *buckets_current_transfer(void)
+{
+	return(_bucket_transfer);
+}

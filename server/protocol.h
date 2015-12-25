@@ -24,7 +24,6 @@
 #define COMMAND_SYNC_INT                    0x3000
 #define COMMAND_SYNC_STRING                 0x3010
 #define COMMAND_SYNC_KEYVALUE               0x3060
-#define COMMAND_SYNC_KEYVALUE_INT           0x3070
 
 
 

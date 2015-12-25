@@ -21,10 +21,10 @@ void push_ping(client_t *client)
 	assert(client->handle > 0);
 	assert(client->node);
 	
-	assert(payload_length() == 0);
+	PAYLOAD payload = payload_new(client, COMMAND_HASHMASK);
+	// no payload data needed.
 	
-	client_send_message(client, COMMAND_PING, 0, NULL, NULL);
-	assert(payload_length() == 0);
+	client_send_message(payload);
 }
 
 
@@ -34,7 +34,12 @@ void push_shuttingdown(client_t *client)
 {
 	assert(client);
 	assert(client->handle > 0);
-	client_send_message(client, COMMAND_SHUTTINGDOWN, 0, NULL, NULL);
+	PAYLOAD payload = payload_new(client, COMMAND_SHUTTINGDOWN);
+
+	// check payload meets protocol specifications.
+	assert(0);
+
+	client_send_message(payload);
 }
 
 
@@ -50,34 +55,32 @@ void push_hashmask(client_t *client, hash_t mask, hash_t hashmask, int level)
 	assert(hashmask >= 0 && hashmask <= mask);
 	assert(level == -1 || level == 0 || level == 1);
 
-	assert(payload_length() == 0);
-	payload_long(mask);			// mask
-	payload_long(hashmask);		// hash
-	payload_int(level);			// instance
+	PAYLOAD payload = payload_new(client, COMMAND_HASHMASK);
+	payload_long(payload, mask);			// mask
+	payload_long(payload, hashmask);		// hash
+	payload_int(payload, level);			// instance
 	
 	// we have a client, that seems to be connected.
 	logger(LOG_DEBUG, "sending HASHMASK: (%#llx/%#llx)", mask, hashmask);
-	client_send_message(client, COMMAND_HASHMASK, payload_length(), payload_ptr(), NULL);
-	
-	payload_clear();
+	client_send_message(payload);
 }
 
 
 // Pushes out a command to the specified client (which should be a cluster node), informing it that 
 // we are a cluster node also, that our interface is such and such.
-void push_serverhello(client_t *client, const char *conninfo_str)
+void push_serverhello(client_t *client, const char *conninfo_str, const char *server_auth)
 {
 	assert(client);
 	assert(client->handle > 0);
 	assert(conninfo_str);
+	assert(server_auth);
 	
-	assert(payload_length() == 0);
-	payload_string(conninfo_str);
+	PAYLOAD payload = payload_new(client, COMMAND_SERVERHELLO);
+	payload_string(payload, conninfo_str);
+	payload_string(payload, server_auth);
 	
 	logger(LOG_DEBUG, "SERVERHELLO sent to '%s'", node_name(client->node));
-	
-	client_send_message(client, COMMAND_SERVERHELLO, payload_length(), payload_ptr(), NULL);
-	payload_clear();
+	client_send_message(payload);
 }
 
 
@@ -87,13 +90,12 @@ void push_loadlevels(client_t *client)
 {
 	assert(client);
 	assert(client->handle > 0);
-	
-	assert(payload_length() == 0);
+
+	PAYLOAD payload = payload_new(client, COMMAND_LOADLEVELS);
+	// no params needed for this operation.
 	
 	logger(LOG_DEBUG, "sending LOADLEVELS");
-	
-	client_send_message(client, COMMAND_LOADLEVELS, 0, NULL, NULL);
-	assert(payload_length() == 0);
+	client_send_message(payload);
 }
 
 void push_accept_bucket(client_t *client, hash_t mask, hash_t hashmask)
@@ -103,14 +105,12 @@ void push_accept_bucket(client_t *client, hash_t mask, hash_t hashmask)
 	assert(mask > 0);
 	assert(hashmask >= 0 && hashmask <= mask);
 	
-	assert(payload_length() == 0);
-	payload_long(mask);
-	payload_long(hashmask);
+	PAYLOAD payload = payload_new(client, COMMAND_ACCEPT_BUCKET);
+	payload_long(payload, mask);
+	payload_long(payload, hashmask);
 	
 	logger(LOG_DEBUG, "sending ACCEPT_BUCKET: (%#llx/%#llx)", mask, hashmask);
-	
-	client_send_message(client, COMMAND_ACCEPT_BUCKET, payload_length(), payload_ptr(), NULL);
-	payload_clear();
+	client_send_message(payload);
 }
 
 
@@ -134,16 +134,13 @@ void push_control_bucket(client_t *client, hash_t mask, hash_t hashmask, int lev
 	assert(mask != 0);
 	assert(hashmask >= 0 && hashmask <= mask);
 	
-	assert(payload_length() == 0);
-	payload_long(mask);
-	payload_long(hashmask);
-	payload_int(level);
+	PAYLOAD payload = payload_new(client, COMMAND_CONTROL_BUCKET);
+	payload_long(payload, mask);
+	payload_long(payload, hashmask);
+	payload_int(payload, level);
 	
 	logger(LOG_DEBUG, "CONTROL_BUCKET(bucket:%#llx)", hashmask);
-	
-	assert(payload_length() > 0);
-	client_send_message(client, COMMAND_CONTROL_BUCKET, payload_length(), payload_ptr(), NULL);
-	payload_clear();
+	client_send_message(payload);
 }
 
 
@@ -156,17 +153,15 @@ void push_finalise_migration(client_t *client, hash_t mask, hash_t hashmask, con
 	assert(hashmask >= 0 && hashmask <= mask);
 	assert(conninfo);
 	
-	assert(payload_length() == 0);
-	payload_long(mask);
-	payload_long(hashmask);
-	payload_int(level);
-	payload_string(conninfo);
+	PAYLOAD payload = payload_new(client, COMMAND_FINALISE_MIGRATION);
+	payload_long(payload, mask);
+	payload_long(payload, hashmask);
+	payload_int(payload, level);
+	payload_string(payload, conninfo);
 	
 	logger(LOG_DEBUG, "FINALISE_MIGRATION(bucket:%#llx)", hashmask);
 	
-	assert(payload_length() > 0);
-	client_send_message(client, COMMAND_FINALISE_MIGRATION, payload_length(), payload_ptr(), NULL);
-	payload_clear();
+	client_send_message(payload);
 }
 
 
@@ -174,43 +169,38 @@ void push_finalise_migration(client_t *client, hash_t mask, hash_t hashmask, con
 
 void push_sync_item(client_t *client, item_t *item)
 {
-	int cmd = 0;
-	
 	assert(client);
 	assert(client->handle > 0);
 	
 	assert(item);
 	assert(item->value);
-	
-	assert(payload_length() == 0);
-	payload_long(item->map_key);
-	payload_long(item->item_key);
 
-	// The expires we store is the time in seconds that it will expire.  But the remote host might 
-	// have a different time, so we need to send the amount of seconds that are remaining on the expiry.
-	if (item->expires == 0) {
-		payload_int(0);
-	} else {
-		payload_int(item->expires - seconds_get());
+	int expires = 0;
+	if (item->expires > 0) {
+		expires = item->expires - seconds_get();
 	}
 	
 	if (item->value->type == VALUE_LONG) {
-		cmd = COMMAND_SYNC_INT;
-		payload_long(item->value->data.l);
+		PAYLOAD payload = payload_new(client, COMMAND_SYNC_INT);
+		payload_long(payload, item->map_key);
+		payload_long(payload, item->item_key);
+		payload_int(payload, expires);
+		payload_long(payload, item->value->data.l);
 		logger(LOG_DEBUG, "sending SYNC_INT: (%#llx:%#llx, %ld)", item->map_key, item->item_key, item->value->data.l);
+		client_send_message(payload);
 	}
 	else if (item->value->type == VALUE_STRING) {
-		cmd = COMMAND_SYNC_STRING;
-		payload_data(item->value->data.s.length, item->value->data.s.data);
+		PAYLOAD payload = payload_new(client, COMMAND_SYNC_INT);
+		payload_long(payload, item->map_key);
+		payload_long(payload, item->item_key);
+		payload_int(payload, expires);
+		payload_data(payload, item->value->data.s.length, item->value->data.s.data);
 		logger(LOG_DEBUG, "sending SYNC_STRING: (%#llx:%#llx)", item->map_key, item->item_key);
+		client_send_message(payload);
 	}
 	else {
 		assert(0);
 	}
-	
-	assert(cmd > 0);
-	client_send_message(client, cmd, payload_length(), payload_ptr(), NULL);
-	payload_clear();
 }
 
 
@@ -221,28 +211,13 @@ void push_sync_keyvalue(client_t *client, hash_t keyhash, int length, char *keyv
 	assert(length > 0);
 	assert(keyvalue);
 	
-	assert(payload_length() == 0);
-	payload_long(keyhash);
-	payload_data(length, keyvalue);
+	PAYLOAD payload = payload_new(client, COMMAND_SYNC_KEYVALUE);
+	payload_long(payload, keyhash);
+	payload_int(payload, 0);
+	payload_data(payload, length, keyvalue);
 	logger(LOG_DEBUG, "sending SYNC_KEYVALUE: (%#llx)", keyhash);
-	client_send_message(client, COMMAND_SYNC_KEYVALUE, payload_length(), payload_ptr(), NULL);
-	payload_clear();
+	client_send_message(payload);
 }
-
-
-void push_sync_keyvalue_int(client_t *client, hash_t keyhash, long long int_key)
-{
-	assert(client);
-	assert(client->handle > 0);
-	
-	assert(payload_length() == 0);
-	payload_long(keyhash);
-	payload_long(int_key);
-	logger(LOG_DEBUG, "sending SYNC_NAME_INT: (%#llx:%ld)", keyhash, int_key);
-	client_send_message(client, COMMAND_SYNC_KEYVALUE_INT, payload_length(), payload_ptr(), NULL);
-	payload_clear();
-}
-
 
 
 

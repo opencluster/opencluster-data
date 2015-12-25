@@ -5,6 +5,7 @@
 #include "event-compat.h"
 #include "logging.h"
 #include "push.h"
+#include "server.h"
 #include "stats.h"
 #include "timeout.h"
 
@@ -21,10 +22,13 @@ typedef enum {
 
 static startup_state _startup = INIT;
 
+char * _node_state_str[] = { "UNKNOWN", "INITIALIZED", "CONNECTING", "AUTHENTICATING", "AUTHENTICATED", "READY" };
+
+
 static node_t **_nodes = NULL;
 static int _node_count = 0;
 
-static int _active_nodes = 0;
+// static int _active_nodes = 0;
 
 static struct event_base *_evbase = NULL;
 
@@ -32,6 +36,34 @@ static struct event_base *_evbase = NULL;
 static void node_wait_handler(int fd, short int flags, void *arg);
 static void node_loadlevel_handler(int fd, short int flags, void *arg);
 
+conninfo_t *_this_conninfo = NULL;
+
+
+
+void nodes_init(struct event_base evbase, conninfo_t conninfo)
+{
+	// attempt to connect to the other known nodes in the cluster.
+	nodes_set_evbase(evbase);
+
+	// let the nodes-subsystem know what the conninfo is for this node.
+	nodes_set_master_conninfo(conninfo);
+	
+	// If we dont have any nodes configured, then we must be starting a new cluster.
+	if (node_count() == 0) {
+		
+		// startup new cluster.
+		assert(_evbase);
+		buckets_init(STARTING_MASK, _evbase);
+		logger(LOG_INFO, "Created New Cluster: %d buckets", buckets_get_primary_count() + buckets_get_secondary_count());
+	}
+
+	node_connect_start();
+
+	
+	// now start the timed event to handle the rest.
+	assert(0);
+	
+}
 
 
 // get a new empty node object.
@@ -81,6 +113,8 @@ static node_t * node_new(conninfo_t *conninfo)
 	node->conninfo = conninfo;
 	node->state = INITIALIZED;
 
+	logger(LOG_DEBUG, "New node object created for '%s'", node_name(node));
+	
 	// add the node to the list of nodes, so that we can iterate through them when we need to.
 	node_alloc(node);
 
@@ -114,64 +148,34 @@ node_t * node_new_file(const char *filename)
 }
 
 
-node_t * node_add(client_t *client, char *connect_info)
+node_t * node_add(client_t *client, conninfo_t *conninfo)
 {
 	node_t *node = NULL;
 
 	assert(client);
-	assert(connect_info);
+	assert(conninfo);
 	
 	// first need to go through the list to find out if thise node is already there.
-	node = node_find(connect_info);
-	if (node == NULL) {
-		
-		conninfo_t *conninfo = conninfo_parse(connect_info);
-		if (conninfo) {
-		
-			node = node_new(conninfo);
-			assert(node);
-			assert(node->client == NULL);
-			node->client = client;
-			
-			assert(client->node == NULL);
-			client->node = node;
-				
-			_active_nodes ++;
-			assert(_active_nodes > 0);
-			
-			logger(LOG_INFO, "Added new node from client: %s", conninfo_name(conninfo));
-		}
-		else {
-			logger(LOG_ERROR, "Unable to add new node from client: %s", connect_info);
-		}
+	node = node_find(conninfo);
+	if (node) {
+		logger(LOG_INFO, "Node '%s' is already in the node list.", conninfo_name(conninfo));
 	}
+	else {
+		node = node_new(conninfo);
+		assert(node);
+		assert(node->client == NULL);
+		node->client = client;
+		
+		assert(client->node == NULL);
+		client->node = node;
+			
+		logger(LOG_INFO, "Added new node from client: %s", conninfo_name(conninfo));
+	}
+	
 
 	assert(node);
 	return(node);
 }
-
-
-
-
-// we have a node that contains a pointer to the client object.  For whatever reason, we need to 
-// clear that.
-void node_detach_client(node_t *node)
-{
-
-	// if we have a loadlevel event set for this node, then we need to cancel it.
-	if (node->loadlevel_event) {
-		event_free(node->loadlevel_event);
-		node->loadlevel_event = NULL;
-	}
-	
-	assert(node->client);
-	node->client = NULL;
-	assert(_active_nodes > 0);
-	_active_nodes --;
-	assert(_active_nodes >= 0);
-
-}
-
 
 
 static void node_connect_handler(int fd, short int flags, void *arg)
@@ -246,11 +250,16 @@ static void node_connect_handler(int fd, short int flags, void *arg)
 			node->state = AUTHENTICATING;
 			
 			// should send a SERVERHELLO command to the server we've connected to.
-			assert(node->conninfo);
-			push_serverhello(node->client, conninfo_str(node->conninfo));
+			assert(_this_conninfo);
+			assert(_auth);
+			push_serverhello(node->client, conninfo_str(_this_conninfo), _auth);
 		}	
 	}	
 }
+
+
+
+
 
 
 
@@ -295,6 +304,9 @@ static void node_connect(node_t *node)
 	assert(result < 0);
 	assert(errno == EINPROGRESS);
 
+	// tell the server that we have created a new socket, since it needs to keep track of how many 
+	// open connections we have.
+	server_conn_inc();
 		
 	logger(LOG_INFO, "Attempting to connect to node: %s", node_name(node));
 	
@@ -308,6 +320,29 @@ static void node_connect(node_t *node)
 	assert(node->connect_event);
 	
 	node->state = CONNECTING;
+}
+
+
+
+
+
+
+
+// we have a node that contains a pointer to the client object.  For whatever reason, we need to 
+// clear that.
+void node_detach_client(node_t *node)
+{
+	// if we have a loadlevel event set for this node, then we need to cancel it.
+	if (node->loadlevel_event) {
+		event_free(node->loadlevel_event);
+		node->loadlevel_event = NULL;
+	}
+	
+	node->client = NULL;
+	node->state = INITIALIZED; 
+	
+	// need to set a timeout to re-establish the connection to the node.
+	node_connect(node);
 }
 
 
@@ -358,12 +393,12 @@ void node_retry(node_t *node)
 
 
 
-node_t * node_find(const char *conninfo_str)
+node_t * node_find(conninfo_t *conninfo)
 {
 	int i;
 	node_t *node = NULL;
 	
-	assert(conninfo_str);
+	assert(conninfo);
 	
 	for (i=0; i<_node_count && node == NULL; i++) {
 		
@@ -374,10 +409,7 @@ node_t * node_find(const char *conninfo_str)
 			assert(_nodes[i]->client);
 			assert(_nodes[i]->conninfo);
 			
-			// when conninfo string is loaded it needs to be compressed to remove unnecessary 
-			// elements, and then the resulting string needs to be hashed, and that value is what 
-			// needs to be compared.
-			if (conninfo_compare_str(_nodes[i]->conninfo, conninfo_str) == 0) {
+			if (conninfo_compare(_nodes[i]->conninfo, conninfo) == 0) {
 				node = _nodes[i];
 			}
 		}
@@ -385,10 +417,6 @@ node_t * node_find(const char *conninfo_str)
 	
 	return(node);
 }
-
-
-
-
 
 
 
@@ -414,27 +442,21 @@ void node_loadlevel_handler(int fd, short int flags, void *arg)
 
 
 
-int node_active_inc(void)
-{
-	assert(_active_nodes >= 0);
-	_active_nodes++;
-	assert(_active_nodes > 0);
-	return(_active_nodes);
-}
-
-
-int node_active_dec(void)
-{
-	assert(_active_nodes > 0);
-	_active_nodes--;
-	assert(_active_nodes >= 0);
-	return(_active_nodes);
-}
-
+// Go through the list of nodes, to determine which ones are in a current active state.
 int node_active_count(void)
 {
-	assert(_active_nodes >= 0);
-	return(_active_nodes);
+	int i;
+	int count=0;
+	for (i=0; i<_node_count; i++) {
+		if (_nodes[i]) {
+			if (_nodes[i]->state == READY) {
+				count++;
+			}
+		}
+	}
+	
+	assert(count >= 0);
+	return(count);
 }
 
 
@@ -451,16 +473,19 @@ void node_connect_start(void)
 	assert(_nodes);
 	assert(_node_count >= 0);
 	for (i=0; i<_node_count; i++) {
-		logger(LOG_DEBUG, "Starting connect for entry: %d/%d", i, _node_count);
 		assert(_nodes);
 		if (_nodes[i]) {
-			logger(LOG_DEBUG, "node exists: %d", i);
 			assert(_nodes[i]->conninfo);
 			assert(_nodes[i]->client == NULL);
 			assert(_nodes[i]->state == INITIALIZED);
 			logger(LOG_DEBUG, "Attempting connect: %d", i);
 			node_connect(_nodes[i]);
 		}
+	}
+
+	// if we didn't have any other node connections to setup, then we can startup the client server.
+	if (_node_count == 0) {
+		client_start(conninfo);
 	}
 }
 
@@ -502,7 +527,6 @@ static void node_free(node_t *node)
 static void node_shutdown_handler(evutil_socket_t fd, short what, void *arg) 
 {
 	node_t *node = arg;
-	int i;
 	
 	assert(fd == -1 && arg);
 	assert(node);
@@ -522,6 +546,7 @@ static void node_shutdown_handler(evutil_socket_t fd, short what, void *arg)
 		// if we can, remove the node from the nodes list.
 		if (node->client) {
 			// the client is still connected.  We need to wait for it to disconnect.
+			assert(0);
 		}
 		else {
 			node_free(node);
@@ -549,11 +574,15 @@ static void node_dump(int index, node_t *node)
 {
 	assert(node);
 
-	stat_dumpstr("    [%02d] '%s', Connected=%s, Connect_attempts=%d", 
+	assert(node->state < sizeof(_node_state_str));
+	
+	stat_dumpstr("    [%02d] '%s', Connected=%s, Connect_attempts=%d, State=%s", 
 				 index, 
 				 node_name(node), 
 				 node->client ? "yes" : "no", 
-				 node->connect_attempts);
+				 node->connect_attempts,
+				 _node_state_str[node->state]
+				);
 }
 
 
@@ -563,7 +592,7 @@ void nodes_dump(void)
 	int i;
 	
 	stat_dumpstr("NODES");
-	stat_dumpstr("  Active Nodes: %d", _active_nodes);
+	stat_dumpstr("  Active Nodes: %d", node_active_count());
 	
 	if (_node_count > 0) {
 		stat_dumpstr(NULL);
@@ -609,3 +638,35 @@ int node_count(void)
 }
 
 
+void nodes_setauth(const char *auth)
+{
+	assert(_auth == NULL);
+	_auth = auth;
+	
+	logger(LOG_INFO, "Setting node authentication.");
+
+}
+
+
+// start the node loadlevel timer.  This timer will fire frequently to check the load on the other 
+// nodes in the system.
+void node_start_loadlevel(node_t *node)
+{
+	assert(node);
+	
+	assert(node->loadlevel_event == NULL);
+	assert(_evbase);
+	node->loadlevel_event = evtimer_new(_evbase, node_loadlevel_handler, (void *) node);
+	assert(node->loadlevel_event);
+	evtimer_add(node->loadlevel_event, &_timeout_node_loadlevel);
+}
+
+
+
+void nodes_set_master_conninfo(conninfo_t *conninfo) 
+{
+	assert(_this_conninfo == NULL);
+	assert(conninfo);
+	
+	_this_conninfo = conninfo;
+}

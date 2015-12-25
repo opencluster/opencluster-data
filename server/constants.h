@@ -14,6 +14,10 @@
 #define INVALID_HANDLE -1
 #endif
 
+// default config file, if it is not otherwise specified.
+#define DEFAULT_CONFIGFILE "/etc/opencluser/opencluster.conf"
+
+
 // client protocol header size in bytes.
 #define HEADER_SIZE 12
 

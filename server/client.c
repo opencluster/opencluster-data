@@ -1,15 +1,12 @@
 // client.c
 
-#define __CLIENT_C
 #include "client.h"
-#undef __CLIENT_C
 
-
+#include "bucket.h"
 #include "commands.h"
 #include "constants.h"
 #include "header.h"
 #include "logging.h"
-#include "messages.h"
 #include "node.h"
 #include "process.h"
 #include "protocol.h"
@@ -19,8 +16,6 @@
 #include "timeout.h"
 
 #include <assert.h>
-#include <ctype.h>
-#include <endian.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -67,7 +62,7 @@ static struct event_base *_evbase = NULL;
 
 
 
-void client_init_commands(int max)
+void clients_init_commands(int max)
 {
 	assert(_commands == NULL);
 	assert(_command_max == 0);
@@ -167,7 +162,7 @@ void client_add_special(int code, void *fn)
 }
 
 
-void client_cleanup(void)
+void clients_cleanup(void)
 {
 	int i;
 	for (i=0; i<_command_max; i++) {
@@ -204,6 +199,7 @@ client_t * client_new(void)
 	assert(client);
 	
 	client->handle = INVALID_HANDLE;
+	client->node = NULL;
 	
 	client->read_event = NULL;
 	client->write_event = NULL;
@@ -262,7 +258,6 @@ client_t * client_new(void)
 
 //--------------------------------------------------------------------------------------------------
 // Initialise the client structure.
-// If 'server' is NULL, then this is probably a connection to another NODE in the cluster.
 void client_accept(client_t *client, evutil_socket_t handle, struct sockaddr *address, int socklen)
 {
 	assert(client);
@@ -390,18 +385,31 @@ static int process_data(client_t *client)
 	raw_header_t *raw;
 
 	void (*func_cmd)(client_t *client, header_t *header, char *payload);
-	void (*func_response)(client_t *client, header_t *header, char *payload, char *data);
+	void (*func_response)(client_t *client, header_t *header, char *payload, payload_t *request);
 	
 	assert(sizeof(char) == 1);
 	assert(sizeof(short int) == 2);
 	assert(sizeof(int) == 4);
 	assert(sizeof(long long) == 8);
+	assert(HEADER_SIZE == sizeof(raw_header_t));
 	
 	assert(client);
 	assert(client->handle > 0);
 
+	#ifndef NDEBUG
+	int cycle_count = 0;
+	#endif
+	
 	while (stopped == 0) {
-			
+
+		#ifndef NDEBUG
+		cycle_count++;
+		logger(LOG_DEBUG, "[process_data] cycle_count=%d", cycle_count);
+		#endif
+		
+		logger(LOG_DEBUG, "[process_data] in.length=%d, in.offset=%d, in.max=%d",
+			   client->in.length, client->in.offset, client->in.max);
+		
 		assert(client->in.buffer);
 		assert((client->in.length + client->in.offset) <= client->in.max);
 		
@@ -437,14 +445,17 @@ static int process_data(client_t *client)
 						header.userid, header.length, client->in.length);
 				
 				// get a pointer to the payload
-				ptr = client->in.buffer + client->in.offset + HEADER_SIZE;
-				assert(ptr);
+				if (header.length == 0) { ptr = NULL; }
+				else { 
+					ptr = client->in.buffer + client->in.offset + HEADER_SIZE;
+					assert(ptr);
+				}
 
 				if (header.command >= _command_max || _commands[header.command] == NULL) {
 
 					if (header.response_code == 0) {
 						logger(LOG_ERROR, "Unknown command received: Command=%d, userid=%d, length=%d", header.command, header.userid, header.length);
-									client_send_reply(client, &header, RESPONSE_UNKNOWN, 0, NULL);
+									client_send_reply(client, &header, RESPONSE_UNKNOWN, NO_PAYLOAD);
 					}
 					else {
 						logger(LOG_ERROR, "Unknown reply: Reply=%d, Command=%d, userid=%d, length=%d", 
@@ -457,7 +468,7 @@ static int process_data(client_t *client)
 
 					#ifndef NDEBUG
 					assert(0);
-					#endif							
+					#endif
 				}
 				else {
 
@@ -483,38 +494,56 @@ static int process_data(client_t *client)
 					}
 					else {
 					
-						// this is a response code.   We need to lookup the UserID for this client to find the stored data for this message.
-						void *data = message_get(client, header.userid, header.command);
-						
-						assert(func_response == NULL);
-						int i;
-						for (i=0; i<_commands[header.command]->max && func_response==NULL; i++) {
-							assert(_commands[header.command]->handlers[i].code >= 0);
-							if (_commands[header.command]->handlers[i].code == header.response_code) {
-								func_response = _commands[header.command]->handlers[i].fn;
-								assert(func_response);
-								(*func_response)(client, &header, ptr, data);
-							}
-						}
-						
-						if (func_response == NULL) {
-							// no function was found, but if there are special responses, such as 'tryelsewhere' and 'unknown'... these can be returned from any command.
-							assert(0);
+						payload_t *payload = payload_get_verify(header.userid, header.command, client);
+						assert(payload);
+						if (payload) {
+							assert(payload->command == header.command);
+							
+							// we got a reply to something, so we need to reduce the count of pending.
+							assert(client->pending > 0);
+							client->pending --;
+							assert(client->pending >= 0);
+							
+							// TODO: This for loop can be optimised by having a lookup array by command 
+							// instead of an iterative list.  This would use up more memory, but would 
+							// be much faster.   On the other hand, at any point in time, this list 
+							// should not be large.
 							
 							assert(func_response == NULL);
 							int i;
-							for (i=0; i<_special_max && func_response == NULL; i++) {
-								if (_specials[i].code == header.response_code) {
-									assert(_specials[i].fn);
-									func_response = _specials[i].fn;
-									(*func_response)(client, &header, ptr, data);
+							for (i=0; i<_commands[header.command]->max && func_response==NULL; i++) {
+								assert(_commands[header.command]->handlers[i].code >= 0);
+								if (_commands[header.command]->handlers[i].code == header.response_code) {
+									func_response = _commands[header.command]->handlers[i].fn;
+									assert(func_response);
+									(*func_response)(client, &header, ptr, payload);
 								}
 							}
 							
-							// we should have handled the specials.  If we still didnt find something to handle it, then our implementation of the protocol is broken.
-							assert(func_response);
+							if (func_response == NULL) {
+								// no function was found, but if there are special responses, such as 'tryelsewhere' and 'unknown'... these can be returned from any command.
+								assert(0);
+								
+								assert(func_response == NULL);
+								int i;
+								for (i=0; i<_special_max && func_response == NULL; i++) {
+									if (_specials[i].code == header.response_code) {
+										assert(_specials[i].fn);
+										func_response = _specials[i].fn;
+										(*func_response)(client, &header, ptr, payload);
+									}
+								}
+								
+								// we should have handled the specials.  If we still didnt find something to handle it, then our implementation of the protocol is broken.
+								assert(func_response);
+							}
+							
+							// release the payload.
+							payload_release(header.userid);
 						}
-					}
+						
+						func_response = NULL;
+					}	
 				}
 				
 				// need to adjust the details of the incoming buffer.
@@ -742,6 +771,9 @@ static void send_data(client_t *client, raw_header_t *rawheader, int length, voi
 	client->out.length += (sizeof(raw_header_t) + length);
 	
 	// if the clients write-event is not set, then set it.
+	// *** For data throughput performance, it may be better to attempt to send the data straight 
+	//     away if a write-event hasn't been set, and if the write fails, then set an event.  This 
+	//     will only work on non-blocking sockets though.
 	assert(client->out.length > 0);
 	if (client->write_event == NULL) {
 		assert(_evbase);
@@ -753,48 +785,74 @@ static void send_data(client_t *client, raw_header_t *rawheader, int length, voi
 }
 
 
-void client_send_message(client_t *client, short command, int length, void *payload, void *data)
+void client_send_message(PAYLOAD payload_id)
 {
+	assert(payload_id >= 0);
+	
+	payload_t *payload = payload_get(payload_id);
+	assert(payload);
+	assert(payload->used > 0);
+	assert(payload->length >= 0);
+	assert(payload->length <= payload->max);
+	assert(payload->buffer);
+	assert(payload->command > 0);
+	
 	raw_header_t raw;
-	int userid;
-	
-	assert(client);
-	assert(command > 0);
-	assert((length == 0 && payload == NULL) || (length > 0 && payload));
-	
-	// when sending a message, we need to save a copy of the specifics.  we will also take a void ptr that we will keep till the response is received.
-	userid = message_set(client, command, data);
-	assert(userid >= 0);
-	
-	raw.command = htobe16(command);
+	raw.command = htobe16(payload->command);
 	raw.response_code = 0;
-	raw.userid = htobe32(userid);
-	raw.length = htobe32(length);
-
-	send_data(client, &raw, length, payload);
+	raw.userid = htobe32(payload_id);
+	raw.length = htobe32(payload->length);
+	
+	client_t *client = payload->client;
+	assert(client);
+	assert(client->pending >= 0);
+	client->pending++;
+	assert(client->pending > 0);
+	
+	send_data(client, &raw, payload->length, 
+		payload->length > 0 ? payload->buffer : NULL );
 }
 
 
 // add a reply to the clients outgoing buffer.  If a 'write' event isnt 
 // already set, then set one so that it can begin sending out the data.
-void client_send_reply(client_t *client, header_t *header, short code, int length, void *payload)
+// Note that the payload_id here is a new payload for the reply, not the original payload from the query.
+void client_send_reply(client_t *client, header_t *header, short code, PAYLOAD payload_id)
 {
-	raw_header_t raw;
-	
 	assert(client);
 	assert(header);
 	assert(code > 0);
-	assert((length == 0 && payload == NULL) || (length > 0 && payload));
+
+	int length = 0;
+	void *ptr = NULL;
 	
+	if (payload_id >= 0) {
+		// we can only assume that the payload index we are given is correct.  
+		payload_t *payload = payload_get(payload_id);
+		assert(payload);
+		assert(payload->length >= 0);
+		
+		length = payload->length;
+		if (length > 0) {
+			ptr = payload->buffer;
+		}
+	}
+		
 	assert(sizeof(raw_header_t) == HEADER_SIZE);
 
 	// build the raw header.
+	raw_header_t raw;
 	raw.command = htobe16(header->command);
 	raw.response_code = htobe16(code);
 	raw.userid = htobe32(header->userid);
 	raw.length = htobe32(length);
 
-	send_data(client, &raw, length, payload);
+	send_data(client, &raw, length, ptr);
+
+	if (payload_id >= 0) {
+		// since this is a reply, we are not going to need the payload again, so we can release it now.
+		payload_release(payload_id);
+	}
 }
 
 
@@ -878,97 +936,6 @@ static void write_handler(int fd, short int flags, void *arg)
 
 
 
-// This function will return a pointer to the internal data.  It will also 
-// update the length variable to indicate the length of the string.  It will 
-// increase the 'next' to point to the next potential field in the payload.  
-// If there is no more data in the payload, you will need to check that yourself
-char * data_string(char **data, int *length)
-{
-	char *str;
-	int *ptr;
-	
-	assert(data);
-	assert(*data);
-	assert(length);
-	
-	ptr = (void*) *data;
-	*length = be32toh(ptr[0]);
-	str = *data + sizeof(int);
-	*data += (sizeof(int) + *length);
-
-	return(str);
-}
-
-
-char * data_string_copy(char **data) 
-{
-	char *s;
-	char *sal;
-	int length = 0;
-	
-	assert(data);
-	assert(*data);
-	
-	s = data_string(data, &length);
-	assert(s);
-	assert(length >= 0);
-	
-	if (length == 0) return NULL;
-	else {
-		sal = malloc(length + 1);
-		memcpy(sal, s, length);
-		sal[length] = 0;
-		return (sal);
-	}
-}
-
-
-// This function will return a pointer to the internal data.  It will also update the length 
-// variable to indicate the length of the string.  It will increase the 'next' to point to the next 
-// potential field in the payload.  If there is no more data in the payload, you will need to check 
-// that yourself
-int data_int(char **data)
-{
-	int *ptr;
-	int value;
-	
-	assert(data);
-	assert(*data);
-	
-	ptr = (void*) *data;
-	value = be32toh(ptr[0]);
-
-	*data += sizeof(int);
-	
-	return(value);
-}
-
-
-
-
-// This function will return a pointer to the internal data.  It will also update the length 
-// variable to indicate the length of the string.  It will increase the 'next' to point to the next 
-// potential field in the payload.  If there is no more data in the payload, you will need to check 
-// that yourself
-long long data_long(char **data)
-{
-	long long *ptr;
-	long long value;
-	
-	assert(data);
-	assert(*data);
-	assert(sizeof(long long) == 8);
-	
-	ptr = (void*) *data;
-	value = be64toh(ptr[0]);
-
-	*data += sizeof(long long);
-	
-	return(value);
-}
-
-
-
 
 
 void client_attach_node(client_t *client, void *node, int fd)
@@ -1007,7 +974,7 @@ static void client_shutdown_handler(evutil_socket_t fd, short what, void *arg)
 	assert(fd == -1);
 	assert(arg);
 
-	int message_count = messages_count(client);
+	int message_count = payload_client_count(client);
 	if (message_count > 0) {
 		// there are still messages waiting for replies for this client, so we need to keep waiting.
 		assert(client->shutdown_event);
@@ -1135,15 +1102,40 @@ int client_count(void)
 
 
 
-// setup events to shutdown all the clients.  It will shutdown all the client-only connections, and setup events to shutdown the server-node connections after all the buckets have finished migrating. 
+// setup events to shutdown all the clients.  It will shutdown all the client-only connections, and 
+// setup events to shutdown the server-node connections after all the buckets have finished 
+// migrating. 
 void clients_shutdown(void)
 {
 	assert(0);
 }
 
-void clients_set_evbase(struct event_base *evbase)
+
+// if the client breaks the comminications protocol, then we simply need to break the connection.
+void client_fail(client_t *client)
+{
+	assert(client);
+	assert(client->handle >= 0);
+	logger(LOG_ERROR, "Client on socket %d has broken the comms protocol.  Dropping connection", client->handle);
+	
+	if (client->node) {
+		assert(0);
+	}
+	
+}
+
+
+// first do any init that can be done straight away, and the rest will be done as part of a timed event.
+void clients_init(struct event_base *evbase)
 {
 	assert(_evbase == NULL);
 	assert(evbase);
 	_evbase = evbase;
+
+	// use a hint of 4096, so that it reserves space up to that ID number.  It will dynamically 
+	// increase as needed, but will avoid some very slight memory thrashing during startup.
+	clients_init_commands(4096);
+
+	// start the client event that will wait for the nodes to settle, and then allow client connections.
+	assert(0);
 }

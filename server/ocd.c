@@ -8,11 +8,11 @@
 #include "event-compat.h"
 
 // includes
+#include "auth.h"
 #include "bucket.h"
 #include "constants.h"
 #include "daemon.h"
 #include "item.h"
-#include "logging.h"
 #include "params.h"
 #include "payload.h"
 #include "seconds.h"
@@ -20,15 +20,11 @@
 #include "shutdown.h"
 #include "stats.h"
 #include "timeout.h"
+#include "usage.h"
 
 #include <assert.h>
 #include <stdlib.h>
 
-
-
-//-----------------------------------------------------------------------------
-// Globals... for other objects in this project to access them, include "globals.h" which has all 
-// the externs defined.
 
 
 // event base for listening on the sockets, and timeout events.
@@ -37,8 +33,7 @@ struct event_base *_evbase = NULL;
 
 
 
-// signal catchers that are used to clean up, and store final data before 
-// shutting down.
+// signal catchers that are used to clean up, and store final data before shutting down.
 struct event *_sigint_event = NULL;
 
 
@@ -50,31 +45,19 @@ static void sigint_handler(evutil_socket_t fd, short what, void *arg)
 {
 	assert(arg == NULL);
 
-#ifndef NDEBUG
- 	if (log_getlevel() > 0 ) printf("\nSIGINT received.\n\n");
-#endif
+ 	syslog(LOG_INFO, "SIGINT received.  Shutdown procedure starting.");
 	
 	// delete the signal events.
 	assert(_sigint_event);
 	event_free(_sigint_event);
 	_sigint_event = NULL;
 
-	log_prepareshutdown();
-
 	shutdown_start();
-	
-// 	printf("SIGINT complete\n");
 }
 
 
 
 
-void create_new_cluster(void)
-{
-	assert(_evbase);
-	buckets_init(STARTING_MASK, _evbase);
-	logger(LOG_INFO, "Created New Cluster: %d buckets", buckets_get_primary_count() + buckets_get_secondary_count());
-}
 
 
 
@@ -84,7 +67,7 @@ void create_new_cluster(void)
 // sockets and event loop.
 int main(int argc, char **argv) 
 {
-
+	// make sure the internal types are what we expect them to be.
 	assert(sizeof(char) == 1);
 	assert(sizeof(short) == 2);
 	assert(sizeof(int) == 4); 
@@ -94,33 +77,98 @@ int main(int argc, char **argv)
 /// Initialization.
 ///============================================================================
 
-	
-	params_parse_args(argc, argv);
-
-	const char *connfile = params_get_conninfo_file();
-	if (connfile == NULL) {
-		fprintf(stderr, "Connection Info file needs to be provided.\n");
-		exit(1);
-	}
-	
-	assert(connfile);
-	conninfo_t *conninfo = conninfo_load(connfile);
-	if (conninfo == NULL) {
-		fprintf(stderr, "Unable to parse conninfo file: %s\n", connfile);
-		exit(1);
-	}
-	assert(conninfo);
-	
-	// daemonize
-	if (params_get_daemonize()) {
-		daemonize(params_get_username(), params_get_pidfile(), 0);
-	}
-	
-	// create our event base which will be the pivot point for pretty much everything.
+// For debugging purposes, make sure that the compiled version of libevent, is the same as the 
+// installed library.   This is to avoid some very difficult to track down bugs, as the stack trace 
+// can be incorrect.   This wont make any difference for non-debug compiles.
 #if ( _EVENT_NUMERIC_VERSION >= 0x02000000 )
 	assert(event_get_version_number() == LIBEVENT_VERSION_NUMBER);
 #endif
 	
+	params_parse_args(argc, argv);
+	
+	// if the user is requesting help(usage), then we do it and exit.
+	if (params_usage() > 0) {
+		usage();
+		exit(EXIT_SUCCESS);
+	}
+	
+	
+	// open the syslog, so that we can begin logging info straight away.
+	openlog("opencluster", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_USER);
+	
+	
+	// load the config fail.  if cannot load the config file, then exit.
+	const char configfile = params_get_configfile();
+	if (configfile == NULL) {
+		configfile = DEFAULT_CONFIGFILE;
+	}
+	if (config_load(configfile) != 0) {
+		syslog(LOG_CRIT, "Unable to load configfile: %s", configfile);
+		fprintf(stderr, "Unable to load configfile: %s\n", configfile);
+		exit(1);
+	}
+
+	// we dont need the command-line params anymore, we can free the resources.
+	params_free();
+	
+	
+	// get the filename of the conninfo file from the params supplied.
+	const char *connfile = config_get("connectinfo");
+	if (connfile == NULL) {
+		syslog(LOG_CRIT, "Connection Info file needs to be provided.");
+		fprintf(stderr, "Connection Info file needs to be provided.\n");
+		exit(1);
+	}
+	
+	// load the conninfo file, as we will need it.  If the file cannot be loaded, we need to exit.
+	assert(connfile);
+	conninfo_t *conninfo = conninfo_load(connfile);
+	if (conninfo == NULL) {
+		syslog(LOG_CRIT, "Unable to parse conninfo file: %s", connfile);
+		fprintf(stderr, "Unable to parse conninfo file: %s\n", connfile);
+		exit(1);
+	}
+	assert(conninfo);
+
+	
+	// load the sync-keys into a list.
+	int keys = 0;
+	const char *sync_dir = config_get("sync-keys");
+	if (sync_dir) { keys = auth_sync_load(sync_dir); }
+	if (keys <= 0) {
+		syslog(LOG_CRIT, "Unable to load any sync-keys.  Keys are required for this server to function.");
+		fprintf(stderr, "Unable to load any sync-keys.  Keys are required for this server to function.\n");
+		exit(1);
+	}
+	
+	// load the query-keys into a list.
+	const char *sync_dir = config_get("sync-keys");
+	if (sync_dir) { keys = auth_query_load(sync_dir); }
+	if (keys <= 0) {
+		syslog(LOG_CRIT, "Unable to load any query-keys.  Keys are required for this server to function.");
+		fprintf(stderr, "Unable to load any query-keys.  Keys are required for this server to function.\n");
+		exit(1);
+	}
+	
+	
+	// load the node files from the nodes directory.  This is optional.
+	const char *node_dir = config_get("nodes-dir");
+	if (node_dir) {
+		nodes_loaddir(node_dir);
+	}
+
+	
+	// daemonize
+	if (config_get_bool("daemon")) {
+		char *user = config_get("user");
+		char *pidfile = config_get("pid-file");
+		daemonize(user, pidfile);
+		
+		// from this point on, the service is running as the daemon user.
+	}
+
+	
+	// create our event base which will be the pivot point for pretty much everything.
 	_evbase = event_base_new();
 	assert(_evbase);
 
@@ -130,8 +178,9 @@ int main(int argc, char **argv)
 	assert(_sigint_event);
 	event_add(_sigint_event, NULL);
 
-	log_init(params_get_logfile(), params_get_logfile_max(), _evbase);
-	
+	// some of the operations need to know the current time.  It does not need to be extremely 
+	// accurate.  Rouchly accurate to the second is adequate.  This is mostly to know when items 
+	// have expired.  Expiry is done at intervals of one second.
 	seconds_init(_evbase);
 	
 	payload_init();
@@ -139,22 +188,10 @@ int main(int argc, char **argv)
 	// statistics are generated every second, setup a timer that can fire and handle the stats.
 	stats_init(_evbase);
 
-	clients_set_evbase(_evbase);
+	sync_init(_evbase, conninfo);
 	
-	// use a hint of 4096, so that it reserves space up to that ID number.  It will dynamically increase as needed, but will avoid some memory thrashing during startup.
-	client_init_commands(4096);
+	query_init(_evbase);
 	
-	// initialise the servers that we listen on.
-	server_listen(_evbase, conninfo);
-
-	// attempt to connect to the other known nodes in the cluster.
-	nodes_set_evbase(_evbase);
-	node_connect_start();
-
-	// If we dont have any nodes configured, then we must be starting a new cluster.
-	if (node_count() == 0) {
-		create_new_cluster();
-	}
 
 ///============================================================================
 /// Main Event Loop.
@@ -163,7 +200,7 @@ int main(int argc, char **argv)
 	// enter the processing loop.  This function will not return until there is
 	// nothing more to do and the service has shutdown.  Therefore everything
 	// needs to be setup and running before this point.  
-	logger(LOG_INFO, "Starting main loop.");
+	syslog(LOG_INFO, "Starting main loop.");
 	assert(_evbase);
 	event_base_dispatch(_evbase);
 
@@ -171,33 +208,24 @@ int main(int argc, char **argv)
 /// Shutdown
 ///============================================================================
 
-	// need to shut the log down now, because we have lost the event loop and cant actually use it 
-	// any more.
-	log_shutdown();
-	
+	// make sure signal handlers have been cleared.
+	assert(_sigint_event == NULL);
+
+	// close the eventbase, because the main loop has exited, there is nothing 
+	// more we can do with events.
 	assert(_evbase);
 	event_base_free(_evbase);
 	_evbase = NULL;
 
-	
-	
-	// server interface should be shutdown.
-// 	assert(_server == NULL);
-// 	assert(_node_count == 0);
-// 	assert(_client_count == 0);
-
-
+	// free resources.
 	client_cleanup();	
-	
-	// make sure signal handlers have been cleared.
-	assert(_sigint_event == NULL);
-
-	
+	nodes_cleanup();
 	payload_free();
+	auth_free();
 
-	params_free();
+	// close the syslog connection.
+	closelog();
 	
-// 	assert(_conncount == 0);
 	assert(_sigint_event == NULL);
 	assert(_evbase == NULL);
 	

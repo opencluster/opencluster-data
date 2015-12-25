@@ -1,0 +1,24 @@
+Originally I intended on only using a single socket for both client and server node connections, but that may not be the best idea.  
+There is certain socket functionality that is re-usable, but the node-parsing and the client-parsing are really very different.  The 
+node parsing handles all the sync between primary and backup buckets, but the client code deals with the setting and getting.
+
+The only cross-over is when a client asks for some data that is on another server, the node code needs to ask the appropriate server 
+for the data.   Maybe we need a special sync request operation just between nodes.
+
+This will make the conninfo files a little more complicated.  So we would have the private conninfo file which is the master, and would 
+be used only by the server node itself.  It then also creates a public conninfo for clients and a public conninfo for other nodes.
+
+It's also possible that server to server sync would be done over a different network than the client connections.  A server might have 
+two NIC's and the node-listener will be on one NIC and the client-listener will be on the other.
+
+We would build in different encryption levels as well.
+
+
+
+
+The new server structure, will be.
+ * main will start initialising the nodes.
+ * When the nodes component is initialised, it will start the client server.
+ * When a node needs to relay information on to another node, it will connect and do the handshake, and the connection will remain.
+ * Pretty much everything will be initiated from the incoming client connections
+

@@ -11,6 +11,7 @@
 void usage(void) {
 	printf(
 		PACKAGE " " VERSION "\n"
+		"-a <file>          authentication file for server-node authentication\n"
 		"-l <file>          config file for listener details\n"
 		"-c <num>           max simultaneous connections, default is 1024\n"
 		"-n <file>          Other cluster node to connect to. Can be specified more than once.\n"

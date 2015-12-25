@@ -9,12 +9,12 @@
 
 typedef struct {
 	char *name;
-	char *original;
 	char *conninfo_str;
 	char *remote_addr;
 	int refcount;
 	json_t *root;
 	int valid;
+	char *client_extract;
 } conninfo_t;
 
 
@@ -32,6 +32,8 @@ conninfo_t * conninfo_dup(conninfo_t *info);
 const char * conninfo_str(const conninfo_t *conninfo);
 const char * conninfo_remoteaddr(conninfo_t *conninfo);
 int conninfo_compare_str(conninfo_t *conninfo, const char *str);
+
+const char * conninfo_extract_client(conninfo_t *info);
 
 char * conninfo_value_str(const conninfo_t *conninfo, const char *key); 
 

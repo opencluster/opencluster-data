@@ -1,0 +1,17 @@
+When a node is started and given the connection info of another node, it will attempt to connect to the other node.
+
+This will involve several phases where it connects to a socket, and authenticates.
+
+When a node is started up, and given multiple nodes to try and connect to.
+
+It will try one at a time until it manages to connect and authenticate.  It will no longer try those 
+initial nodes, but will instead try and build a hashmap, and get the node details from there.
+
+
+
+
+Once connected, it will need to get a full hashmap picture.  We can do this in several ways.  It can 
+go through the list of hashmaps and fill out any blanks before it considers itself complete.    
+
+Or, it can be more passive and wait until a request comes in, and it discovers that it doesn't know 
+where that bucket is, so it asks another node if it knows.  This might be the better option.

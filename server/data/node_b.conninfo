@@ -1,5 +1,11 @@
 {
   "name":"Node-2",
+  "node-ip":"127.0.0.1",
+  "node-port":"7566",
+  "node-private-key":"....",
+  "node-public-key":".....",
   "ip":"127.0.0.1",
-  "port":"6570"
+  "port":"7565",
+  "private-key":"...",
+  "public-key":"..."
 }

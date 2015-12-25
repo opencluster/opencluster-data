@@ -1,0 +1,3 @@
+#!/bin/bash
+rm /tmp/b-logs*
+gdb ./ocd.debug -ex "r -vvvvvvv -l data/node_b.conninfo -n data/node_a.conninfo -a data/server_auth -g /tmp/b-logs-"

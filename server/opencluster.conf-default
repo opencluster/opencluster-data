@@ -1,0 +1,96 @@
+# OpenCluster default config file.
+# Copy this file to /etc/opencluster/opencluster.conf and edit with appropriate values.
+
+
+# Start as a Daemon
+# Depending on the startup mechanism, opencluster can put itself in daemon mode, or just run directly.
+daemon=yes
+
+# Run User (only applies if 'daemon=yes')
+# User ID that should be used to run the daemon.  This account should have access to the logfile 
+# directory, the data directory, and the scratch directory.   If this option is not set, the daemon 
+# will remain running as whatever user it started as, which is not recommended if the daemon was 
+# started as root.
+user=opencluster
+
+# PID File (only applies if 'daemon=yes')
+# Since the initial process will fork a new process to change user account, the process that was 
+# originally created will no longer exist, therfore, some init systems will want to know what the 
+# actually process ID is of the running instance.  Setting this config value will write the process 
+# ID to a file.   This file will be written from the account that initially started the daemon.
+pid-file=/var/run/opencluster.pid
+
+# Verbosity
+# The initial verbosity of data being logged to the logfile is set here.  
+# Valid options are (the option chosen, includes all the options above, but not below):
+#    emergency
+#    alert
+#    critical
+#    error 
+#    warning
+#    notice
+#    info
+#    debug
+verbosity=error
+
+
+# Create Cluster on Startup.
+# Indicates that when node starts up, it will either not start a cluster and will only join one, or 
+# will attempt to join the cluster, and if that fails, start one, or will always start a cluster.
+# 
+# Options are:
+#  auto - attempt to join, if that fails, start cluster, but do not attempt to join after that.
+#  always - always start a cluster and do not attempt to join other nodes.
+#  no - do not start a cluster, instead only join existing cluster nodes.
+cluster-start=auto
+
+
+
+# Master Connect-info file
+# Each server will have a connectinfo file which describes how to connect to it.  Various parts of 
+# this file is distributed through the cluster so that other server nodes and clients can connect to 
+# it.
+# Note:   This file will be opened BEFORE the user fork, so the process that is starting the daemon 
+#         will need to have access to the file (normally started as root).  The running user should 
+#         not have access to any of the config, and especially not the location of private keys.
+connectinfo=/etc/opencluster/connectinfo
+
+
+# Location of the (SYNC) node-to-node keys.
+# This is the location of the primary private keys that will allow clients to authenticate and have 
+# full access to the cluster (both reading and writing).   Since this is a directory, there can be 
+# more than one private key.  The system will load them all at startup.  When attempting to decrypt 
+# the initial ENCRYPT message of each session, it will attempt to use them in reverse alphabetical 
+# order, so if you create a new key, but want the old ones to still work, simply put the date at the 
+# end of the file, and that will ensure that the latest one is tried first.   This is only used on 
+# the initial handshake of a session, so  (in reverse alphabetical order).
+#   eg, (private-20141123, 
+# Note also that the system will ignore any files begining with a period (ie, a '.').
+sync-keys=/etc/opencluster/sync-keys
+
+
+# Location of the (QUERY) client-to-node keys.
+# This is the location of the primary private keys that will allow clients to authenticate and have full access to 
+# the cluster (both reading and writing).   Since this is a directory, there can be more than one private key.  The system will load them all at startup and attempt to use them one by one.  When attempting to decrypt the initial ENCRYPT message, it will attempt to use them in reverse alphabetical order, so if you create a new key, but want the old ones to still work, simply put the date at the end of the file, and that will ensure that the latest one is tried first.   This is only used on the initial handshake of a session, so  (in reverse alphabetical order).
+
+# Note also that the system will ignore any files begining with a period (ie, a '.').
+query-keys=/etc/opencluster/query-keys
+
+
+# Directory containing node files.
+# For the system to connect to other nodes in the cluster, it needs to maintain a config file for 
+# each node.  These can be placed in a directory and loaded automatically on startup.  If you only 
+# want to connect initially to one other node, you can specifiy a single file.  But if you want to 
+# attempt to connect to multiple nodes, then use this option.
+# 
+# Note that the system will attempt to connect to a node in alphabetical order, and once it does 
+# manage to connect to one node, it will no longer attempt to connect to any others using files 
+# here, instead it will get all further connect information from the cluster itself.
+#
+# Note also that the system will ignore any files begining with a period (ie, a '.').  If you want 
+# to temporarily hide the conninfo for a particular node, you can simply rename it with a . at the 
+# begining, and it will be ignored.   
+# For example.  Rename node1.conninfo to .node1.conninfo
+node-dir=/etc/opencluster/nodes
+
+

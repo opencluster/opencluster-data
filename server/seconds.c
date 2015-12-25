@@ -38,7 +38,8 @@ static void seconds_handler(int fd, short int flags, void *arg)
 	_seconds = _current_time.tv_sec - _start_time.tv_sec;
 
 	if (_seconds < 0 || _seconds < previous) {
-		// the time has rolled back.  How do we handle that?   It means we have many items with a short expiry that will probably expire.
+		// the time has rolled back.  How do we handle that?   It means we have many items with a 
+		// short expiry that will probably expire.
 		assert(0);
 	}
 

@@ -85,6 +85,7 @@ int buckets_get_primary_count(void);
 int buckets_get_secondary_count(void);
 
 int buckets_transferring(void);
+int buckets_send_bucket(client_t *client, hash_t mask, hash_t hashmask);
 int buckets_accept_bucket(client_t *client, hash_t mask, hash_t hashmask);
 void buckets_control_bucket(client_t *client, hash_t mask, hash_t key_hash, int level);
 
@@ -94,11 +95,15 @@ hash_t buckets_mask(void);
 bucket_t * buckets_find_switchable(node_t *node);
 bucket_t * buckets_nobackup_bucket(void);
 
-void buckets_finalize_migration(client_t *client, hash_t hashmask, int level, const char *conninfo_str);
+void buckets_finalize_migration(client_t *client, hash_t hashmask, int level, conninfo_t *conninfo);
 bucket_t * buckets_check_loadlevels(client_t *client, int primary, int backups);
 
 void buckets_set_transferring(bucket_t *bucket, client_t *client);
 void buckets_clear_transferring(bucket_t *bucket);
+int buckets_transfer_items(client_t *client);
+bucket_t *buckets_current_transfer(void);
+
+
 
 #endif
 

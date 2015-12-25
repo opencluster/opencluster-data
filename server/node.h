@@ -33,7 +33,6 @@ typedef enum {
 typedef struct {
 	hash_t nodehash;
 	conninfo_t *conninfo;
-	client_t *client;
 	struct event *connect_event;
 	struct event *loadlevel_event;
 	struct event *wait_event;
@@ -42,30 +41,29 @@ typedef struct {
 	node_state_e state;
 } node_t;
 
-void nodes_set_evbase(struct event_base *evbase);
+void nodes_dump(void);
+void nodes_shutdown(void);
 
 // create new nodes... from different sources.
 node_t * node_new_file(const char *filename);
-node_t * node_add(client_t *client, char *connect_info);
+node_t * node_add(client_t *client, conninfo_t *conninfo);
 
 void node_connect_start(void);
 void node_detach_client(node_t *node);
 void node_retry(node_t *node);
 void node_shutdown(node_t *node);
 
-node_t * node_find(const char *conninfo_str);
+node_t * node_find(conninfo_t *conninfo);
 
-int node_active_inc(void);
-int node_active_dec(void);
 int node_active_count(void);
-
 int node_count(void);
 
-void nodes_dump(void);
 
 const char * node_name(node_t *node);
 
-void nodes_shutdown(void);
+void node_start_loadlevel(node_t *node);
+
+
 
 
 #endif
