@@ -1,5 +1,10 @@
 This file provides some information about active branches in the repository.
 
+node-sync
+	In changing the protocol, a lot of hte functionality for syncing data 
+    between nodes was disabled.  Need to go through and make sure it works 
+    again.
+
 client-connectivity
 	The client library does not handle multiple servers correctly.   It also 
 	does not handle recovery of a server connection.
