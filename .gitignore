@@ -19,7 +19,7 @@ utils/oc_get
 utils/oc_set
 *.class
 products/opencluster-legacy/clients/c/libopencluster.o
-products/opencluster-legacy/clients/c/libconninfo.so.1.0.1
+products/opencluster-legacy/clients/c/libopencluster.so.1.0.1
 products/opencluster-legacy/conninfo/tools/conninfo_get
 products/opencluster-legacy/conninfo/tools/conninfo_pack
 products/opencluster-legacy/conninfo/tools/conninfo_set
