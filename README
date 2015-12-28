@@ -1,0 +1,61 @@
+OpenCluster is a suite of products to give applications the ability to co-ordinate work with each other (cluster locks), communicate 
+with each other (message queues) and share data with each other (clustered data).
+
+OpenCluster Locks
+	
+	This product allows applications to co-ordinate work that would conflict with each other.  For example, if the process only
+	allows for one new account to be created at a time, then you might have a 'new account' lock.  Whenever a process needs to
+	create a new account, it sets that lock, and if another process needs to create a new account, it will attempt to set the lock
+	also but will have to wait until the first process releases it.  Once released, the second process can receive the lock,
+	process and when done, release it.
+
+OpenCluster Messaging
+
+	This product provides a mechanism where different processes can send and receive work items amongst each other.  For example, a
+	process might need a new account to be created.  It sends a message to the 'accounts' process asking for a new account to be
+	created.  One or more 'accounts' processes might be running, and one will receive the request, process it, and return a reply
+	with the relevant details.
+
+OpenCluster Cache
+
+	This product provides a simple distributed Hashtable that is used as a cache.  Permenant data should not be used on it, instead
+	this is a cache to hold data that is more costly to produce.  For example, it might be the rendered output of a webpage.  The
+	key will contain certain variables that make up that page, and when those variables change, the rendered output changes.  But
+	if the variables are the same, then dont need to spend time rendering the page, but instead provide the cached output.  Cached
+	items can have an expiry... so that they automatically dissapear after a certain time.  Also, there can be limits on the amount
+	of memory to dedicate to the cache, and when the cache gets full, start removing the items that havent been used for the
+	longest.
+
+OpenCluster Data (Simple)
+
+	This product provides a simple distributed key/value hash table.  It is distrubuted amongst the nodes and clients simply set
+	string based keys with string or integer based values.  Very similar to OpenCluster-Cache, but the data is meant to be less
+	volatile.
+
+OpenCluster Data (Structured)
+
+	This product provides a much more advanced and structured storage solution.  It provides a far more flexible solution to 
+	looking up data, with the premise being that a properly designed and implemented system, should be able to pull out all the 
+	information it needs in a single request.  To accomplish this, it uses a concept similar to database tables, but instead of 
+	each table having defined columns, each table instead has rows with an undefined number of cells, and each cell is labeled.  
+	For example, you can have 'Users' row that might have a bunch of values 
+		'userID=5454, fullname="Joe Bloggs", email="wherever@example.com"'.  
+	Queries could be performed on any of those cells to return the row (or rows).  Additionally this means that you dont need empty 
+	cells.  Each row can use only the cells that it wants to populate.
+
+OpenCluster Blocks
+
+	This product is a bit more technical in nature.  Very similar to the SimpleData product but instead of providing a key/value
+	where the value is some arbitrarily sized value, with Clustered Blocks, you are instead dealing with blocks of memory that are
+	distributed across a system.  Different languages provide different mechanisms, and some languages may be very difficult to
+	implement.  Essentially, if an application wants to store some data, it opens the block, stores data in it, and commits it.
+	Very simimilar in functionality behind the scenes, but very different implementation and design analogy from the client
+	perspective.
+
+
+
+
+All products should be multi-tenantable, meaning that you could have multiple customers or users on the one system, neither conflicting 
+or even aware of each other.  This could be for seperation of processing, or it could be to provide a service to multiple customers.
+
+
