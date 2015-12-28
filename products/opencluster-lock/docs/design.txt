@@ -1,0 +1,31 @@
+BRIEF OVERVIEW
+
+This product is intended to be standalone cluster locking service.  It will allow a lock to be set, and released.  There is nothing stopping an application from ignoring the lock, so it is up to the application to follow the rules.
+
+
+
+
+PRIMARY REQUIREMENTS
+
+1. Security - access should be protected by certificates.  communications should be encrypted.  Stored data should be encrypted.
+2. Highly Available
+3. Scalable
+4. Avoid, or allow to manage, a split-brain scenario.
+5. Namespaces - should allow for different namespaces or tenents.  There should be no ability for tenents or namespaces to pollute or even be aware of each other.
+6. Locks should be given a name.
+7. Only the service that requested the lock, can release it.
+
+
+
+
+
+EXISTING COMPETING PRODUCTS
+
+I am unaware of any existing product that provides a standalone cluster lock service.  However, many clustered data services also provide locking mechanisms, although a lot of these are not specifically locking services, but rather the ability to simulate a 
+locking service using the clustered data service.
+
+
+
+
+
+
