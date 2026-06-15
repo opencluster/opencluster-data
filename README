@@ -29,34 +29,37 @@ OpenCluster Cache
 
 OpenCluster Data (Simple)
 
-	This product provides a simple distributed key/value hash table.  It is distrubuted amongst the nodes and clients simply set
-	string based keys with string or integer based values.  Very similar to OpenCluster-Cache, but the data is meant to be less
-	volatile.
+	This product provides a simple distributed key/value hash table.  It is distrubuted amongst the nodes and 
+    clients simply set string based keys with string or integer based values.  Very similar to 
+    OpenCluster-Cache, but the data is meant to be less volatile.
 
 OpenCluster Data (Structured)
 
-	This product provides a much more advanced and structured storage solution.  It provides a far more flexible solution to 
-	looking up data, with the premise being that a properly designed and implemented system, should be able to pull out all the 
-	information it needs in a single request.  To accomplish this, it uses a concept similar to database tables, but instead of 
-	each table having defined columns, each table instead has rows with an undefined number of cells, and each cell is labeled.  
+	This product provides a much more advanced and structured storage solution.  It provides a far more flexible 
+    solution to looking up data, with the premise being that a properly designed and implemented system, should 
+    be able to pull out all the information it needs in a single request.  To accomplish this, it uses a concept 
+    similar to database tables, but instead of each table having defined columns, each table instead has rows with 
+    an undefined number of cells, and each cell is labeled.  
 	For example, you can have 'Users' row that might have a bunch of values 
 		'userID=5454, fullname="Joe Bloggs", email="wherever@example.com"'.  
-	Queries could be performed on any of those cells to return the row (or rows).  Additionally this means that you dont need empty 
-	cells.  Each row can use only the cells that it wants to populate.
+	Queries could be performed on any of those cells to return the row (or rows).  Additionally this means that you 
+    dont need empty cells.  Each row can use only the cells that it wants to populate.
 
 OpenCluster Blocks
 
-	This product is a bit more technical in nature.  Very similar to the SimpleData product but instead of providing a key/value
-	where the value is some arbitrarily sized value, with Clustered Blocks, you are instead dealing with blocks of memory that are
-	distributed across a system.  Different languages provide different mechanisms, and some languages may be very difficult to
-	implement.  Essentially, if an application wants to store some data, it opens the block, stores data in it, and commits it.
-	Very simimilar in functionality behind the scenes, but very different implementation and design analogy from the client
-	perspective.
+	This product is a bit more technical in nature.  Very similar to the SimpleData product but instead of providing 
+    a key/value where the value is some arbitrarily sized value, with Clustered Blocks, you are instead dealing with 
+    blocks of memory that are distributed across a system.  Different languages provide different mechanisms, and some 
+    languages may be very difficult to implement.  Essentially, if an application wants to store some data, it opens 
+    the block, stores data in it, and commits it.
+    Very simimilar in functionality behind the scenes, but very different implementation and design analogy from the 
+    client perspective.
 
 
 
 
-All products should be multi-tenantable, meaning that you could have multiple customers or users on the one system, neither conflicting 
-or even aware of each other.  This could be for seperation of processing, or it could be to provide a service to multiple customers.
+All products should be multi-tenantable, meaning that you could have multiple customers or users on the one system, 
+neither conflicting or even aware of each other.  This could be for seperation of processing, or it could be to provide 
+a service to multiple customers.
 
 
