@@ -49,9 +49,9 @@ OpenCluster Blocks
 
 	This product is a bit more technical in nature.  Very similar to the SimpleData product but instead of providing 
     a key/value where the value is some arbitrarily sized value, with Clustered Blocks, you are instead dealing with 
-    blocks of memory that are distributed across a system.  Different languages provide different mechanisms, and some 
-    languages may be very difficult to implement.  Essentially, if an application wants to store some data, it opens 
-    the block, stores data in it, and commits it.
+    blocks of memory that are distributed across a system.  Different languages provide different mechanisms, and 
+    some languages may be very difficult to implement.  Essentially, if an application wants to store some data, it 
+    opens the block, stores data in it, and commits it.
     Very simimilar in functionality behind the scenes, but very different implementation and design analogy from the 
     client perspective.
 
